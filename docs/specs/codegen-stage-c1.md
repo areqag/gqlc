@@ -828,11 +828,12 @@ arguments is caught rather than passed over for being past an arity
 (`gqlc-vu7z`). The functions these documents print that open the same
 context-parameter anchor without being query methods — the
 `driverOrTx.run` seam, the driver's own `ExecuteWrite`, a godog step
-handler — are exempted by `specNonMethodLists`, which names each
-parameter list verbatim beside the document printing it and says how
-many times that document prints it. The count is exact: a document
-that grows one of those quotes is red until the number moves, and a
-document that drops one is red too.
+handler — are exempted by `specNonMethodSites`, which names each site
+verbatim beside the document printing it — the name before the
+parameter list, then the list — and says how many times that document
+prints it. The count is exact: a document that grows one of those
+quotes is red until the number moves, and a document that drops one is
+red too.
 
 Which documents owe graded sites is written down in that test, by
 name, and reconciled against what the sweep actually read — in both
@@ -925,28 +926,56 @@ carry over 500 bare spans shaped like the **exhibit** `"key": value`,
 across more than 30 files, nearly all of them JSON model shapes, so a
 sweep reading them would redden on prose across the corpus.
 
-That marker does not reach everywhere the same shape now occurs. The
+That marker does not reach everywhere the same shape occurs, and where
+it does not, something already in the documents stands in for it. The
 exemption for a parameter list belonging to something other than a
-query method is held by `specNonMethodLists` on its text and its
-count, with no marker beside it, because 11 of the 13 sites it covers
-sit inside fenced Go code blocks where a bolded word is literal text
-corrupting the example. So one of those quotes replaced in place by a
-claim spelled identically keeps the exemption — the same defect one
-construct over, filed rather than closed (`gqlc-yn2l`), and bounded by
-what such a claim would have to assert: that an emitted query method
-takes a `cypher string` and a driver parameters map as arguments.
+query method is held by `specNonMethodSites` with no marker beside it,
+because 11 of the 13 sites it covers sit inside fenced Go code blocks
+where a bolded word is literal text corrupting the example. What
+carries the intent there is the name each document already prints
+before the list: the census is keyed on `run`, `ExecuteWrite` or
+`func` *together with* the list, so one of those quotes replaced in
+place by a claim about the emitted surface is red twice over — once as
+a list no entry covers, once as an entry whose count fell
+(`gqlc-yn2l`). What stays exempted is a replacement keeping both
+halves, which has to assert that an emitted query method is named
+`run`, or `ExecuteWrite`, or is an anonymous `func` literal, *and*
+takes a `cypher string` beside a driver parameters map.
 
 The fifth and sixth are narrower, and both were measured rather than
-reasoned about. The sweeps read raw markdown bytes, so a site inside
-an HTML comment is graded exactly as visible text is: a document whose
-only surviving `ctx context.Context` sits in `<!-- ... -->` keeps its
-census entry while showing a reader nothing, and a commented site
-disagreeing with `codegen.ParamArg` is red on text no rendered page
-displays (`gqlc-jnsk`). The binding sweep, meanwhile, peels pointer
-operators off a value along with carrier conversions before comparing
-it, so `*arg` and `&arg` in a `map[string]any` entry both unwrap to
-`arg` and stay green (`gqlc-173n`) — what is held is the identifier
-underneath, not the expression around it.
+reasoned about. The sweeps read raw markdown bytes, so an HTML comment
+is present to them and absent from the rendered page — and the half of
+that which matters is not the noisy half. A commented site that has
+drifted reddens the fence over a line no reader can see, which is loud
+and self-correcting; a commented site that is *correct* pays its
+document's floor while showing a reader nothing, so the census vouches
+for a surface the documentation has stopped describing. Four of the
+five anchors are therefore refused inside a comment outright, rather
+than read there: an absence check, not a scanner, because deciding
+whether a comment's contents would have rendered is a parse and
+deciding whether bytes sit between the delimiters is not
+(`gqlc-jnsk`). The remaining anchor is the brace-less binding
+scanner's, which has none to refuse, so such a span inside a comment
+is still read.
+The sixth is the binding sweep's breadth: its anchor is the bare
+literal type with its opening brace, and the sweep reaches all of
+`docs/`, so an unrelated option map in any future note — a rendering
+option table, a driver config — is graded as a documented binding. That
+fails closed, and it is declined rather than narrowed — the remedy of
+requiring a nearby signature is refuted by C3, which owes three
+bindings and prints no parameterised method at all (`gqlc-173n`, ADR
+0029 decision 16).
+
+The deref that used to sit beside it is closed. The sweep still peels
+pointer operators off a value to find the identifier, so `*arg`
+reports the name `arg`, but the expression is now graded on its shape
+as well: no arm of `paramBindExpr` or `sliceParamBindExpr` can produce
+a `*` or an `&`, so either operator is drift at every nullability. The
+shape that motivated it is `float64(*arg)` — a nullable parameter
+binds bare, taking the nullable arm before `driverCarrier` is
+consulted, so a carrier wrapped around a deref is both a nil panic and
+a claim the emitter has no path to, while its identifier is correct
+and the name rule alone lets it through.
 
 One further gap is recorded in the fence's own header rather than
 here, because it bounds what the sweeps reach at all: the prose around
@@ -961,10 +990,13 @@ held verbatim, so `, arg int64` in place of `, arg <T>` is red on the
 type even though the name is untouched — that bullet is the normative
 rule, and a rule stated in a second spelling is how one arity came to
 be stated twice while the other sat in prose. Everywhere else only
-the name is read. The rest of a graded signature is not — its method
-name, its parameter type and its return type are all unread — and
-neither are the decode bodies, the `<zero>` values, or any signature
-the sweep does not reach at all. Those remain unfenced prose that the
+the argument name is read. The rest of a graded signature is not — its
+method name, its parameter type and its return type are all unread —
+and neither are the decode bodies, the `<zero>` values, or any
+signature the sweep does not reach at all. A method name is read in
+exactly one other place, and it is not a grading: an *exempted* site's
+name is half the key `specNonMethodSites` recognises it by, which is
+why a claim put in its place is caught. Those remain unfenced prose that the
 emitter is free to outgrow, so read them as illustration and the
 goldens under `test/data/codegen/valid/` as truth. The argument-name
 rule above went four stages unchecked because there was neither a

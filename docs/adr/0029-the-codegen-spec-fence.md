@@ -402,8 +402,9 @@ Telling those from a drifted claim cannot be done from the bytes. An emitted
 query method's name is the query author's, so there is no receiver, no keyword
 and no shape a four-parameter drifted claim could not also wear. That is
 Decision 12's finding one construct over, and the answer is the same shape:
-`specNonMethodLists` writes the intent down, per document, keyed by the verbatim
-parameter list, reconciled in both directions.
+`specNonMethodSites` writes the intent down, per document, keyed by the verbatim
+parameter list — and, since Decision 14, by the name printed before it —
+reconciled in both directions.
 
 The bead asked for a real discriminator rather than a list, and named two
 candidates. Both were measured and both were declined:
@@ -429,17 +430,169 @@ and one that stops printing it is red too.
 Decision 12's marker does NOT transfer, and the reason is measured rather than
 assumed: 11 of the 13 sites sit inside fenced Go code blocks, where
 `**exhibit**` is not emphasis but literal text corrupting the example. Only C4's
-`ExecuteWrite` span and the godog handler are in prose. So the residual gap is
-`gqlc-x2sg`'s exactly — a quote replaced in place by a claim spelled
-identically keeps the count satisfied — and it is filed rather than closed
-(`gqlc-yn2l`), bounded by what such a claim would have to say: that an emitted
-query method takes a `cypher string` and a driver `params map[string]any`.
+`ExecuteWrite` span and the godog handler are in prose. So the residual gap was
+`gqlc-x2sg`'s exactly — a quote replaced in place by a claim spelled identically
+keeps the count satisfied — and it was filed rather than closed (`gqlc-yn2l`).
+Decision 14 closes it without a marker.
 
 The census key is canonicalised — the list's depth-zero entries, whitespace
 collapsed, rejoined on `, ` — so gofmt's line breaks and trailing comma are not
 a different entry. Without that, reformatting a quoted signature reads as one
 exempted site disappearing and an unrecorded one arriving. Only this census is
 canonicalised; Decision 10's exhibit census keeps the text a document prints.
+
+## Decision 14 — an exempted non-method site is keyed by its name as well as its list
+
+Decision 13 left `gqlc-yn2l` open: `specNonMethodSites` was keyed per document by
+the parameter list alone, so a document could replace one of those quotes IN
+PLACE with a claim about the emitted surface spelled identically. The list was
+unchanged and the count stayed satisfied, so the claim went ungraded. Measured on
+this bead at `000bae22`: rewriting C1's `func (d driverDB) run(…)` to
+`func (q *Queries) PeopleOverAge(…)`, list untouched, left
+`TestSpecMethodArgIsGeneratorOwned` green.
+
+Decision 12's answer to the same shape was a marker, and Decision 13 measured why
+it does not transfer here. The answer that does is cheaper, and it is already in
+the documents: **the name each site is printed under**. The census key becomes
+the name and the list together — `run`, `ExecuteWrite` and `func` are now part
+of what is exempted, not merely the four lists — so the replacement above is red
+twice over, once as an overlong list no entry covers and once as an entry whose
+count fell.
+
+(The key's spelling is `name` followed by the list back inside its parentheses.
+It is described here rather than printed for the reason Decision 13 gives one
+paragraph up: writing it out prints the anchor, and the fence grades this
+document. It caught the first draft of this sentence.)
+
+This is not the general discriminator Decision 13 declined, and the distinction
+is the whole of why it is admissible. That candidate asked the bytes to decide,
+in the abstract, whether a four-parameter signature belongs to an emitted query
+method — which nothing can, since the method's name is the query author's. This
+asks nothing of the bytes. It widens a census that was already written down by
+hand, from one field to two. Every site it covers already prints a name, so it
+costs no byte in any document, which is exactly what `**exhibit**` could not
+manage inside a fenced code block.
+
+Three properties, each of which cost a row:
+
+- A type-parameter list between the name and the paren is stepped over, because
+  C4 quotes `func ExecuteWrite[T any](…)`. Reading `]` as the end of the name
+  would key that site under the empty name.
+- An anonymous function literal is keyed under `func`, because that is what the
+  godog handler prints in the name position. Keying on it holds a replacement to
+  still being an anonymous literal.
+- A parenthesis-less site — the code-span scanner's — has no name position at
+  all, and is keyed under the empty name rather than allowed to claim a named
+  entry. No census entry is written that way today; all 13 sites are
+  parenthesised.
+
+What remains exempted is a replacement keeping BOTH halves. It has to claim that
+an emitted query method is named `run`, or `ExecuteWrite`, or is an anonymous
+`func` literal, AND takes a `cypher string` beside a driver
+`params map[string]any`. That is narrower than the residual Decision 12 accepts
+for the exhibit censuses, where the shape alone is the key.
+
+## Decision 15 — a graded anchor may not sit inside an HTML comment
+
+The sweeps read bytes, so an HTML comment is fully present to them and fully
+absent from the rendered page. That is the only construct in this corpus where
+the two disagree, and it cuts two ways which are not equally serious.
+
+A commented site whose text has **drifted** reddens the fence over a line no
+reader can see. That is a maintenance annoyance, and it is loud, so it corrects
+itself. A commented site whose text is **correct** pays a census: `specSigDocs`
+and `specBindDocs` are per-document floors, so a document can meet its whole
+obligation on signatures nobody reads, and a floor that exists to prove the
+surface is still described proves nothing. `gqlc-jnsk` names the second as the
+direction that matters, and it is the one that cannot be fixed by reading the
+site harder — there is nothing wrong with the site.
+
+So the answer is an **absence check**: the anchors may not appear inside a
+comment at all, in either condition. That is
+[ADR 0042](0042-the-spec-fence-stays-a-byte-scan.md)'s stated preference —
+refuse the construct rather than interpret it — and here the preference is what
+makes the decision affordable. Deciding whether a comment's contents *would have
+rendered* as a graded site is a markdown parse. Deciding whether a byte run sits
+between the two comment delimiters is not.
+
+There is no exemption list, on purpose. An exemption would be a second invisible
+place for a signature to live, which is the thing being removed.
+
+Three properties, each of which cost a row:
+
+- A comment opener inside an inline code span opens nothing, because a renderer
+  prints that run verbatim as content. This is not a refinement: ADR 0042
+  discusses the construct by quoting the opener in code spans three times, and
+  read naively the first quote opens a "comment" running hundreds of lines to
+  the second. The check would have booby-trapped the document that motivates it.
+- A comment opener inside a FENCED code block opens nothing either, for the same
+  reason — a fence is printed verbatim too, so nothing there is hidden. That
+  falls out of `gqlc-cgat`'s conflation rather than being designed: a fence is a
+  run of backticks, so the span reader pairs it like a very long code span. The
+  direction happens to be the right one, and it is pinned because it is measured
+  rather than intended. It cost the first mutation row written for this check,
+  which commented out a signature inside a fenced example and SURVIVED — the
+  apparatus being wrong, not the guard.
+- An unterminated opener runs to the end of the document. That is the renderer's
+  own reading, and it is the fail-closed one — treating it as no comment at all
+  would let a document hide any amount of graded text from both the reader and
+  this check by omitting the terminator.
+
+What remains unreached is `scanBareBinds`, which has no anchor: it offers every
+inline code span in a document to `bareBindValues` and grades whatever parses as
+a binding. A commented bare binding is therefore still read and still graded, so
+`gqlc-offa`'s sweep keeps the limit this decision closes for the other four.
+Giving it one would mean anchoring a scanner that exists precisely because the
+binding it catches carries no anchor.
+
+## Decision 16 — a binding's pointer operators are graded; its surroundings are not
+
+`gqlc-173n` raises two limits of the binding sweep. They get opposite answers,
+and the reason in both cases is a measurement rather than a principle.
+
+**The deref is closed, and it needed no knowledge of the parameter's type.**
+`unwrapConversions` peels `*` and `&` along with carrier conversions, so a
+documented `float64(*arg)` reduced to `arg` and passed the name rule. That shape
+is exactly what a mechanical rename of C3 §5.7 would have produced, and it is a
+nil panic at runtime, because `paramBindExpr` takes its nullable arm and returns
+the access expression *before* `driverCarrier` is reached — a nullable parameter
+binds bare, so a carrier wrapped around a deref is a composition the emitter has
+no path to.
+
+The bead proposes grading the shape "for nullable parameters", which the fence
+cannot tell from bytes. It does not have to. Reading the emitter: every binding
+is `access`, or one helper call around it — `paramBindExpr` returns the access
+bare, `from<T>[Ptr](access)`, `encode<Suffix>[Ptr](access)` or
+`<carrier>(access)`, and `sliceParamBindExpr`'s arms are the same shape — while
+`access` is `codegen.ParamArg` or a field selected off it. No arm introduces
+either operator, so they are wrong at *every* nullability and the rule is a byte
+test. Confirmed against the golden corpus: no emitted `map[string]any` binding
+in `test/data/codegen/valid` carries a `*` or an `&`, and neither does any
+documented one, so the check lands green.
+
+**The breadth is declined, and the bead's own remedy is refuted by the corpus.**
+`mapAnchor` is the bare literal type and `docRoots` is all of `docs/`, so a
+future note showing an unrelated option map is told its binding is not
+generator-owned. The bead proposes requiring the literal to sit "adjacent to a
+graded signature". Measured: `specBindDocs` owes C3 three bindings and
+`specSigDocs` has no C3 entry at all, because all nine of C3's documented
+signatures are zero-parameter methods and the sweep grades only a list holding
+one parameter past the context. There is no parameterised method anywhere in
+that document to anchor to. A proximity rule drops all three of its bindings and
+takes it below its declared floor — the fence reddens on a clean tree.
+
+That is the same shape as Decision 13's refutation of receiver-anchoring, and
+the same conclusion: the candidate discriminator is not in the bytes. The other
+candidate the bead offers — "inside a section the spec marks normative" — is a
+markdown parse, which [ADR 0042](0042-the-spec-fence-stays-a-byte-scan.md)
+declines.
+
+So the breadth stays, and it stays deliberately. It fails CLOSED, which makes it
+a maintenance annoyance rather than a hole, and the danger is only that whoever
+meets it narrows `docRoots` in response — the breadth of `docRoots` is
+load-bearing, since the original drift reached C1, C3, C4 and C5. It is pinned
+by a row in `TestSpecBindScannerDetectsDrift` so that a later reader finds the
+behaviour declared rather than discovers it.
 
 ## Consequences
 
@@ -458,24 +611,31 @@ own header:
   floor is a count, not a membership (`gqlc-0rjn`, Decision 3).
 - A parameter list one of the documents quotes for a function that is not an
   emitted query method — the `run` seam, `ExecuteWrite`, a godog handler — is
-  exempted by `specNonMethodLists` by its text and its count, so replacing one
-  of those quotes in place with a claim spelled identically keeps the exemption
-  (`gqlc-yn2l`, Decision 13). It is Decision 12's gap where Decision 12's remedy
-  does not reach, because 11 of the 13 sites are inside fenced code blocks.
+  exempted by `specNonMethodSites` by its name, its text and its count. A
+  replacement keeping the name AND the list is still exempted, so what is
+  unreached is a claim that an emitted query method is named `run`,
+  `ExecuteWrite` or `func` and takes a `cypher string` beside a driver
+  `params map[string]any` (`gqlc-yn2l`, Decision 14).
 - The prose around an intact graded span may say the opposite of it
   (`gqlc-e143`). The editorial answer, and why the fence is not the answer, is
   Decision 11.
-- The binding sweep peels pointer operators along with carrier conversions, so
-  `*arg` and `&arg` unwrap to `arg` and stay green (`gqlc-173n`).
+- The binding sweep still peels pointer operators to find the NAME, but a
+  binding whose expression carries one is now graded on its shape as well, so
+  `*arg` and a deref inside a carrier are both red (`gqlc-173n`, Decision 16).
+  What stays unreached there is the surroundings: every `map[string]any` literal
+  under `docRoots` is graded as a documented binding whatever it is for, which
+  fails closed and is declined deliberately.
 - A driver binding stated with no `map[string]any` literal around it is unswept,
   and so is a parenthesis-less parameter list with no code span around it — in
   running prose, or on its own line inside a fenced or indented code block
   (`gqlc-offa`, `gqlc-cgat`, Decision 10).
 - `docFiles`'s guard that every `docRoots` entry exists on disk is neither
   witnessed nor in Decision 7's enumeration (`gqlc-ipx6`).
-- The sweeps read raw markdown bytes, so a site inside an HTML comment is graded
-  exactly as visible text is — invisible to a reader, present to the census
-  (`gqlc-jnsk`).
+- The sweeps read raw markdown bytes, so a site inside an HTML comment would be
+  graded exactly as visible text is. Four of the five anchors are now refused
+  outright inside a comment rather than read there (`gqlc-jnsk`, Decision 15).
+  The fifth, `scanBareBinds`, has no anchor to refuse, so a brace-less binding
+  span inside a comment is still read and still pays `specBindDocs`.
 
 Every entry above is a limit of a byte scan, and reading them together invites
 the question of whether the scan should become a parse.
