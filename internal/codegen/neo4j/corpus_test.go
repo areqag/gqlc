@@ -158,13 +158,21 @@ var corpusSubtests = map[string]int{
 // This is the third census because the first two cannot see the fixture's
 // commonest shape. corpusTests names top-level tests and a top-level test
 // passes whether or not anything ran inside it; corpusSubtests counts
-// subtest passes and this fixture has four t.Run call sites among 41
-// top-level tests, so for the other 37 a test whose table goes empty has
-// no key on either side, which is equality. Measured: emptying
+// subtest passes, and corpusSubtests' key set IS the set of tests that
+// call t.Run — a handful of this fixture's tests, a guarded fact rather
+// than a figure in prose, since Declared.Check compares that map against
+// the run. For every test not among those keys a table that goes empty
+// has no key on either side, which is equality. Measured: emptying
 // TestEdgyRefusesWhatTheSchemaDidNotDeclare's four-entry key table on
 // origin/master, which carries both other censuses and not this one,
 // left the run green (bd gqlc-eum1, the half gqlc-mlf4 left open).
-// The count of t.Run sites was one in 34 tests when this was written.
+//
+// This paragraph used to carry the two counts as figures — "N t.Run call
+// sites among M top-level tests". No guard read either, and both drifted
+// every time the fixture grew: 34 to 41 to 44 over three hand-repairs.
+// They are gone rather than re-fixed, because the fact they were there to
+// support is the one the sentence above now states, and that one is
+// guarded (bd gqlc-zobe7).
 //
 // Every test here that ranges over anything has an entry, and a test that
 // ranges over nothing has none — see corpusrun.Table for what Rows and

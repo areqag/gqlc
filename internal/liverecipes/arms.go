@@ -66,4 +66,7 @@ var LiveArms = map[string]Arm{
 	"TestNeo4jNeverHandsBackANullValuedProperty":                ArmNeo4j,
 	"TestAGENeverHandsBackANullValuedProperty":                  ArmAGE,
 	"TestAGEKeepsAnExplicitNullAtARecordFieldButNotAtAProperty": ArmAGE,
+	"TestEveryAgtypeCaptureIsWitnessedOrDeclaredSynthetic":      ArmNeo4j,
+	"TestAGEAgtypeCaptureMatchesTheServer":                      ArmAGE,
+	"TestAGEAgtypeNullReachesPgxAsSQLNULL":                      ArmAGE,
 }
