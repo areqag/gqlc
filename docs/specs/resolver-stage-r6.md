@@ -698,8 +698,8 @@ Algorithm:
    circuits.
 3. For each `SetEffect` in `e.OnCreate()`: same as step 2.
 
-The `[]SetEffect` sealed sub-sum (`query.go:1651-1660`) guarantees
-`OnMatch` and `OnCreate` contain only `SetPropertyEffect` /
+The `[]SetEffect` return on `query.MergeEffect`'s `OnMatch` and
+`OnCreate` guarantees they contain only `SetPropertyEffect` /
 `SetEntityEffect` / `SetLabelsEffect` — the R6 validator has no
 runtime type-check to write; the compiler enforces the invariant.
 
