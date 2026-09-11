@@ -35,7 +35,6 @@ type (
 var RenderFaultHook = &renderFaultHook
 
 var (
-	CarriesZone                      = carriesZone
 	DecodeFunc                       = decodeFunc
 	DialectGaps                      = dialectGaps
 	DollarTag                        = dollarTag

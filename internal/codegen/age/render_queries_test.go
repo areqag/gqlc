@@ -399,10 +399,10 @@ func TestDecodeFuncHasAnArmForEveryCarrierTheTypeTableProduces(t *testing.T) {
 	// KindList arm folds into its element text is applied to a value, so
 	// every starred carrier this backend emits reaches the AST as `"[]" +
 	// elem` and enters the census as nothing. Swept under its own key
-	// because these texts are DERIVED and the ones above are READ, and a
+	// because these texts are ASKED FOR and the ones above are READ, and a
 	// reader who trusts the wrong one of those is owed the difference.
-	starred := starredElementTexts(byMethod["Property"])
-	for _, goType := range starred {
+	elements := listElementTexts(t)
+	for _, goType := range elements {
 		t.Run("Property/element/"+goType, func(t *testing.T) {
 			requireCarrierHasAnArm(t, goType)
 		})
@@ -417,23 +417,31 @@ func TestDecodeFuncHasAnArmForEveryCarrierTheTypeTableProduces(t *testing.T) {
 	require.Empty(t, byMethod["Temporal"], "typeMap.Temporal named %v, so this backend now carries a temporal "+
 		"width: read it against decodeFunc before moving this number", byMethod["Temporal"])
 
-	// 22 Property texts less `any` and the two zoned carriers. Pinned
-	// rather than left implicit because starredElementTexts filters, and a
-	// filter that widened to everything would leave this loop ranging over
-	// nothing while every assertion above still passed — the exact shape of
-	// silence this whole test exists against.
-	// assert rather than require on both zoned texts, and on this side of
-	// the Len: a require here aborts, and the one mutation that reaches
-	// them — dropping carriesZone from the filter — admits BOTH, so the
-	// first would be the only one ever witnessed. Each pin then has its own
-	// victim: dropping carriesZone reports the two texts and the count 21,
-	// and a filter widened to exclude everything reports the count 0 while
-	// these two pass vacuously.
+	// The KindList arm's two exclusions, read back off the census the arm
+	// itself produced. They are what the hardcoded count used to stand in
+	// for, and they are strictly more than it said: a count fires on any
+	// movement and names none of it, while each of these names the arm
+	// clause it is about.
+	//
+	// assert rather than require on the zoned pair: a require aborts, and
+	// the one mutation that reaches them — dropping carriesZone from the
+	// arm — admits BOTH, so the first would be the only one ever
+	// witnessed.
 	for _, zoned := range []string{age.GoInstant, age.GoTime} {
-		assert.NotContains(t, starred, "*"+zoned,
+		assert.NotContains(t, elements, "*"+zoned,
 			"typeMap.Property refuses a list whose element carries a zone, so the table produces no such element text")
 	}
-	require.Len(t, starred, 19, "the derived element census is %v", starred)
+	// The `any` carve-out, which the copied filter this census replaced
+	// could not ask about at all: it excluded `any` outright, so a table
+	// that started starring it would have moved nothing here. Both halves
+	// are needed — Contains alone passes a table emitting `any` AND
+	// `*any`, NotContains alone passes one emitting neither.
+	assert.Contains(t, elements, "any",
+		"LIST<ANY> is admitted and `any` already carries null as nil, so the element text is the UNSTARRED one")
+	assert.NotContains(t, elements, "*any",
+		"the KindList arm exempts `any` from the element star, so no schema reaches a `*any` element")
+	require.NotEmpty(t, elements,
+		"the type table admitted no width at a list-element position, so the loop above ranged over nothing")
 }
 
 // requireCarrierHasAnArm requires decodeFunc to name a helper for one Go
@@ -483,46 +491,55 @@ func requireCarrierHasAnArm(t *testing.T, goType string) {
 	}
 }
 
-// starredElementTexts is every Go type text the type table produces at a
-// list-ELEMENT position, derived from the texts it names as literals.
+// listElementTexts is every Go type text the type table produces at a
+// list-ELEMENT position, asked of the table one declared width at a time.
 //
-// It has to be derived rather than read, and that is the whole reason this
-// function exists. The star is applied at RUN TIME inside the KindList arm
-// — `if !pt.ElemNotNull() && elemTy != "any" { elemTy = "*" + elemTy }` —
-// and the arm still returns the single `"[]" + elem` shape the AST walk
-// accepts, so the walk sees a composition over a VALUE and contributes
-// nothing. Every starred carrier the backend emits is therefore invisible
-// to typeTableGoTypes, by construction and not by an oversight the walk
-// could be widened to fix without resolving types.
+// It has to be asked for rather than read, and that is the whole reason
+// this function exists. The star is applied at RUN TIME inside the
+// KindList arm — `if !pt.ElemNotNull() && elemTy != "any" { elemTy = "*" +
+// elemTy }` — and the arm still returns the single `"[]" + elem` shape the
+// AST walk accepts, so the walk sees a composition over a VALUE and
+// contributes nothing. Every starred carrier the backend emits is
+// therefore invisible to typeTableGoTypes, by construction and not by an
+// oversight the walk could be widened to fix without resolving types.
 //
-// The two exclusions are the list arm's own. Order is not significant here
-// — both are pure predicates under an `||`, and this function checks `any`
-// first while the arm applies carriesZone first:
+// NOTHING IS COPIED HERE, which is what bd gqlc-uafp bought and is the
+// only reason to prefer this to the census it replaced. The predecessor
+// re-applied the KindList arm's two exclusions — carriesZone, then the
+// `any` carve-out — to the literal texts the walk read, so the SHAPE of
+// the arm's filter lived in the test as well as in production and the
+// only thing holding the two together was a hardcoded count. Here the
+// widths go in and the element texts come out: carriesZone is applied by
+// the arm, because a zoned element makes it answer ok=false and the width
+// drops out below; the carve-out is applied by the arm, because `any`
+// leaves it unstarred. A change to either is a change to this census, and
+// the assertions at the call site name which one moved.
 //
-//   - carriesZone refuses a zoned element outright — a list has one property
-//     name for all its elements and so nowhere to put the second and later
-//     UTC offsets. `*time.Time` and `*Time` are texts the table cannot
-//     produce, and demanding an arm for one would be this census vouching
-//     for a carrier rather than reporting it. Both are pinned absent below.
-//   - `any`, the carve-out, already carries null as nil.
+// ElemNotNull is false at every call, so every width that survives comes
+// back through the star clause. That is the position the census is about:
+// a NOT NULL element is the bare text the AST walk already reads, and
+// sweeping it here would report the same rows twice.
 //
-// carriesZone is called through the export rather than copied, so the
-// duplication is the one `any` literal. The alternative is not asking the
-// question: a starred census that over-reached would put a row on this table
-// for a carrier no schema can reach, and this test's contract is what the
-// table PRODUCES. A formulation that asks typeMap.Property for the element
-// text directly and so copies nothing is bd gqlc-uafp — filed, not taken
-// here, because it changes what the guard asks and so needs its own battery.
-func starredElementTexts(property []string) []string {
-	out := make([]string, 0, len(property))
-	for _, text := range property {
-		if text == "any" || age.CarriesZone(text) {
+// The domain is declaredPropertyTypes — internal/graph's own width
+// vocabulary, derived from the declaration — so a width the vocabulary
+// gains reaches this census with no edit here, and one the table refuses
+// as a list element is absent because the table said so.
+func listElementTexts(t *testing.T) []string {
+	t.Helper()
+
+	seen := make(map[string]struct{})
+	for _, width := range declaredPropertyTypes(t) {
+		text, ok := age.TypeMap{}.Property(graph.ListOf(width, false))
+		if !ok {
 			continue
 		}
-		out = append(out, "*"+text)
+		elem, isList := strings.CutPrefix(text, "[]")
+		require.True(t, isList,
+			"typeMap.Property answered %q for LIST<%s>, which is not the `\"[]\" + elem` shape the list arm returns, "+
+				"so the element text cannot be read off it", text, width)
+		seen[elem] = struct{}{}
 	}
-	slices.Sort(out)
-	return out
+	return slices.Sorted(maps.Keys(seen))
 }
 
 // decodeFuncOf names the helper decodeFunc answers for one Go type, and is
