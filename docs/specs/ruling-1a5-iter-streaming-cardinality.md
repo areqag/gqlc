@@ -7,10 +7,14 @@ build (§7).
 Two research sessions (2026-09-08, 2026-09-09/10) closed every feasibility
 question this needed and recorded `STATUS: no decision taken`. This document
 takes the decision. It re-measures the load-bearing claims rather than citing
-them; §9 lists the three the tree contradicts.
+them; §9 lists every place the bead's ledger and the tree disagree, including the
+two figures the re-measurement moved.
 
 Every file:line below was read, and every probe run, at this branch's base,
-master `687896a9`.
+master `21720c45`. The probes were first run at `687896a9` and the counts and
+line numbers re-derived after the rebase; the one claim that did **not** survive
+it is §5's third bullet, which named a defect that has since been fixed on
+master, and it is restated rather than deleted.
 
 **The short answer.** ADR 0010 §D8's 2026-07-11 ruling stands unchanged:
 `:iter` is an **author-declared, opt-in fourth cardinality** returning
@@ -32,35 +36,43 @@ in it.
 
 ## 1. The measurement everything else is weighed against
 
-`errcheck` polices a returned error and cannot police a yielded one. Re-run this
-session against the repo's pinned `.bin/golangci-lint` v2.13.1 and the real
-`.golangci.yml` (`errcheck.check-blank: true`, `check-type-assertions: true`),
-on a scratch module outside the tree, with doc comments present so `revive` is
-silent and the exit status is errcheck's alone:
+`errcheck` polices a returned error; over the arms below it does not police a
+yielded one. Run against the repo's pinned `.bin/golangci-lint` v2.13.1 and the
+real `.golangci.yml` (`errcheck.check-blank: true`,
+`check-type-assertions: true`), on a scratch module outside the tree, with doc
+comments and `gofmt` applied so `revive`/`gci`/`gofumpt` are silent and the exit
+status is errcheck's alone. **The whole enabled linter set runs**, not errcheck
+in isolation, so a `0 issues.` row is the claim that none of them fires:
 
 | arm | source | verdict |
 |---|---|---|
 | materialising | `rows, _ := Slice()` | `Error return value is not checked (errcheck)` — **EXIT=1** |
 | streaming | `for row := range Seq()` | `0 issues.` — **EXIT=0** |
 
-The bead's figure holds exactly. And the failure the linter is silent about is
-not a dropped error. D8's sketch yields `(zeroRow, err)`, and a one-variable
-`range` over that — legal Go, `go vet` exit 0 — **appends a phantom zero-valued
-row**. Measured a third time here on go1.27.0, over a sequence yielding two good
-rows then an error:
+The bead's figure holds exactly, and it re-ran unchanged after this branch was
+rebased onto `21720c45`. And the failure the linter is silent about is not a
+dropped error. D8's sketch yields `(zeroRow, err)`, and a one-variable `range`
+over that — legal Go, `go vet` exit 0 — **appends a phantom zero-valued row**.
+Measured on go1.27.0 over a sequence yielding two good rows then an error:
 
 ```
 len=3 rows=[]main.Row{{Name:"ada", Age:36}, {Name:"bob", Age:41}, {Name:"", Age:0}}
 ```
+
+and reproduced on the rebase with a one-good-row sequence, which lands
+`len=2 … {Name:"", Age:0}` — the phantom is the last element either way, one per
+error yielded, not an artefact of the row count.
 
 The consumer's slice is longer than the result set and the extra element is
 indistinguishable from a real empty row. That is silent-wrong, the class
 ADR 0030's stated posture and ADR 0010 §D1's "reject, don't guess" exist to
 refuse.
 
-This does **not** say the streaming shape is unsafe. It says the shape has a
-hazard the toolchain cannot catch, so the decision is *who has to opt into it,
-and whether the opt-in is visible where the query is reviewed*.
+This does **not** say the streaming shape is unsafe, and it is not a claim about
+Go tooling in general — only about the linters this repository gates a PR with.
+It says the shape has a hazard those linters do not catch, so the decision is
+*who has to opt into it, and whether the opt-in is visible where the query is
+reviewed*.
 
 ## 2. Universal `:many` → `iter.Seq2` is declined
 
@@ -134,9 +146,15 @@ Measured the same way as §1, four arms, same linter and config:
 
 Arm C against arm D is the finding. Today, calling a `:many` method and spending
 nothing is caught, because the signature returns an error. Under `Result[T]` the
-signature returns one value and no error, so the call is clean to every tool —
+signature returns one value and no error, so the call is clean to every tool this
+repository runs — `go vet` and the pinned `golangci-lint` under `.golangci.yml`,
+which is the whole of what gates a PR here, not a claim about the Go ecosystem —
 and because the thunk is lazy, *the query does not run*. Confirmed by execution:
-a `Lazy()` whose `.All()` sets a flag leaves the flag `false`.
+a `Lazy()` whose `.All()` sets a flag leaves the flag `false`. `unparam` and
+`unused` are both enabled in `.golangci.yml` and neither fires on arm C, so this
+is not a case of one linter being switched off. What was **not** tested is a
+custom `go/analysis` pass; a project willing to write one could catch arm C, and
+§7 records that as the falsifier.
 
 Opening nothing at construction is what makes `Result[T]` leak-free, and it is
 the same property that makes forgetting to spend it invisible. The two cannot be
@@ -158,10 +176,35 @@ having to pre-declare — and it pays for that with §3.1 and §3.2.
 
 ### 3.4 The cost, stated so it is not the reason
 
-158 golden files carry a `:many` signature — 79 `querier.go`, 77
-`queries.cypher.go`, 2 `directory.cypher.go`; 64 apache-age-pgx-v5, 60
-neo4j-go-v5, 34 neo4j-go-v6 — and the spike estimated ~276 golden writes for a
-full change. Worse than that estimate: on neo4j the `:many` body decodes a
+The bead records "158 goldens" from the spike. That number does not reproduce,
+and the re-measurement is larger, so the command is given here rather than the
+figure alone — the count is only as good as what it counts, and the spike's is
+not reconstructible:
+
+```
+grep -rhE '^func \(q \*queries\) [A-Za-z0-9_]+\(ctx context\.Context.*\) \(\[\].*, error\) \{$' \
+  --include='*.go' test/data/codegen/valid | wc -l          # 148
+grep -rlE '^func \(q \*queries\) [A-Za-z0-9_]+\(ctx context\.Context.*\) \(\[\].*, error\) \{$' \
+  --include='*.go' test/data/codegen/valid | wc -l          #  92
+```
+
+with the matching `querier.go` interface entry counted the same way. That gives
+**148 signatures on each side, in 92 files each: 184 signature-bearing golden
+files and 296 signature lines.** The implementation files split 37
+apache-age-pgx-v5 / 36 neo4j-go-v5 / 19 neo4j-go-v6, and the `querier.go` files
+split identically, which cross-checks against the 51 `:many` queries: each is
+emitted once per backend it has a golden for, and the v6 corpus is the thinnest.
+By basename the 92 are 90 `queries.cypher.go` and 2 `directory.cypher.go`.
+`Tx` adds nothing — it carries no `([]T, error)` method of its own in any
+golden, so the forwarders are not a third site. §9 records the discrepancy.
+
+The two figures bound different things and the execution needs both: **184** is
+how many files a reviewer opens, **296** is how many lines change. Neither is a
+count of *edits* — a regenerated golden is rewritten wholesale, so the work is
+one emitter change per backend plus one `just test-codegen` regeneration, and
+these numbers measure the diff a reviewer has to read, not the labour.
+
+Worse than the count: on neo4j the `:many` body decodes a
 **materialised** `[]*neo4j.Record` handed back across `driverOrTx.run`
 (`internal/codegen/neo4j/render_db.go:58-88`), whose own doc comment calls those
 "self-contained value snapshots safe to consume after the transaction closes",
@@ -223,10 +266,12 @@ emitted body on the neo4j side.
 D8 calls its grill markers "the paved runway". They hold, and the enum half is
 real: `internal/queryfile/annotated.go:14-20` documents `:iter` as reserved by
 name, and the members start at `iota + 1` so a fourth constant churns no wire
-format. Three gaps the execution meets that the bead does not record.
+format. Three gaps the execution meets that the bead does not record — the third
+of which has been paved since this ruling was drafted, and is kept here because
+§6 orders the work around it.
 
 - **`exhaustive` covers a quarter of the sites.** Adding `CardinalityIter` reds
-  the four `switch` statements over the enum (`internal/codegen/prepare.go:720`,
+  the four `switch` statements over the enum (`internal/codegen/prepare.go:721`,
   `neo4j/render_queries.go:374`, `age/render_queries.go:276`,
   `queryfile/annotated.go:38`). None of the four uses a `default`, which is the
   whole reason all four stay visible under `default-signifies-exhaustive: true`
@@ -248,39 +293,63 @@ format. Three gaps the execution meets that the bead does not record.
   single-row helper, and an `:iter` query is correctly not `:one`. That is worth
   stating because the grep does not distinguish them, and an execution lane
   sweeping every comparison would otherwise "fix" a site that is already right.
-- **`querierImports` is a string scan with no named guard.** `neo4j/render_querier.go:76-101`
+- **`querierImports` is a string scan with no named guard.** `neo4j/render_querier.go:77-101`
   tests `strings.Contains(ty, "dbtype.")` / `"time.Time"` over `GoType` text;
   age's equivalent is `slices.ContainsFunc(..., namesInstant)`
-  (`age/render_querier.go:19-29`, `age/render_queries.go:19-22`). Neither has an
+  (`age/render_querier.go:22`, `age/render_queries.go:19-22`). Neither has an
   arm for a new import, and `grep -rln 'querierImports\|namesInstant'` over
-  `internal/codegen/` returns only the two renderers — **no `_test.go`
-  references either**, so the miss surfaces as a compile failure under
-  `codegen-fence` and nothing names it. A guard is owed; §6 says which.
-- **`emitscan`'s capture analysis has no closure arm, and errs in the direction
-  its doc comment denies.** `DeclaredIdents` (`internal/codegen/emitscan/emitscan.go:433-458`)
-  switches on `*ast.AssignStmt` (DEFINE), `*ast.ValueSpec` and `*ast.RangeStmt`
-  (DEFINE) only. A `*ast.FuncLit` parameter is none of those, so a generated
-  `func(yield func(Row, error) bool)` binds `yield` invisibly: `FreeIdents`
-  (`:369-394`) reports it **free**, while its doc comment claims the analysis
-  "errs towards calling a name bound: an emission that captures one therefore
-  fails rather than slips through". `BodyLocals` (`:463-478`) misses it for the
-  same reason. What is **not** at risk, contrary to the bead's framing:
-  `Candidates` (`:270-285`) is `ast.Inspect` over every `*ast.Ident`, so a new
-  `yield` enters the swept candidate set automatically, and `Scope` intersects
-  free idents with package-level declarations, which `yield` is not. So the
-  exposure is narrower than "unsettled real risk" and it is one specific arm.
-  Filed as its own bead (§7) because the doc-comment/behaviour mismatch exists
-  today, independent of `:iter`.
+  `internal/codegen/` returns three non-test files — both `render_querier.go`
+  and `age/render_queries.go`, which declares `namesInstant` and uses it a second
+  time at `:107` — and **no `_test.go` at all**, so the miss surfaces as a
+  compile failure under `codegen-fence` and nothing names it. A guard is owed;
+  §6 says which.
+- **`emitscan`'s closure gap was real, is now fixed, and what replaced it still
+  bounds the execution.** As this ruling was drafted, `DeclaredIdents` switched
+  on `*ast.AssignStmt` (DEFINE), `*ast.ValueSpec` and `*ast.RangeStmt` (DEFINE)
+  only, so a generated `func(yield func(Row, error) bool)` bound `yield`
+  invisibly and `FreeIdents` reported it **free** — the direction its own doc
+  comment denied. That was filed as **gqlc-9hrh** and has since landed on master
+  (PR #2839, `21720c45`): `DeclaredIdents`
+  (`internal/codegen/emitscan/emitscan.go:467-470`) now has a `*ast.FuncLit` arm
+  reading the literal's parameters and results, `BodyLocals` (`:506`) inherits it
+  by delegation, and `TestAClosureParameterIsNotFree` /
+  `TestAClosureParameterIsABodyLocal` (`emitscan_test.go:469,488`) pin both. So
+  step 1 of §6 is **already done**; the execution does not re-do it, and the
+  `capture_test.go` sweeps in both emitters measure a closure-bodied emission
+  correctly on arrival.
+  What survives is narrower and is **not** a blocker for `:iter`. `FreeIdents`'
+  doc comment now enumerates five constructs it still reports free — a local
+  type declaration and its field names, a statement label, a parameter name in a
+  func *type*, and a type parameter — filed as **gqlc-db0e**. None is a shape the
+  `:iter` emission as specified here produces: the body binds `yield` (a closure
+  parameter, now bound) and ordinary short declarations, and the `func(Row,
+  error) bool` inside `iter.Seq2` has unnamed parameters. **Don't name them.**
+  Writing `func(yield func(row Row, err error) bool)` for readability would put
+  those names into gqlc-db0e's fourth construct — a parameter name in a func
+  *type* — where `FreeIdents` reports them free. The consequence is a spurious
+  capture report rather than a missed one, since `Scope` then intersects the free
+  set with package-level declarations: harmless for `row`, a red sweep the day
+  someone writes `func(person Person, err error) bool` over a model type the
+  emitter also declares. It costs nothing to leave them unnamed. The execution
+  should read that doc comment before step 4, and must not read the gqlc-9hrh fix
+  as having made the analysis universally conservative.
+  What was never at risk, contrary to the bead's framing: `Candidates`
+  (`:270-285`) is `ast.Inspect` over every `*ast.Ident`, so a new `yield` enters
+  the swept candidate set automatically, and `Scope` (`:296-323`) intersects free
+  idents with package-level declarations, which `yield` is not.
 
 ## 6. What the execution owes — files, order, guards
 
 In this order, because each step's guard is the next step's screen.
 
-1. **`internal/codegen/emitscan`** — add a `*ast.FuncLit` arm to
-   `DeclaredIdents` so a closure parameter is bound, with a unit test asserting
-   `FreeIdents` does not report it. **gqlc-9hrh**; land it first so the
-   capture sweeps in `neo4j/capture_test.go` and `age/capture_test.go` are
-   measuring the right thing when a closure-bodied emission arrives.
+1. ~~**`internal/codegen/emitscan`** — add a `*ast.FuncLit` arm to
+   `DeclaredIdents` so a closure parameter is bound.~~ **Done: gqlc-9hrh landed
+   as PR #2839**, which is why this step is kept struck through rather than
+   deleted — an execution lane reading §5 must not re-derive it. The capture
+   sweeps in `neo4j/capture_test.go` and `age/capture_test.go` will measure a
+   closure-bodied emission correctly on arrival. Read `FreeIdents`' doc comment
+   before step 4: it enumerates five constructs still reported free (gqlc-db0e),
+   none of which the `:iter` body emits.
 2. **`internal/queryfile`** — `CardinalityIter`, a `parseCardinality` arm
    (`parse.go:169-177`), a `String()` arm (`annotated.go:37-49`, below the
    switch as the existing comment requires), and a `MarshalJSON` wire tag
@@ -288,8 +357,9 @@ In this order, because each step's guard is the next step's screen.
 3. **`internal/codegen/prepare.go`** — `ErrIterOnWrite` in `errors.go` beside
    `ErrCardinalityShapeMismatch` and in the sentinel list at `:300`; the
    validation arm at `:778-786` gains `:iter` + Write → `ErrIterOnWrite` and
-   `:iter` + zero columns → `ErrCardinalityShapeMismatch`. Then sweep the twelve
-   `== Cardinality*` comparisons of §5.
+   `:iter` + zero columns → `ErrCardinalityShapeMismatch`. Then sweep the
+   `== Cardinality*` comparisons of §5 — thirteen lines, of which four need an
+   `:iter` arm and two are correct as they stand.
 4. **Emitters, neo4j first** (`render_queries.go` `writeMethodSignature:236`,
    `returnTypeText:263`, the body writer, and `render_db.go`'s `driverOrTx` seam
    (`:58`), which must grow a streaming method because today's returns
@@ -329,7 +399,10 @@ one string in `returnTypeText` and it deletes the §5 import arm.
 | 3 | drop the `iter` arm from `querierImports` | the new import guard test, **and** `codegen-fence` — if only the fence reds, the guard is not a guard |
 | 4 | delete the `stopped` test inside `emit` | the live re-entry row of §4; if it is not runnable, the row is vacuous and must be reported as such rather than dropped |
 | 5 | flip one `== CardinalityMany` to `!= CardinalityExec` | an `:iter` golden takes the `:many` body |
-| 6 | drop the `*ast.FuncLit` arm from `DeclaredIdents` | the new emitscan unit test |
+
+Five rows, not six. A sixth — drop the `*ast.FuncLit` arm from `DeclaredIdents` —
+was owed while step 1 was outstanding; gqlc-9hrh ran it and three others before
+merging, so re-running it here would measure that bead's guard, not this one's.
 
 Screen every row with `go test -c -o /dev/null ./internal/codegen/...
 ./internal/queryfile/` before trusting a RED, and regenerate goldens before each
@@ -384,9 +457,15 @@ time**, not when the branch is cut.
 **Bead disposition.** `gqlc-1a5` **stays open** and carries the build. Its title
 and description already describe exactly the implementation §6 scopes, so
 closing it and minting a same-titled execution twin would leave GH #218 closed
-and unbuilt. The one thing spun out is §5's third bullet — the `emitscan`
-`*ast.FuncLit` gap, filed as **gqlc-9hrh** — because that defect is in the tree
-today and is not conditional on `:iter` shipping.
+and unbuilt. So this document's own PR carries `Refs: gqlc-1a5` and no `Closes`.
+
+What was spun out is §5's third bullet — the `emitscan` `*ast.FuncLit` gap,
+**gqlc-9hrh**, because that defect was in the tree independent of `:iter`
+shipping. It is now **closed and merged** (PR #2839), and its own investigation
+spun out **gqlc-db0e** for five further constructs `FreeIdents` still reports
+free. gqlc-db0e is **not** a prerequisite for the `:iter` build — none of the
+five is a construct the `:iter` emission produces (§5) — and this ruling does not
+schedule it.
 
 ## 8. Rejected alternatives
 
@@ -437,10 +516,30 @@ reader will reach for.
   and 2 of those are prose inside comments
   (`nested_list_property/queries.cypher:16`, `record_property/queries.cypher:30`).
   Counting `// name: X :many` gives **51**, across **34** of **97** valid dirs —
-  the bead's corrected figures exactly. The 158 signature-bearing goldens
-  reproduce too, and break down as §3.4 records.
-- **The `emitscan` risk is narrower than "unsettled".** §5's third bullet —
-  `Candidates` is safe by construction, `DeclaredIdents` is the one gap.
+  the bead's corrected figures exactly — but only when the glob reaches every
+  `*.cypher`, not `valid/*/queries.cypher`. `multi_source_files` holds
+  `directory.cypher` and `people.cypher`, and the shallow glob reads 50 across
+  33 dirs. Both figures are of the valid corpus alone; a repo-wide file count
+  also lands on 51 (51 files under `test/data/codegen` contain a `:many`,
+  17 of them in `invalid/`), and the coincidence is worth naming because it
+  makes a wrong count look confirmed.
+- **The "158 goldens" figure does not reproduce; it is 184.** The re-measured
+  count, with its definition, is in §3.4: 148 emitted `:many` signatures on the
+  implementation side and 148 matching `querier.go` interface entries, in 92
+  files each. The spike's per-backend split (64/60/34) is below the measured one
+  (74/72/38 counting both sides) by a consistent margin, so the spike was
+  probably counting a narrower file set; I could not reconstruct which, and did
+  not guess. The direction matters for the execution — the churn is **larger**
+  than the bead promises, not smaller — and it is the reason §3.4 states the
+  command rather than the number. It changes no part of the ruling, because
+  §3.4's cost was already declared not to be the deciding argument.
+- **The `emitscan` risk was narrower than "unsettled", and is now closed.**
+  `Candidates` was safe by construction and `DeclaredIdents` was the one gap;
+  it was fixed on master as gqlc-9hrh (PR #2839) while this ruling was in
+  review, so §5's third bullet is the only claim in this document that the tree
+  has overtaken. The replacement limit is gqlc-db0e, and it does not touch
+  `:iter`.
 - **The `querierImports` claim holds and is worse than stated.** Not only is
   there no named guard, there is no test file referencing either backend's import
-  helper at all.
+  helper at all — the three files that name `querierImports` or `namesInstant`
+  are all production renderers.
