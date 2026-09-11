@@ -3,7 +3,7 @@
 # schema under test/data/resolver/{valid,invalid}/schemas/*.gql. Generated
 # file: edit internal/resolver/sweep_test.go, not this.
 #
-# corpus: 364 queries, 43 schemas. 15652 cells: 4652 accept, 11000 refuse.
+# corpus: 366 queries, 43 schemas. 15738 cells: 4652 accept, 11086 refuse.
 #
 # cell rows: query, schema, verdict, sentinel, detail. A refusing cell's
 # detail digests the error text and is expanded by the strconv.Quote'd msg
@@ -32,6 +32,7 @@ msg	098c7b93b40f	"unknown property: p.rank missing on plural-satisfying type Eng
 msg	099ad44b4cde	"unknown property: p.meta missing on plural-satisfying type Engineer&Person&Staff"
 msg	0b375b3b8c1d	"unknown property: p.nosuch missing on plural-satisfying type Contractor&Person"
 msg	0b7410ed84ee	"query construct not supported at resolver stage R0: path binding"
+msg	0f92f5eeedc3	"unknown property: ON MATCH SET p.employeeId missing on plural-satisfying type Engineer&Person&Staff"
 msg	0fad26bace16	"unknown property: a.name missing on plural-satisfying type Employee&Person"
 msg	0fc82c813393	"query construct not supported at resolver stage R0: unwind binding"
 msg	102a62a42923	"unknown property: p.nickname"
@@ -79,6 +80,8 @@ msg	2b1d591f0cbe	"unknown property: REMOVE n.notAProp missing on plural-satisfyi
 msg	2ba46702cd61	"part binding type conflict: variable \"r\" carried as edge, re-declared as a node pattern"
 msg	2bc9fd382684	"unknown property: REMOVE property r.notAProp missing on union member Person-[AUTHORED]->Post"
 msg	2c86186736b5	"call argument assignability: procedure \"test.my.proc\" argument 0: cannot assign int to STRING"
+msg	2d13cf7fc598	"unknown property: ON MATCH SET p.employeeId missing on plural-satisfying type Person"
+msg	2d7cad7ecf83	"unknown property: ON CREATE SET p.employeeId"
 msg	2da29fcc911f	"ambiguous label: a is satisfied by more than one declared node type: Employee&Person, Person"
 msg	2daa9952f7c1	"part binding type conflict: variable \"r\" carried as edge with labels KNOWS, re-bound with labels LIKES"
 msg	2feb74e80414	"unknown property: SET a.nope missing on plural-satisfying type Employee&Person"
@@ -87,6 +90,7 @@ msg	313a74e3fa5f	"unknown property: DELETE n.notAProp"
 msg	32d69b2162dd	"unknown property: SET a.nope"
 msg	33664e09e49c	"unknown property: p.name missing on plural-satisfying type Employee&Person"
 msg	337444d5ed4c	"unknown property: ON MATCH SET a.age"
+msg	349d663739bc	"unknown property: ON MATCH SET p.employeeId"
 msg	361e2b5adcc5	"part binding type conflict: variable \"label\" carried as CALL YIELD scalar, re-bound as plural node"
 msg	365a812a52c6	"unknown property: a.age missing on plural-satisfying type Engineer&Person&Staff"
 msg	3684f855049b	"unknown property: ON MATCH SET a.age missing on plural-satisfying type Employee&Person"
@@ -160,6 +164,7 @@ msg	69c66121a7fe	"unknown property: n.age missing on plural-satisfying type Cont
 msg	6a8c3e6486b9	"unknown property: ON CREATE SET a.notAProp missing on plural-satisfying type Contractor&Person"
 msg	6b06b9159eac	"unknown property: n.age missing on plural-satisfying type Employee&Person"
 msg	6b6136df18be	"unknown property: p.nickname missing on plural-satisfying type Contractor&Person"
+msg	6d7160790615	"unknown property: ON CREATE SET p.employeeId missing on plural-satisfying type Person"
 msg	6e2a1d04ab95	"unknown property: p.rank missing on plural-satisfying type Employee&Person"
 msg	6e50888dfa54	"parameter type conflict: parameter \"x\": property:STRING (not null) vs property:INT (nullable)"
 msg	6e9982a447e3	"unknown property: ON CREATE SET b.age missing on plural-satisfying type Engineer&Person&Staff"
@@ -210,6 +215,7 @@ msg	951f82dbadaa	"unknown edge: Person-[KNOWS]->Post, Post-[KNOWS]->Person"
 msg	967a2bfaa2bc	"unknown edge: Person-[LIKES]->Post"
 msg	9897f9c085c7	"invalid effect target: SET c.p: \"c\" resolves to a projection alias, not an entity binding"
 msg	9969af262819	"call argument assignability: procedure \"test.my.proc\" argument 1: cannot assign string to INTEGER"
+msg	996ff1b9ef8d	"unknown property: ON CREATE SET p.employeeId missing on plural-satisfying type Contractor&Person"
 msg	9973104ea190	"unknown property: p.age"
 msg	99f21786532e	"unknown property: p.notAProperty"
 msg	9a13ed960d67	"unknown property: DELETE property r.notAProp missing on union member Person-[AUTHORED]->Post"
@@ -337,6 +343,8 @@ msg	f10763976b37	"unknown property: REMOVE n.age"
 msg	f15cf68ae5c7	"unknown label: REMOVE n:Draft: label \"Draft\" not declared on any node type"
 msg	f2de20717a50	"union column mismatch: column \"r\" projects edgeUnion {Person-[AUTHORED]->Post, Person-[LIKES]->Post, Person-[SHARED]->Post} (not null) in branch 1 but edgeUnion {Person-[AUTHORED]->Post, Person-[LIKES]->Post} (not null) in branch 0"
 msg	f32b06027944	"unknown property: n.name"
+msg	f3a0297d36e1	"unknown property: ON CREATE SET p.employeeId missing on plural-satisfying type Engineer&Person&Staff"
+msg	f494174102c4	"unknown property: ON MATCH SET p.employeeId missing on plural-satisfying type Contractor&Person"
 msg	f4e1a9e44a89	"unknown edge: Company-[REVIEWED]->Employee&Person, Company-[REVIEWED]->Person, Company&Large-[REVIEWED]->Employee&Person, Company&Large-[REVIEWED]->Person"
 msg	f55f65b621e5	"unknown edge: Post-[AUTHORED]->Person, Post-[LIKES]->Person"
 msg	f6491c98b5cd	"part binding type conflict: variable \"a\" carried as Person, re-bound as Post"
@@ -2245,6 +2253,49 @@ cell	invalid/merge_endpoint_unknown_label.cypher	valid/schemas/social_r5.gql	ref
 cell	invalid/merge_endpoint_unknown_label.cypher	valid/schemas/social_r6.gql	refuse	ErrUnknownLabel	f81bb33a3ff0
 cell	invalid/merge_endpoint_unknown_label.cypher	valid/schemas/social_r7.gql	refuse	ErrUnknownLabel	f81bb33a3ff0
 cell	invalid/merge_endpoint_unknown_label.cypher	valid/schemas/social_selfloop.gql	refuse	ErrUnknownLabel	f81bb33a3ff0
+cell	invalid/merge_on_create_property_unknown_on_plural_satisfying_node.cypher	invalid/schemas/certificate.gql	refuse	ErrUnknownProperty	2d7cad7ecf83
+cell	invalid/merge_on_create_property_unknown_on_plural_satisfying_node.cypher	invalid/schemas/edge_union_keys.gql	refuse	ErrUnknownProperty	2d7cad7ecf83
+cell	invalid/merge_on_create_property_unknown_on_plural_satisfying_node.cypher	invalid/schemas/narrowed_ends_disagree.gql	refuse	ErrUnknownLabel	1c867a6623eb
+cell	invalid/merge_on_create_property_unknown_on_plural_satisfying_node.cypher	invalid/schemas/satisfy_ambiguous.gql	refuse	ErrUnknownProperty	996ff1b9ef8d
+cell	invalid/merge_on_create_property_unknown_on_plural_satisfying_node.cypher	invalid/schemas/satisfy_plural_edges_chain.gql	refuse	ErrUnknownLabel	1c867a6623eb
+cell	invalid/merge_on_create_property_unknown_on_plural_satisfying_node.cypher	invalid/schemas/satisfy_plural_edges_inline_subtype.gql	refuse	ErrUnknownProperty	6d7160790615
+cell	invalid/merge_on_create_property_unknown_on_plural_satisfying_node.cypher	invalid/schemas/satisfy_plural_edges_overlapping.gql	refuse	ErrUnknownProperty	6d7160790615
+cell	invalid/merge_on_create_property_unknown_on_plural_satisfying_node.cypher	invalid/schemas/satisfy_plural_edges_reversed.gql	refuse	ErrUnknownProperty	6d7160790615
+cell	invalid/merge_on_create_property_unknown_on_plural_satisfying_node.cypher	invalid/schemas/satisfy_plural_edges_reversed_subtype.gql	refuse	ErrUnknownLabel	1c867a6623eb
+cell	invalid/merge_on_create_property_unknown_on_plural_satisfying_node.cypher	invalid/schemas/satisfy_plural_edges_three_types.gql	refuse	ErrUnknownProperty	996ff1b9ef8d
+cell	invalid/merge_on_create_property_unknown_on_plural_satisfying_node.cypher	invalid/schemas/satisfy_plural_edges_two_swapped_pairs.gql	refuse	ErrUnknownProperty	6d7160790615
+cell	invalid/merge_on_create_property_unknown_on_plural_satisfying_node.cypher	invalid/schemas/satisfy_plural_property_diverges.gql	refuse	ErrUnknownProperty	996ff1b9ef8d
+cell	invalid/merge_on_create_property_unknown_on_plural_satisfying_node.cypher	invalid/schemas/satisfy_singular.gql	refuse	ErrUnknownProperty	6d7160790615
+cell	invalid/merge_on_create_property_unknown_on_plural_satisfying_node.cypher	invalid/schemas/social.gql	refuse	ErrUnknownProperty	2d7cad7ecf83
+cell	invalid/merge_on_create_property_unknown_on_plural_satisfying_node.cypher	invalid/schemas/social_ambiguous.gql	refuse	ErrUnknownLabel	1c867a6623eb
+cell	invalid/merge_on_create_property_unknown_on_plural_satisfying_node.cypher	invalid/schemas/social_edgeunion.gql	refuse	ErrUnknownProperty	2d7cad7ecf83
+cell	invalid/merge_on_create_property_unknown_on_plural_satisfying_node.cypher	invalid/schemas/social_r2.gql	refuse	ErrUnknownProperty	2d7cad7ecf83
+cell	invalid/merge_on_create_property_unknown_on_plural_satisfying_node.cypher	invalid/schemas/social_r3.gql	refuse	ErrUnknownProperty	2d7cad7ecf83
+cell	invalid/merge_on_create_property_unknown_on_plural_satisfying_node.cypher	invalid/schemas/social_r3_nulldiff.gql	refuse	ErrUnknownProperty	2d7cad7ecf83
+cell	invalid/merge_on_create_property_unknown_on_plural_satisfying_node.cypher	invalid/schemas/social_r3_typediff.gql	refuse	ErrUnknownProperty	2d7cad7ecf83
+cell	invalid/merge_on_create_property_unknown_on_plural_satisfying_node.cypher	invalid/schemas/social_r5.gql	refuse	ErrUnknownProperty	2d7cad7ecf83
+cell	invalid/merge_on_create_property_unknown_on_plural_satisfying_node.cypher	invalid/schemas/social_r6.gql	refuse	ErrUnknownProperty	2d7cad7ecf83
+cell	invalid/merge_on_create_property_unknown_on_plural_satisfying_node.cypher	invalid/schemas/social_r7.gql	refuse	ErrUnknownProperty	2d7cad7ecf83
+cell	invalid/merge_on_create_property_unknown_on_plural_satisfying_node.cypher	valid/schemas/certificate.gql	refuse	ErrUnknownProperty	2d7cad7ecf83
+cell	invalid/merge_on_create_property_unknown_on_plural_satisfying_node.cypher	valid/schemas/multiround.gql	refuse	ErrUnknownLabel	1c867a6623eb
+cell	invalid/merge_on_create_property_unknown_on_plural_satisfying_node.cypher	valid/schemas/satisfy_implied_label_endpoint.gql	refuse	ErrUnknownLabel	1c867a6623eb
+cell	invalid/merge_on_create_property_unknown_on_plural_satisfying_node.cypher	valid/schemas/satisfy_plural_edges.gql	refuse	ErrUnknownProperty	6d7160790615
+cell	invalid/merge_on_create_property_unknown_on_plural_satisfying_node.cypher	valid/schemas/satisfy_plural_edges_inline_subtype.gql	refuse	ErrUnknownProperty	6d7160790615
+cell	invalid/merge_on_create_property_unknown_on_plural_satisfying_node.cypher	valid/schemas/satisfy_plural_edges_mixed_symmetry.gql	refuse	ErrUnknownProperty	f3a0297d36e1
+cell	invalid/merge_on_create_property_unknown_on_plural_satisfying_node.cypher	valid/schemas/satisfy_plural_edges_reversed_subtype.gql	refuse	ErrUnknownLabel	1c867a6623eb
+cell	invalid/merge_on_create_property_unknown_on_plural_satisfying_node.cypher	valid/schemas/satisfy_plural_edges_symmetric.gql	refuse	ErrUnknownProperty	6d7160790615
+cell	invalid/merge_on_create_property_unknown_on_plural_satisfying_node.cypher	valid/schemas/satisfy_singular.gql	refuse	ErrUnknownProperty	6d7160790615
+cell	invalid/merge_on_create_property_unknown_on_plural_satisfying_node.cypher	valid/schemas/social.gql	refuse	ErrUnknownProperty	2d7cad7ecf83
+cell	invalid/merge_on_create_property_unknown_on_plural_satisfying_node.cypher	valid/schemas/social_edgeunion.gql	refuse	ErrUnknownProperty	2d7cad7ecf83
+cell	invalid/merge_on_create_property_unknown_on_plural_satisfying_node.cypher	valid/schemas/social_r1.gql	refuse	ErrUnknownProperty	2d7cad7ecf83
+cell	invalid/merge_on_create_property_unknown_on_plural_satisfying_node.cypher	valid/schemas/social_r2.gql	refuse	ErrUnknownProperty	2d7cad7ecf83
+cell	invalid/merge_on_create_property_unknown_on_plural_satisfying_node.cypher	valid/schemas/social_r3.gql	refuse	ErrUnknownProperty	2d7cad7ecf83
+cell	invalid/merge_on_create_property_unknown_on_plural_satisfying_node.cypher	valid/schemas/social_r3_unionnn.gql	refuse	ErrUnknownProperty	2d7cad7ecf83
+cell	invalid/merge_on_create_property_unknown_on_plural_satisfying_node.cypher	valid/schemas/social_r4.gql	refuse	ErrUnknownProperty	2d7cad7ecf83
+cell	invalid/merge_on_create_property_unknown_on_plural_satisfying_node.cypher	valid/schemas/social_r5.gql	refuse	ErrUnknownProperty	2d7cad7ecf83
+cell	invalid/merge_on_create_property_unknown_on_plural_satisfying_node.cypher	valid/schemas/social_r6.gql	refuse	ErrUnknownProperty	2d7cad7ecf83
+cell	invalid/merge_on_create_property_unknown_on_plural_satisfying_node.cypher	valid/schemas/social_r7.gql	refuse	ErrUnknownProperty	2d7cad7ecf83
+cell	invalid/merge_on_create_property_unknown_on_plural_satisfying_node.cypher	valid/schemas/social_selfloop.gql	refuse	ErrUnknownProperty	2d7cad7ecf83
 cell	invalid/merge_on_create_undeclared_label.cypher	invalid/schemas/certificate.gql	refuse	ErrUnknownLabel	dfb36442e6f8
 cell	invalid/merge_on_create_undeclared_label.cypher	invalid/schemas/edge_union_keys.gql	refuse	ErrUnknownLabel	dfb36442e6f8
 cell	invalid/merge_on_create_undeclared_label.cypher	invalid/schemas/narrowed_ends_disagree.gql	refuse	ErrUnknownLabel	1c867a6623eb
@@ -2331,6 +2382,49 @@ cell	invalid/merge_on_create_unknown_property.cypher	valid/schemas/social_r5.gql
 cell	invalid/merge_on_create_unknown_property.cypher	valid/schemas/social_r6.gql	refuse	ErrUnknownProperty	68b66302ccca
 cell	invalid/merge_on_create_unknown_property.cypher	valid/schemas/social_r7.gql	refuse	ErrUnknownProperty	68b66302ccca
 cell	invalid/merge_on_create_unknown_property.cypher	valid/schemas/social_selfloop.gql	refuse	ErrUnknownProperty	68b66302ccca
+cell	invalid/merge_on_match_property_unknown_on_plural_satisfying_node.cypher	invalid/schemas/certificate.gql	refuse	ErrUnknownProperty	349d663739bc
+cell	invalid/merge_on_match_property_unknown_on_plural_satisfying_node.cypher	invalid/schemas/edge_union_keys.gql	refuse	ErrUnknownProperty	349d663739bc
+cell	invalid/merge_on_match_property_unknown_on_plural_satisfying_node.cypher	invalid/schemas/narrowed_ends_disagree.gql	refuse	ErrUnknownLabel	1c867a6623eb
+cell	invalid/merge_on_match_property_unknown_on_plural_satisfying_node.cypher	invalid/schemas/satisfy_ambiguous.gql	refuse	ErrUnknownProperty	f494174102c4
+cell	invalid/merge_on_match_property_unknown_on_plural_satisfying_node.cypher	invalid/schemas/satisfy_plural_edges_chain.gql	refuse	ErrUnknownLabel	1c867a6623eb
+cell	invalid/merge_on_match_property_unknown_on_plural_satisfying_node.cypher	invalid/schemas/satisfy_plural_edges_inline_subtype.gql	refuse	ErrUnknownProperty	2d13cf7fc598
+cell	invalid/merge_on_match_property_unknown_on_plural_satisfying_node.cypher	invalid/schemas/satisfy_plural_edges_overlapping.gql	refuse	ErrUnknownProperty	2d13cf7fc598
+cell	invalid/merge_on_match_property_unknown_on_plural_satisfying_node.cypher	invalid/schemas/satisfy_plural_edges_reversed.gql	refuse	ErrUnknownProperty	2d13cf7fc598
+cell	invalid/merge_on_match_property_unknown_on_plural_satisfying_node.cypher	invalid/schemas/satisfy_plural_edges_reversed_subtype.gql	refuse	ErrUnknownLabel	1c867a6623eb
+cell	invalid/merge_on_match_property_unknown_on_plural_satisfying_node.cypher	invalid/schemas/satisfy_plural_edges_three_types.gql	refuse	ErrUnknownProperty	f494174102c4
+cell	invalid/merge_on_match_property_unknown_on_plural_satisfying_node.cypher	invalid/schemas/satisfy_plural_edges_two_swapped_pairs.gql	refuse	ErrUnknownProperty	2d13cf7fc598
+cell	invalid/merge_on_match_property_unknown_on_plural_satisfying_node.cypher	invalid/schemas/satisfy_plural_property_diverges.gql	refuse	ErrUnknownProperty	f494174102c4
+cell	invalid/merge_on_match_property_unknown_on_plural_satisfying_node.cypher	invalid/schemas/satisfy_singular.gql	refuse	ErrUnknownProperty	2d13cf7fc598
+cell	invalid/merge_on_match_property_unknown_on_plural_satisfying_node.cypher	invalid/schemas/social.gql	refuse	ErrUnknownProperty	349d663739bc
+cell	invalid/merge_on_match_property_unknown_on_plural_satisfying_node.cypher	invalid/schemas/social_ambiguous.gql	refuse	ErrUnknownLabel	1c867a6623eb
+cell	invalid/merge_on_match_property_unknown_on_plural_satisfying_node.cypher	invalid/schemas/social_edgeunion.gql	refuse	ErrUnknownProperty	349d663739bc
+cell	invalid/merge_on_match_property_unknown_on_plural_satisfying_node.cypher	invalid/schemas/social_r2.gql	refuse	ErrUnknownProperty	349d663739bc
+cell	invalid/merge_on_match_property_unknown_on_plural_satisfying_node.cypher	invalid/schemas/social_r3.gql	refuse	ErrUnknownProperty	349d663739bc
+cell	invalid/merge_on_match_property_unknown_on_plural_satisfying_node.cypher	invalid/schemas/social_r3_nulldiff.gql	refuse	ErrUnknownProperty	349d663739bc
+cell	invalid/merge_on_match_property_unknown_on_plural_satisfying_node.cypher	invalid/schemas/social_r3_typediff.gql	refuse	ErrUnknownProperty	349d663739bc
+cell	invalid/merge_on_match_property_unknown_on_plural_satisfying_node.cypher	invalid/schemas/social_r5.gql	refuse	ErrUnknownProperty	349d663739bc
+cell	invalid/merge_on_match_property_unknown_on_plural_satisfying_node.cypher	invalid/schemas/social_r6.gql	refuse	ErrUnknownProperty	349d663739bc
+cell	invalid/merge_on_match_property_unknown_on_plural_satisfying_node.cypher	invalid/schemas/social_r7.gql	refuse	ErrUnknownProperty	349d663739bc
+cell	invalid/merge_on_match_property_unknown_on_plural_satisfying_node.cypher	valid/schemas/certificate.gql	refuse	ErrUnknownProperty	349d663739bc
+cell	invalid/merge_on_match_property_unknown_on_plural_satisfying_node.cypher	valid/schemas/multiround.gql	refuse	ErrUnknownLabel	1c867a6623eb
+cell	invalid/merge_on_match_property_unknown_on_plural_satisfying_node.cypher	valid/schemas/satisfy_implied_label_endpoint.gql	refuse	ErrUnknownLabel	1c867a6623eb
+cell	invalid/merge_on_match_property_unknown_on_plural_satisfying_node.cypher	valid/schemas/satisfy_plural_edges.gql	refuse	ErrUnknownProperty	2d13cf7fc598
+cell	invalid/merge_on_match_property_unknown_on_plural_satisfying_node.cypher	valid/schemas/satisfy_plural_edges_inline_subtype.gql	refuse	ErrUnknownProperty	2d13cf7fc598
+cell	invalid/merge_on_match_property_unknown_on_plural_satisfying_node.cypher	valid/schemas/satisfy_plural_edges_mixed_symmetry.gql	refuse	ErrUnknownProperty	0f92f5eeedc3
+cell	invalid/merge_on_match_property_unknown_on_plural_satisfying_node.cypher	valid/schemas/satisfy_plural_edges_reversed_subtype.gql	refuse	ErrUnknownLabel	1c867a6623eb
+cell	invalid/merge_on_match_property_unknown_on_plural_satisfying_node.cypher	valid/schemas/satisfy_plural_edges_symmetric.gql	refuse	ErrUnknownProperty	2d13cf7fc598
+cell	invalid/merge_on_match_property_unknown_on_plural_satisfying_node.cypher	valid/schemas/satisfy_singular.gql	refuse	ErrUnknownProperty	2d13cf7fc598
+cell	invalid/merge_on_match_property_unknown_on_plural_satisfying_node.cypher	valid/schemas/social.gql	refuse	ErrUnknownProperty	349d663739bc
+cell	invalid/merge_on_match_property_unknown_on_plural_satisfying_node.cypher	valid/schemas/social_edgeunion.gql	refuse	ErrUnknownProperty	349d663739bc
+cell	invalid/merge_on_match_property_unknown_on_plural_satisfying_node.cypher	valid/schemas/social_r1.gql	refuse	ErrUnknownProperty	349d663739bc
+cell	invalid/merge_on_match_property_unknown_on_plural_satisfying_node.cypher	valid/schemas/social_r2.gql	refuse	ErrUnknownProperty	349d663739bc
+cell	invalid/merge_on_match_property_unknown_on_plural_satisfying_node.cypher	valid/schemas/social_r3.gql	refuse	ErrUnknownProperty	349d663739bc
+cell	invalid/merge_on_match_property_unknown_on_plural_satisfying_node.cypher	valid/schemas/social_r3_unionnn.gql	refuse	ErrUnknownProperty	349d663739bc
+cell	invalid/merge_on_match_property_unknown_on_plural_satisfying_node.cypher	valid/schemas/social_r4.gql	refuse	ErrUnknownProperty	349d663739bc
+cell	invalid/merge_on_match_property_unknown_on_plural_satisfying_node.cypher	valid/schemas/social_r5.gql	refuse	ErrUnknownProperty	349d663739bc
+cell	invalid/merge_on_match_property_unknown_on_plural_satisfying_node.cypher	valid/schemas/social_r6.gql	refuse	ErrUnknownProperty	349d663739bc
+cell	invalid/merge_on_match_property_unknown_on_plural_satisfying_node.cypher	valid/schemas/social_r7.gql	refuse	ErrUnknownProperty	349d663739bc
+cell	invalid/merge_on_match_property_unknown_on_plural_satisfying_node.cypher	valid/schemas/social_selfloop.gql	refuse	ErrUnknownProperty	349d663739bc
 cell	invalid/merge_on_match_second_effect_unknown_property.cypher	invalid/schemas/certificate.gql	refuse	ErrUnknownProperty	3dc6fb1da3b2
 cell	invalid/merge_on_match_second_effect_unknown_property.cypher	invalid/schemas/edge_union_keys.gql	refuse	ErrUnknownProperty	e9c9ebb0ba1c
 cell	invalid/merge_on_match_second_effect_unknown_property.cypher	invalid/schemas/narrowed_ends_disagree.gql	refuse	ErrUnknownLabel	1c867a6623eb
