@@ -2123,7 +2123,7 @@ func witnessesItsEndpoints(e query.EdgeBinding, written map[string]struct{}, dem
 // the implication between the two guards cannot see it: rewriting
 // demoteAcrossEdges' gate to `e.Nullable() || !qualifiedDemoter(e)` leaves
 // TestEveryEdgeTheNarrowingLearnsFromAlsoDemotesItsEndpoints green — measured
-// on PR #2868's head and re-measured 2026-09-11 at 320ab129. What reds is the
+// on PR #2868's head and re-measured 2026-09-11 at bda2933d. What reds is the
 // corpus fixture valid/demote_group_cascade.cypher, three of whose six columns
 // type nullable once ay9's exemption is gone. That test's own comment
 // enumerates the guard holding each caller's side (bd gqlc-nmga, gqlc-3biy).
