@@ -349,6 +349,17 @@ func TestAnAmpersandBearingLabelKeysAsOneLabel(t *testing.T) {
 		}
 	})
 
+	// The negative control, and the reason the acceptances above do not read as
+	// "label validation was deleted". ErrAmpersandInLabel went because the key
+	// stopped colliding, not because a label stopped being checked: the three
+	// identifier refusals still stand at the same position, and a label that
+	// decodes to no name at all is still refused there. Without this, every row
+	// above would pass under a labelName that returned the raw token text.
+	t.Run("a label that names nothing is still refused", func(t *testing.T) {
+		_, err := parseSchema(t, "CREATE GRAPH TYPE G { (:``) }")
+		require.ErrorIs(t, err, gql.ErrEmptyIdentifier)
+	})
+
 	t.Run("the two sets it must not forge", func(t *testing.T) {
 		require.NotEqual(t, graph.LabelSet{"A", "B"}.Key(), graph.LabelSet{"A&B"}.Key(),
 			"the forgery: one label spelling itself as two")
