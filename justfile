@@ -1250,8 +1250,8 @@ test-bd-prime-guard:
 # property under test is what golangci-lint does with a broken tree and a stub
 # would only encode the belief about it.
 #
-# ENROLLED IN `just gates` AND IN ci.yml's lint job, unlike test-bd-prime-guard
-# above, which is what the second paragraph of that comment is asking for. It
+# ENROLLED IN `just gates` AND IN ci.yml's lint job, the same way
+# test-bd-prime-guard above is enrolled under `tidy`. It
 # rides `lint` rather than taking a context of its own: the job already provides
 # Go, just, the pinned golangci-lint and shellcheck, and a required context
 # added here is one a repository admin has to enable by hand before it blocks
