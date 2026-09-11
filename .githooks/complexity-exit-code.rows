@@ -8,7 +8,7 @@
 # non-zero code means it never got that far. The hook prints two different
 # messages off that distinction, and the wrong one sends an author looking for
 # a function to split over a package nothing measured (bd gqlc-f0x1, gqlc-i8j9,
-# gqlc-9nj3).
+# gqlc-9nj3, gqlc-3rgo).
 #
 # $1 is the justfile under test, defaulting to this repository's. It is a
 # parameter so that a mutation run can point these rows at a COPY of the real
@@ -153,6 +153,25 @@ else
     row nested-module-still-graded FAIL "rc=${rc}, expected 1 with a gocyclo row; output: ${out}"
 fi
 
+# G5: a package that merely needs FORMATTING still grades. The parse half of the
+# pre-flight runs `gofmt -l`, whose ordinary job is to NAME files that are
+# unformatted, and a pre-flight reading that naming as a failure would refuse
+# most mid-edit trees. It is the exit STATUS that is read and stdout is
+# discarded: `gofmt -l` exits 0 over a file it lists (measured 2026-09-11). It
+# is the only row that a pre-flight reading gofmt's OUTPUT instead of its status
+# fails on its own — measured in the form that keeps a parse error visible,
+# `module_parse_err="$(gofmt -l ... 2>&1 || true)"` with a non-empty test, which
+# left the other nine green.
+probe_dir "${root_probe_parent}"; d="${probe}"
+over_complex_go "${d}/a.go" probe
+printf '\nfunc  Unformatted( ) int {\nreturn    1\n}\n' >>"${d}/a.go"
+run_complexity "./${d}"
+if [ "${rc}" -eq 1 ] && [ "${out}" != "${out#*gocyclo}" ]; then
+    row unformatted-still-graded PASS "rc=1 and the report names gocyclo"
+else
+    row unformatted-still-graded FAIL "rc=${rc}, expected 1 with a gocyclo row; output: ${out}"
+fi
+
 # --- the load-failure rows ------------------------------------------------
 
 # L1: THE BEAD'S CASE (gqlc-9nj3). Two package clauses in one directory is a
@@ -197,27 +216,47 @@ else
     row no-go-file FAIL "rc=${rc}, expected a non-1 structural code; output: ${out}"
 fi
 
-# --- the row that pins a KNOWN GAP ----------------------------------------
-
-# X1: a file whose body does not PARSE reaches this recipe and still comes back
-# as 1, so the hook still prints the complexity sentence over a package nothing
-# graded. It is NOT covered by the pre-flight and is not meant to be: go/build
-# reads only as far as the imports, so `go list` loads this package at rc=0
-# (measured), and the comment in .githooks/pre-commit which claimed `just
-# fmt-check` catches it first is false — golangci-lint's formatters report an
-# unparseable file as a level=warning and the run exits 0 (measured 2026-09-11,
-# bd gqlc-3rgo).
+# L4: a file whose BODY does not parse. This row was written as
+# `parse-error-KNOWN-GAP` and asserted the opposite — rc=1, the misreport — so
+# that whoever closed bd gqlc-3rgo would be failed here and sent to the comment
+# rather than discovering the pin by accident. That worked, and this is the
+# flipped row.
 #
-# The row asserts the CURRENT behaviour rather than the desired one, so that
-# whoever closes that bead is failed here and sent to this comment instead of
-# discovering the pin by accident.
+# It is a separate row from L1 because the two are caught by different halves of
+# the pre-flight. `go list` cannot see this one: go/build reads only as far as
+# the imports, so it loads this package at rc=0 (measured), and what refuses it
+# is the `gofmt -l` parse over the exact file list `go list` named. Delete that
+# gofmt call and L1 stays green while this row goes red, which is the whole
+# reason to keep both.
+#
+# The claim in .githooks/pre-commit that `just fmt-check` catches an unparseable
+# file first was false and is gone: golangci-lint's formatters decline to format
+# a file they cannot parse, report it as a level=warning and exit 0 (measured
+# 2026-09-11), and the hook redirects both streams to /dev/null.
 probe_dir "${root_probe_parent}"; d="${probe}"
 printf 'package %s\n\nfunc Broken( {{{\n' probe >"${d}/a.go"
 run_complexity "./${d}"
-if [ "${rc}" -eq 1 ]; then
-    row parse-error-KNOWN-GAP PASS "rc=1 — still misreported as a finding, bd gqlc-3rgo"
+if [ "${rc}" -ne 0 ] && [ "${rc}" -ne 1 ]; then
+    row parse-error PASS "rc=${rc}, structural rather than 1"
 else
-    row parse-error-KNOWN-GAP FAIL "rc=${rc}: the gap may be closed; update this row and bd gqlc-3rgo"
+    row parse-error FAIL "rc=${rc}, expected a non-1 structural code; output: ${out}"
+fi
+
+# L5: the same, in a _test.go. Separate from L4 because the file list the parse
+# pre-flight walks is built from `go list`'s per-package file fields, and
+# GoFiles does not carry test files — TestGoFiles and XTestGoFiles do. Drop
+# those from the template and L4 stays green while this row reads rc=1, which is
+# a real reachable state: golangci-lint lints test files (run.tests defaults to
+# true) and a `_test.go` that does not parse arrives as 1 exactly as a non-test
+# file does (measured 2026-09-11).
+probe_dir "${root_probe_parent}"; d="${probe}"
+printf 'package %s\n\nfunc Fine() {}\n' probe >"${d}/a.go"
+printf 'package %s\n\nfunc TestBroken( {{{\n' probe >"${d}/a_test.go"
+run_complexity "./${d}"
+if [ "${rc}" -ne 0 ] && [ "${rc}" -ne 1 ]; then
+    row parse-error-in-test PASS "rc=${rc}, structural rather than 1"
+else
+    row parse-error-in-test FAIL "rc=${rc}, expected a non-1 structural code; output: ${out}"
 fi
 
 printf '\n%d passed, %d failed\n' "${pass}" "${fail}"
