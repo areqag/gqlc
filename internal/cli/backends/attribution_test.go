@@ -307,7 +307,7 @@ func declaredWidths(t *testing.T) []graph.PropertyType {
 	// logs below, do not reorder between runs over one vocabulary.
 	declared := slices.Sorted(maps.Keys(vocabulary))
 
-	widths := make([]graph.PropertyType, 0, 5*len(declared)+3)
+	widths := make([]graph.PropertyType, 0, 5*len(declared)+4)
 	for _, pt := range declared {
 		// RECORD<ANY> is swept as a bare width below and nowhere else,
 		// because two of its container forms cannot be asked about at
