@@ -402,6 +402,13 @@ var invalidFixtures = map[string]error{
 	"set_property_unknown_on_plural_satisfying_node.cypher":    ErrUnknownProperty,
 	"remove_property_unknown_on_plural_satisfying_node.cypher": ErrUnknownProperty,
 	"delete_property_unknown_on_plural_satisfying_node.cypher": ErrUnknownProperty,
+	// gqlc-l38k. The same arm under the two MERGE sub-clauses, which the three
+	// above do not reach. Their clause word is the one that cannot be read off
+	// the effect value — validateEffect receives it as an argument from the
+	// MERGE walk — so it is the only part of this lane a per-variant dispatch
+	// cannot get right by construction.
+	"merge_on_create_property_unknown_on_plural_satisfying_node.cypher": ErrUnknownProperty,
+	"merge_on_match_property_unknown_on_plural_satisfying_node.cypher":  ErrUnknownProperty,
 	// 0tft. Phase C narrows a plural endpoint to the node types its committed
 	// candidates put on that end of the pattern, intersected across every
 	// touching edge — so the refusal that survives the widening is the one
@@ -1254,6 +1261,35 @@ var invalidFixtureContains = map[string]string{
 	"set_property_unknown_on_plural_satisfying_node.cypher":    "SET p.employeeId missing on plural-satisfying type Person",
 	"remove_property_unknown_on_plural_satisfying_node.cypher": "REMOVE p.employeeId missing on plural-satisfying type Person",
 	"delete_property_unknown_on_plural_satisfying_node.cypher": "DELETE p.employeeId missing on plural-satisfying type Person",
+
+	// The same arm under the two MERGE sub-clauses, the last two of the six
+	// effectClause constants to reach it (bd gqlc-l38k). They are a separate
+	// entry rather than two more rows above because the clause word arrives by
+	// a different route: SET, REMOVE and DELETE each name themselves at the
+	// validator that owns them, while ON CREATE SET and ON MATCH SET are ONE
+	// validator — validateSetPropertyEffect, reached through validateMergeEffect
+	// — told which sub-clause it is running under by an argument from the MERGE
+	// walk.
+	//
+	// MERGE over a plural-satisfying label set does NOT refuse upstream for
+	// having no single type to create; it arrives here. That was in doubt when
+	// this was filed and is the reason these two were written rather than
+	// waived.
+	//
+	// Measured at a62cd30c: swapping clauseMergeOnCreate and clauseMergeOnMatch
+	// FOR EACH OTHER at the plural call site alone — leaving the singular arm
+	// beside it correct, so the defect is confined to this lane — moved 68
+	// manifest cells with 0 sentinel and 0 verdict changes and then went FULLY
+	// GREEN after -update, failing no hand-written test at any point. The two
+	// pins below are what that mutant now dies on.
+	//
+	// Do not reach for the same swap at validateMergeEffect's own call sites as
+	// evidence about this lane: merge_on_{create,match}_unknown_property.cypher
+	// pin the SINGULAR arm under their paired social_r6.gql, so a swap there is
+	// red before it ever reaches unionNodeProperty and says nothing about which
+	// arms are covered.
+	"merge_on_create_property_unknown_on_plural_satisfying_node.cypher": "ON CREATE SET p.employeeId missing on plural-satisfying type Person",
+	"merge_on_match_property_unknown_on_plural_satisfying_node.cypher":  "ON MATCH SET p.employeeId missing on plural-satisfying type Person",
 	// Both begin at the sentinel; see label_satisfy_plural_property above.
 	"unknown_property_union_missing.cypher":      "unknown property: property r.views missing on union member Person-[LIKES]->Post",
 	"unknown_property_union_type_differs.cypher": "unknown property: property r.weight type differs across union members: property:INT (not null) vs property:FLOAT (not null)",
