@@ -1005,6 +1005,67 @@ func TestDecodeVertexWithAnyProperty(t *testing.T) {
 	}
 }
 
+// TestUnionDecodersRefuseABodyWithNoAgtypeValueInIt reaches the one line
+// of the emitted union dispatch that no live AGE battery can hand an
+// input to.
+//
+// Both null lanes filter the value out before the decoder is asked: an
+// agtype null in a projected column arrives at pgx as SQL NULL, so the
+// emitted nil-guard skips the call outright, and AGE keeps no
+// null-valued property, so the nullable-property accessor returns on key
+// absence. agtype's output function emits no zero-length text for any
+// value either. A harness that hands the decoder its argument directly
+// is the only place this input exists, and this is that harness (bd
+// gqlc-6omn).
+//
+// The two member sets are not redundant coverage of one another. An
+// empty body reaches a different next line in each emitted shape: a set
+// claiming a self-delimiting family opens `switch body[0]`, which
+// INDEXES the empty slice, while one claiming only boolean and float
+// opens with a whole-token comparison, which does not. Without the
+// indexing union nothing here says the guard is what stops a panic;
+// without the other, the reason below is never compared against a
+// decoder that ran on to a refusal of its own.
+//
+// The REASON is asserted and not the verdict, because both refusals a
+// union decoder can return are errors and they say opposite things:
+// "is no member's wire shape" reports a value that arrived and belongs
+// to no member, which is the wrong account of a body with nothing in it.
+// The quoted raw is asserted beside it for the same reason — the guard
+// reports what it was handed, not what TrimSpace left.
+func TestUnionDecodersRefuseABodyWithNoAgtypeValueInIt(t *testing.T) {
+	unions := []struct {
+		name   string
+		decode func([]byte) (any, error)
+	}{
+		// First the set whose dispatch does not index body, so it runs
+		// to a return rather than to a panic when the guard is gone: a
+		// panic takes the whole child binary down with it, and what it
+		// takes down is every row declared after it.
+		{"UNION<BOOL|FLOAT64>", decodeUnion8b198fa4},
+		{"UNION<INT32|STRING>", decodeUnion2f53465c},
+	}
+	// Blank text is not a lighter case than the empty string. The guard
+	// reads what TrimSpace returned, so by the time it is measured a
+	// body of blanks IS the empty body — and a length check written
+	// against raw instead would admit every row below but the first.
+	bodies := []string{"", " ", "\t", "\r\n", "  \t \n "}
+	for _, u := range unions {
+		for _, raw := range bodies {
+			got, err := u.decode([]byte(raw))
+			if err == nil {
+				t.Errorf("decode %s given %q = %#v, want a refusal", u.name, raw, got)
+				continue
+			}
+			for _, want := range []string{"decode " + u.name, "is not an agtype value", strconv.Quote(raw)} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("decode %s given %q = %q, want it to mention %q", u.name, raw, err, want)
+				}
+			}
+		}
+	}
+}
+
 // slicesEqual is the corpus module's own comparison: the module requires
 // nothing, so testify is unavailable and this is one line rather than a
 // dependency. A nil slice and an empty one are not equal here: the graph
