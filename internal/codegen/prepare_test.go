@@ -1263,6 +1263,92 @@ func TestRecordSiteAliasCollidesWithAnEntityStruct(t *testing.T) {
 			`and record site alias "PlaceAddr" for entity "Place" property "addr"`)
 }
 
+// TestUnionHelperCollidesWithADecodeHelper pins source 10, and it is
+// source 8's situation exactly one namespace over: both colliding names
+// are generator-owned, so no capture guard can reach the pair.
+//
+// A union's helpers are named from a digest of its canonical encoding,
+// "decode" + "Union" + eight hex digits. An entity's decode helper is
+// "decode" + the entity struct name, and that name comes from a schema
+// label the author writes. So a label spelled exactly Union<the digest of
+// some union the same batch reaches> produces two declarations under one
+// name, and neither is at fault alone — which is why the message names
+// both.
+//
+// Driven through sweepIdentifiers rather than Prepare, for the reason
+// export_test.go exists: a union property is still refused by Phase A
+// today, so Prepare cannot be handed a batch that reaches this source.
+// When that refusal lifts, this row keeps measuring the sweep rather than
+// the front end that fed it.
+//
+// The digest is read from UnionHelperSuffix rather than written down. A
+// literal would pin today's hash of today's encoding, so a change to
+// either would leave the label naming nothing and the test passing while
+// witnessing no collision at all — green because the premise evaporated.
+func TestUnionHelperCollidesWithADecodeHelper(t *testing.T) {
+	union := graph.UnionOf([]graph.UnionMember{
+		{Type: graph.TypeString}, {Type: graph.TypeInt32},
+	})
+	collide := codegen.UnionHelperSuffix(union)
+
+	carrier := codegen.Entity{
+		Name:   "Person",
+		Fields: []codegen.EntityField{{PropName: "attr", Field: "Attr", GoType: "any", Width: union}},
+	}
+
+	require.NoError(t, codegen.SweepIdentifiers([]codegen.Entity{carrier}, nil),
+		"the control: the union group alone collides with nothing, so the row below witnesses a collision rather than a sweep that refuses every batch")
+
+	err := codegen.SweepIdentifiers([]codegen.Entity{carrier, {Name: collide}}, nil)
+	require.ErrorIs(t, err, codegen.ErrIdentifierCollision)
+	require.ErrorContains(t, err,
+		`emitted by both entity decode helper "decode`+collide+`" for entity struct "`+collide+`" `+
+			`and union `+string(union)+` decode helper "decode`+collide+`"`)
+}
+
+// TestEveryUnionHelperNameIsEnrolled holds the other three names of the
+// group. The collision row above can only witness the DECODE helper,
+// because "decode"+<entity struct> is the one other unexported
+// generator-owned name in that namespace — so without this row the three
+// encode names could go unenrolled and nothing would notice until `go
+// build` of the EMITTED package reported a redeclaration, with no line in
+// the author's schema to point at.
+//
+// Held against a query METHOD name, which is source 3 — the one source
+// that emits an arbitrary identifier rather than a derived one, so it can
+// be spelled as each of the four in turn. Every other unexported source
+// carries a fixed affix ("decode"+entity, bare+"QueryText") and so cannot
+// reach the three encode names at all.
+//
+// Driven off UnionHelperNames rather than a list repeated here, so a
+// fifth name added to the group arrives in this test with it, and the
+// empty-group control is what stops the loop passing by not running.
+func TestEveryUnionHelperNameIsEnrolled(t *testing.T) {
+	union := graph.UnionOf([]graph.UnionMember{
+		{Type: graph.TypeString}, {Type: graph.TypeInt32},
+	})
+	carrier := codegen.Entity{
+		Name:   "Person",
+		Fields: []codegen.EntityField{{PropName: "attr", Field: "Attr", GoType: "any", Width: union}},
+	}
+
+	names := codegen.UnionHelperNames(union)
+	require.NotEmpty(t, names, "the group is empty, so every row below is vacuous")
+	for _, name := range names {
+		t.Run(name, func(t *testing.T) {
+			twin := codegen.Query{MethodName: name}
+			require.NoError(t, codegen.SweepIdentifiers(nil, []codegen.Query{twin}),
+				"the per-row control: %q collides with nothing when the union is absent", name)
+
+			err := codegen.SweepIdentifiers([]codegen.Entity{carrier}, []codegen.Query{twin})
+			require.ErrorIs(t, err, codegen.ErrIdentifierCollision,
+				"%q is emitted by the union group and by a query method, and the sweep did not notice", name)
+			require.ErrorContains(t, err, `union `+string(union))
+			require.ErrorContains(t, err, strconv.Quote(name))
+		})
+	}
+}
+
 // goldenCorpusGlob reaches the committed golden trees from this package.
 // The conformance suite reads the same corpus through its own root, which
 // an env var can redirect at a copy; this sweep wants the tracked trees
