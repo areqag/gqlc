@@ -46,44 +46,7 @@ func renderRecordHelpers(pkg string, encodings []graph.PropertyType, uses map[gr
 		if use.encode || use.encodePtr || use.list {
 			writeRecordEncode(&body, pt, suffix, alias)
 		}
-		if use.encodePtr {
-			fmt.Fprintf(&body, `
-// encode%[1]sPtr binds a nullable %[2]s parameter: a nil pointer is the
-// Cypher null the schema's nullability declared, not a zero-valued map.
-func encode%[1]sPtr(v *%[2]s) any {
-	if v == nil {
-		return nil
-	}
-	return encode%[1]s(*v)
-}
-`, suffix, alias)
-		}
-		if use.list {
-			fmt.Fprintf(&body, `
-// encode%[1]sList widens a list of %[2]s parameters element by element.
-// The driver marshals no gqlc struct, so each element becomes its map
-// before the list reaches the wire.
-func encode%[1]sList(v []%[2]s) []any {
-	out := make([]any, len(v))
-	for i := range v {
-		out[i] = encode%[1]s(v[i])
-	}
-	return out
-}
-`, suffix, alias)
-		}
-		if use.listPtr {
-			fmt.Fprintf(&body, `
-// encode%[1]sListPtr binds a nullable list of %[2]s: a nil pointer is the
-// Cypher null the schema's nullability declared, not an empty list.
-func encode%[1]sListPtr(v *[]%[2]s) any {
-	if v == nil {
-		return nil
-	}
-	return encode%[1]sList(*v)
-}
-`, suffix, alias)
-		}
+		writeRecordWrappers(&body, pt, suffix, alias, use)
 		if use.decode {
 			writeRecordDecode(&body, pt, suffix, alias)
 		}
@@ -116,6 +79,104 @@ func encode%[1]sListPtr(v *[]%[2]s) any {
 	return []byte(b.String())
 }
 
+// writeRecordWrappers emits whichever of the three encode wrappers the
+// batch calls: the nullable one, the list one, and the nullable-list one.
+// They are together because they share one question the plain encoder
+// does not raise — whether this encoding's encode can FAIL, which it can
+// exactly when a field of it reaches a declared union, and which changes
+// each wrapper's return arity rather than its body.
+//
+// Split out of renderRecordHelpers because that fallibility doubles every
+// arm: six emissions behind four conditions is over the cognitive gate
+// this repository sets, and the split is along the seam the doubling
+// introduced rather than an arbitrary one.
+func writeRecordWrappers(body *strings.Builder, pt graph.PropertyType, suffix, alias string, use carrierUse) {
+	fallible := recordEncodeIsFallible(pt)
+	if use.encodePtr {
+		if fallible {
+			fmt.Fprintf(body, `
+// encode%[1]sPtr binds a nullable %[2]s parameter: a nil pointer is the
+// Cypher null the schema's nullability declared, not a zero-valued map.
+func encode%[1]sPtr(v *%[2]s) (any, error) {
+	if v == nil {
+		return nil, nil
+	}
+	return encode%[1]s(*v)
+}
+`, suffix, alias)
+		} else {
+			fmt.Fprintf(body, `
+// encode%[1]sPtr binds a nullable %[2]s parameter: a nil pointer is the
+// Cypher null the schema's nullability declared, not a zero-valued map.
+func encode%[1]sPtr(v *%[2]s) any {
+	if v == nil {
+		return nil
+	}
+	return encode%[1]s(*v)
+}
+`, suffix, alias)
+		}
+	}
+	if use.list {
+		if fallible {
+			fmt.Fprintf(body, `
+// encode%[1]sList widens a list of %[2]s parameters element by element.
+// The driver marshals no gqlc struct, so each element becomes its map
+// before the list reaches the wire.
+func encode%[1]sList(v []%[2]s) ([]any, error) {
+	out := make([]any, len(v))
+	for i := range v {
+		elem, err := encode%[1]s(v[i])
+		if err != nil {
+			return nil, fmt.Errorf(%[3]s, %[4]s, i, err)
+		}
+		out[i] = elem
+	}
+	return out, nil
+}
+`, suffix, alias, strconv.Quote("encode %s element %d: %w"), strconv.Quote(string(pt)))
+		} else {
+			fmt.Fprintf(body, `
+// encode%[1]sList widens a list of %[2]s parameters element by element.
+// The driver marshals no gqlc struct, so each element becomes its map
+// before the list reaches the wire.
+func encode%[1]sList(v []%[2]s) []any {
+	out := make([]any, len(v))
+	for i := range v {
+		out[i] = encode%[1]s(v[i])
+	}
+	return out
+}
+`, suffix, alias)
+		}
+	}
+	if use.listPtr {
+		if fallible {
+			fmt.Fprintf(body, `
+// encode%[1]sListPtr binds a nullable list of %[2]s: a nil pointer is the
+// Cypher null the schema's nullability declared, not an empty list.
+func encode%[1]sListPtr(v *[]%[2]s) (any, error) {
+	if v == nil {
+		return nil, nil
+	}
+	return encode%[1]sList(*v)
+}
+`, suffix, alias)
+		} else {
+			fmt.Fprintf(body, `
+// encode%[1]sListPtr binds a nullable list of %[2]s: a nil pointer is the
+// Cypher null the schema's nullability declared, not an empty list.
+func encode%[1]sListPtr(v *[]%[2]s) any {
+	if v == nil {
+		return nil
+	}
+	return encode%[1]sList(*v)
+}
+`, suffix, alias)
+		}
+	}
+}
+
 // writeRecordEncode emits encode<Suffix>: the field-by-field build of the
 // Cypher map one declared record binds as.
 //
@@ -143,25 +204,68 @@ func writeRecordEncode(b *strings.Builder, pt graph.PropertyType, suffix, alias 
 	if !ok {
 		return
 	}
+	fallible := recordEncodeIsFallible(pt)
 	fmt.Fprintf(b, "\n// encode%s builds the Cypher map a %s binds as.\n", suffix, alias)
-	fmt.Fprintf(b, "func encode%s(v %s) map[string]any {\n", suffix, alias)
+	if fallible {
+		fmt.Fprintf(b, "func encode%s(v %s) (map[string]any, error) {\n", suffix, alias)
+	} else {
+		fmt.Fprintf(b, "func encode%s(v %s) map[string]any {\n", suffix, alias)
+	}
 	if len(plan) == 0 {
 		// RECORD<> carries struct{}, so the parameter is named but never
 		// read. An empty composite literal keeps the signature uniform
-		// with every other encode helper.
+		// with every other encode helper. A record with no fields reaches
+		// no union, so the fallible form is unreachable here.
 		b.WriteString("\treturn map[string]any{}\n}\n")
 		return
 	}
+	binds := make([]string, len(plan))
+	for i, f := range plan {
+		param := codegen.Param{GoType: f.GoType, Nullable: f.Nullable, Width: f.Width}
+		binds[i] = paramBindExpr(param, "v."+f.Field)
+		if !paramBindIsFallible(param) {
+			continue
+		}
+		// A field whose bind validates against a union's member set is
+		// hoisted for writeParamPrelude's reason one level out: the map is
+		// a composite literal and has no room for the error check that
+		// refusal exists to raise.
+		local := fmt.Sprintf("f%d", i)
+		fmt.Fprintf(b, "\t%s, err := %s\n", local, binds[i])
+		format, args := recordFail(pt, f.Key, 0, "%w")
+		fmt.Fprintf(b, "\tif err != nil {\n\t\treturn nil, fmt.Errorf(%s, %s, err)\n\t}\n", format, args)
+		binds[i] = local
+	}
 	b.WriteString("\treturn map[string]any{\n")
-	for _, f := range plan {
-		bind := paramBindExpr(codegen.Param{
-			GoType:   f.GoType,
-			Nullable: f.Nullable,
-			Width:    f.Width,
-		}, "v."+f.Field)
-		fmt.Fprintf(b, "\t\t%q: %s,\n", f.Key, bind)
+	for i, f := range plan {
+		fmt.Fprintf(b, "\t\t%q: %s,\n", f.Key, binds[i])
+	}
+	if fallible {
+		b.WriteString("\t}, nil\n}\n")
+		return
 	}
 	b.WriteString("\t}\n}\n")
+}
+
+// recordEncodeIsFallible reports whether this record's emitted encode
+// helper answers (value, error) rather than a value.
+//
+// Exactly the records that reach a closed union, through their own fields
+// or through a list or a nested record under one. A union validates
+// against its declared member set at BIND time (spec §4), so a record
+// standing above one cannot promise to build its map; every other record
+// encode is a field-by-field copy with nothing to refuse, and a helper
+// declared to return an error it can never raise is plumbing every caller
+// is made to check.
+//
+// A separate function rather than the expression inlined at the four
+// sites that ask it — the body, the two wrappers and the caller's
+// fallibility test — so the four cannot drift on which records they
+// consider fallible. A drift there is a signature mismatch in the
+// EMITTED package, which `go build` reports with no line in the schema
+// to point at.
+func recordEncodeIsFallible(pt graph.PropertyType) bool {
+	return codegen.ReachesUnion(pt)
 }
 
 // writeRecordDecode emits decode<Suffix>: the field-by-field check of a
@@ -264,6 +368,55 @@ func recordFail(pt graph.PropertyType, key string, depth int, tail string) (form
 // the depth, so an element that fails still names the declared field it
 // belongs to.
 func writeRecordValueDecode(b *strings.Builder, pt graph.PropertyType, key string, depth int, goType string, width graph.PropertyType, src, indent string, next func() string) string {
+	site := decodeSite{
+		zero: "out",
+		fail: func(depth int, tail string) (format, args string) {
+			return recordFail(pt, key, depth, tail)
+		},
+	}
+	return writeValueDecode(b, site, depth, goType, width, src, indent, next)
+}
+
+// decodeSite is the two things a value-decode walk differs on between its
+// callers: what a failing return hands back BESIDE the error, and how a
+// failure is worded at a given list depth.
+//
+// Two fields rather than two walks. The record helper returns
+// (RecordAlias, error) and words its failures around a declared field
+// name; the union helper returns (any, error) and words its failures
+// around a declared union. Everything between those two facts — the
+// assertion to the driver carrier, the per-element descent, the checked
+// narrowing and its error plumbing — is one rule, and a second copy of it
+// would be a second chance for the two to disagree about, say, whether a
+// nullable list element is asserted before or after its nil check.
+type decodeSite struct {
+	zero string
+	fail func(depth int, tail string) (format, args string)
+}
+
+// writeValueDecode emits the statements that turn one driver value — src,
+// an expression of static type any — into a value of goType, and answers
+// the name of the local it bound the result to. Every arm binds one, so
+// the caller assigns or takes the address of a name it did not have to
+// predict.
+//
+// Recursive through list levels, because the driver hands every array
+// back as []any whatever the elements are. A nested DECLARED record and a
+// nested DECLARED union are NOT recursed into here: each is its own entry
+// in its own encoding set with its own emitted helper, which this names —
+// inlining either would emit the same body once per reference.
+func writeValueDecode(b *strings.Builder, site decodeSite, depth int, goType string, width graph.PropertyType, src, indent string, next func() string) string {
+	if codegen.IsDeclaredUnion(goType, width) {
+		// A closed union carries as `any`, so it would otherwise take the
+		// shapeless arm below and be handed over undispatched. Asked
+		// FIRST, and on the pair rather than on the text, because the
+		// text it shares with ANY VALUE is the one arm that must keep
+		// assigning bare.
+		out := next()
+		fmt.Fprintf(b, "%s%s, err := decode%s(%s)\n", indent, out, codegen.UnionHelperSuffix(width), src)
+		writeValueDecodeFail(b, site, depth, indent)
+		return out
+	}
 	if !ridesADriverCarrier(goType) {
 		// ANY VALUE has no carrier to assert against: `x.(any)` is false
 		// for exactly the null that width exists to hold. The driver
@@ -276,16 +429,32 @@ func writeRecordValueDecode(b *strings.Builder, pt graph.PropertyType, key strin
 	held := next()
 	fmt.Fprintf(b, "%s%s, ok := %s.(%s)\n", indent, held, src, carrier)
 	fmt.Fprintf(b, "%sif !ok {\n", indent)
-	format, args := recordFail(pt, key, depth, "expected "+carrier+", got %T")
-	fmt.Fprintf(b, "%s\treturn out, fmt.Errorf(%s, %s, %s)\n", indent, format, args, src)
+	format, args := site.fail(depth, "expected "+carrier+", got %T")
+	fmt.Fprintf(b, "%s\treturn %s, fmt.Errorf(%s, %s, %s)\n", indent, site.zero, format, args, src)
 	fmt.Fprintf(b, "%s}\n", indent)
+	return writeCarrierNarrow(b, site, depth, goType, width, carrier, held, indent, next)
+}
 
+// writeCarrierNarrow emits the narrowing of a value ALREADY held at its
+// driver carrier down to the declared Go type, and answers the local it
+// bound. Split from writeValueDecode because the union decode reaches it
+// with the assertion already made: its type switch IS the assertion, and
+// re-asserting inside an arm would emit a check the arm just proved.
+func writeCarrierNarrow(b *strings.Builder, site decodeSite, depth int, goType string, width graph.PropertyType, carrier, held, indent string, next func() string) string {
 	switch {
-	case isSliceType(goType):
+	case walksElements(goType, width):
 		acc, idx, elem := next(), next(), next()
 		fmt.Fprintf(b, "%s%s := make(%s, len(%s))\n", indent, acc, goType, held)
 		fmt.Fprintf(b, "%sfor %s, %s := range %s {\n", indent, idx, elem, held)
-		got := writeRecordValueDecode(b, pt, key, depth+1, strings.TrimPrefix(goType, "[]"), width.Elem(), elem, indent+"\t", next)
+		if unionElementIsNullable(goType, width) {
+			// The one element shape whose null cannot be left to the
+			// value walk: a union's decode dispatches on the wire shape,
+			// and a nil element belongs to no member. On every other
+			// element type the null is either impossible or already
+			// carried by a star this walk asserts through.
+			fmt.Fprintf(b, "%s\tif %s == nil {\n%s\t\tcontinue\n%s\t}\n", indent, elem, indent, indent)
+		}
+		got := writeValueDecode(b, site, depth+1, strings.TrimPrefix(goType, "[]"), width.Elem(), elem, indent+"\t", next)
 		fmt.Fprintf(b, "%s\t%s[%s] = %s\n", indent, acc, idx, got)
 		fmt.Fprintf(b, "%s}\n", indent)
 		return acc
@@ -296,13 +465,57 @@ func writeRecordValueDecode(b *strings.Builder, pt graph.PropertyType, key strin
 	case carrier != goType:
 		out := next()
 		fmt.Fprintf(b, "%s%s, err := %s\n", indent, out, narrowCall(goType, width, held))
-		fmt.Fprintf(b, "%sif err != nil {\n", indent)
-		failFormat, failArgs := recordFail(pt, key, depth, "%w")
-		fmt.Fprintf(b, "%s\treturn out, fmt.Errorf(%s, %s, err)\n", indent, failFormat, failArgs)
-		fmt.Fprintf(b, "%s}\n", indent)
+		writeValueDecodeFail(b, site, depth, indent)
 		return out
 	}
 	return held
+}
+
+// writeValueDecodeFail emits the `if err != nil` that wraps a fallible
+// narrowing's error in the site's own wording. One function because the
+// three fallible arms — the union dispatch, the checked numeric narrow
+// and the nested record decode — all report through %w and differ in
+// nothing else.
+func writeValueDecodeFail(b *strings.Builder, site decodeSite, depth int, indent string) {
+	fmt.Fprintf(b, "%sif err != nil {\n", indent)
+	format, args := site.fail(depth, "%w")
+	fmt.Fprintf(b, "%s\treturn %s, fmt.Errorf(%s, %s, err)\n", indent, site.zero, format, args)
+	fmt.Fprintf(b, "%s}\n", indent)
+}
+
+// walksElements reports whether a decode has to narrow a driver []any
+// element by element rather than hand it over whole.
+//
+// isSliceType is the ordinary answer and excludes []any, because an ANY
+// element is already the value the caller is handed and asserting it
+// would fail on exactly the null that width carries. A LIST of a DECLARED
+// UNION is the one []any that is not that case: its elements have a
+// member set to be narrowed to, and handing the slice over whole would
+// deliver the driver's widened int64 out of an INT32 member — the exact
+// thing declaring the member list buys (spec §4).
+func walksElements(goType string, width graph.PropertyType) bool {
+	return isSliceType(goType) || isUnionList(goType, width)
+}
+
+// isUnionList reports whether a carrier text and the width beside it are a
+// list whose ELEMENTS are closed unions.
+//
+// Both halves for IsDeclaredUnion's reason, one container out: `[]any` is
+// also LIST<ANY VALUE>'s carrier and LIST<ANY PROPERTY VALUE>'s, and
+// neither has a member set — a site reading the text alone would name a
+// helper for every ANY-element list in the batch.
+func isUnionList(goType string, width graph.PropertyType) bool {
+	return goType == "[]"+codegen.UnionCarrierText && width.Kind() == graph.KindList &&
+		codegen.IsDeclaredUnion(codegen.UnionCarrierText, width.Elem())
+}
+
+// unionElementIsNullable reports whether a walked list's elements are
+// closed unions the schema permits to be NULL. Read off the width rather
+// than off the text, because a union element carries no star: `any` holds
+// its own null and typeMap.Property deliberately does not star it.
+func unionElementIsNullable(goType string, width graph.PropertyType) bool {
+	return walksElements(goType, width) && !width.ElemNotNull() &&
+		codegen.IsDeclaredUnion(codegen.UnionCarrierText, width.Elem())
 }
 
 // recordFileImports answers which imports the emitted record file names,

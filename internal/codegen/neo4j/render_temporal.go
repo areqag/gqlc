@@ -67,9 +67,10 @@ type carrierUse struct {
 // the leafType the temporal side marks on hands back the whole struct
 // and no carrier inside it is ever named — while the record's emitted
 // helper pair calls those carriers' conversions by name.
-func conversionUses(prepared codegen.Prepared) (map[string]carrierUse, map[graph.PropertyType]carrierUse) {
+func conversionUses(prepared codegen.Prepared) (map[string]carrierUse, map[graph.PropertyType]carrierUse, map[graph.PropertyType]carrierUse) {
 	temporal := make(map[string]carrierUse)
 	records := make(map[graph.PropertyType]carrierUse)
+	unions := make(map[graph.PropertyType]carrierUse)
 	markTemporal := func(goType string, set func(*carrierUse)) {
 		name := leafType(goType)
 		if !isTemporalCarrier(name) {
@@ -84,6 +85,11 @@ func conversionUses(prepared codegen.Prepared) (map[string]carrierUse, map[graph
 		set(&use)
 		records[encoding] = use
 	}
+	markUnion := func(encoding graph.PropertyType, set func(*carrierUse)) {
+		use := unions[encoding]
+		set(&use)
+		unions[encoding] = use
+	}
 
 	// Decode needs no nullability, in either kind: to<X> and
 	// decode<Suffix> are the same call either way, because a missing key
@@ -91,6 +97,13 @@ func conversionUses(prepared codegen.Prepared) (map[string]carrierUse, map[graph
 	setDecode := func(u *carrierUse) { u.decode = true }
 	var markDecode func(goType string, width graph.PropertyType)
 	markDecode = func(goType string, width graph.PropertyType) {
+		if members, ok := unionLeafMembers(goType, width); ok {
+			markUnion(leafWidth(width), setDecode)
+			for _, m := range members {
+				markDecode(m.GoType, m.Width)
+			}
+			return
+		}
 		if fields, ok := recordLeafFields(goType, width); ok {
 			markRecord(leafWidth(width), setDecode)
 			for _, f := range fields {
@@ -108,30 +121,18 @@ func conversionUses(prepared codegen.Prepared) (map[string]carrierUse, map[graph
 	// then calls encode<X>, which builds every field the same way.
 	var markEncode func(goType string, width graph.PropertyType, nullable bool)
 	markEncode = func(goType string, width graph.PropertyType, nullable bool) {
-		set := func(u *carrierUse) {
-			switch {
-			case isSliceType(goType):
-				// A list parameter converts per element, so what it
-				// needs is the plain helper at the leaf plus the list
-				// helper that calls it — never the Ptr form, whose
-				// nil-to-Cypher-null job belongs to the list helper.
-				u.encode = true
-				// A nullable ELEMENT owes a DIFFERENT list helper, not a
-				// flag on this one: the two take incompatible parameter
-				// types ([]X and []*X), so marking both would emit a
-				// helper nothing calls.
-				if listElemIsNullable(goType) {
-					u.listElem = true
-					u.listElemPtr = u.listElemPtr || nullable
-					return
-				}
-				u.list = true
-				u.listPtr = u.listPtr || nullable
-			case nullable:
-				u.encodePtr = true
-			default:
-				u.encode = true
+		set := encodeDirection(goType, width, nullable)
+		if members, ok := unionLeafMembers(goType, width); ok {
+			markUnion(leafWidth(width), set)
+			// A member is marked as a NON-nullable, NON-list parameter
+			// whatever the position above it was: encode<Suffix>'s arms
+			// each hold a value already known to be that member, and the
+			// outer nullability was spent by the Ptr wrapper one call
+			// earlier — exactly the rule the record branch states.
+			for _, m := range members {
+				markEncode(m.GoType, m.Width, false)
 			}
+			return
 		}
 		if fields, ok := recordLeafFields(goType, width); ok {
 			markRecord(leafWidth(width), set)
@@ -159,7 +160,65 @@ func conversionUses(prepared codegen.Prepared) (map[string]carrierUse, map[graph
 			markEncode(f.GoType, f.Width, f.Nullable)
 		}
 	}
-	return temporal, records
+	return temporal, records, unions
+}
+
+// encodeDirection answers which encode helper ONE parameter position
+// reaches for, as the mutation conversionUses applies to whichever
+// carrier's flags that position lands on.
+//
+// A function of the position alone rather than a closure over the walk,
+// because the answer depends on nothing the walk accumulates: the shape
+// and the nullability are the whole question. That is what lets the same
+// answer be applied to a temporal carrier, a record encoding and a union
+// encoding without the walk restating the rules once per kind.
+func encodeDirection(goType string, width graph.PropertyType, nullable bool) func(*carrierUse) {
+	return func(u *carrierUse) {
+		switch {
+		case walksElements(goType, width):
+			// A list parameter converts per element, so what it needs is
+			// the plain helper at the leaf plus the list helper that calls
+			// it — never the Ptr form, whose nil-to-Cypher-null job belongs
+			// to the list helper.
+			u.encode = true
+			// A nullable ELEMENT owes a DIFFERENT list helper, not a flag
+			// on this one: the two take incompatible parameter types ([]X
+			// and []*X), so marking both would emit a helper nothing calls.
+			if listElemIsNullable(goType) {
+				u.listElem = true
+				u.listElemPtr = u.listElemPtr || nullable
+				return
+			}
+			u.list = true
+			u.listPtr = u.listPtr || nullable
+		case nullable:
+			u.encodePtr = true
+		default:
+			u.encode = true
+		}
+	}
+}
+
+// unionLeafMembers answers the member plan of the DECLARED closed union at
+// the leaf of a carrier, if there is one.
+//
+// The leaf rather than the carrier itself, for recordLeafFields' reason: a
+// LIST<UNION<…>> reaches its members' conversions too, because the emitted
+// encode<Suffix>List calls encode<Suffix> per element and that helper's
+// arms call each member's own conversion by name. A test on the outer
+// width alone would see KindList and descend into nothing.
+//
+// ok=false covers two negatives on purpose — not a union, and a union some
+// member of which this backend cannot carry. The second cannot arrive
+// here, because a refused union fails preparation before any emission walk
+// runs; it is folded in rather than distinguished so a caller has one
+// question to ask and no unreachable arm to write.
+func unionLeafMembers(goType string, width graph.PropertyType) ([]codegen.UnionMemberPlan, bool) {
+	leaf, elem := leafType(goType), leafWidth(width)
+	if !codegen.IsDeclaredUnion(leaf, elem) {
+		return nil, false
+	}
+	return codegen.UnionMembers(elem, typeMap{}.Property)
 }
 
 // recordLeafFields answers the field plan of the DECLARED record at the
@@ -324,7 +383,19 @@ func narrowCall(goType string, width graph.PropertyType, src string) string {
 // fails the emitted package's own lint fence, so an over-broad gate
 // reds the fixture rather than merely emitting a dead line.
 func narrowsANumericWidth(entities []codegen.Entity, prepared []codegen.Query) (ints, floats bool) {
-	visit := func(goType string) {
+	var visit func(goType string, width graph.PropertyType)
+	visit = func(goType string, width graph.PropertyType) {
+		if members, ok := unionLeafMembers(goType, width); ok {
+			// A union's own carrier is `any`, so the leaf test below would
+			// stop here and the narrowing its decode arms call would be
+			// emitted with no declaration. The members ARE the narrowed
+			// widths — that is the whole of what the member list buys
+			// (spec §4) — so the descent is not optional.
+			for _, m := range members {
+				visit(m.GoType, m.Width)
+			}
+			return
+		}
 		leaf := leafType(goType)
 		if leaf == driverCarrier(leaf) || isTemporalCarrier(leaf) {
 			return
@@ -345,14 +416,14 @@ func narrowsANumericWidth(entities []codegen.Entity, prepared []codegen.Query) (
 	}
 	for _, e := range entities {
 		for _, f := range e.Fields {
-			visit(f.GoType)
+			visit(f.GoType, f.Width)
 		}
 	}
 	for _, p := range prepared {
 		for _, f := range p.RowFields {
-			visit(f.GoType)
+			visit(f.GoType, f.Width)
 			for elem := f.ListElem; elem != nil; elem = elem.Nested {
-				visit(elem.GoType)
+				visit(elem.GoType, elem.Width)
 			}
 		}
 	}
