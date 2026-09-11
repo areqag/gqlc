@@ -252,8 +252,8 @@ func nameBackend(err error) error {
 }
 
 // carriedByNoBackend reports whether a width is one spec §9 puts out of
-// reach of every enrolled target rather than of this one — the eight
-// oversized numerics, at any container depth.
+// reach of every enrolled target rather than of this one —
+// uncarriedEverywhere, at any container depth.
 //
 // This is a claim about backends this package cannot see, which is why it
 // is not asserted here: TestAContingentRefusalNamesItsBackend
@@ -279,8 +279,28 @@ func carriedByNoBackend(pt graph.PropertyType) bool {
 			return carriedByNoBackend(f.Type)
 		})
 	}
-	return slices.Contains(oversizedNumerics, pt)
+	return slices.Contains(uncarriedEverywhere, pt)
 }
+
+// uncarriedEverywhere is the set carriedByNoBackend answers true for: the
+// widths no enrolled target carries, so that a refusal of one withholds
+// this backend's name.
+//
+// It is oversizedNumerics plus graph.TypeUUID, and the two are kept as
+// separate lists because they are claims of different durability rather
+// than one list someone split. The eight below are permanent under spec
+// §9 — no Go builtin is that wide and none is coming. UUID is here
+// because no target carries it TODAY and neo4j's driver already ships
+// dbtype.UUID at v6.2.0: stage 2 of bd gqlc-eg4b gives neo4j-go-v6 that
+// carrier, and on the day it does, UUID divides the roster, this entry
+// becomes false, and the refusal below starts owing the AGE name. The
+// composition root reds when that happens
+// (TestAContingentRefusalNamesItsBackend), which is the intended way for
+// it to be noticed, so removing this entry is part of landing stage 2
+// and not a separate cleanup.
+var uncarriedEverywhere = slices.Concat(oversizedNumerics, []graph.PropertyType{
+	graph.TypeUUID,
+})
 
 // oversizedNumerics are the eight widths of spec §9 — the numerics wider
 // than any Go builtin, and the arbitrary-precision decimal. They are

@@ -20,24 +20,98 @@ import (
 
 const grammarPath = "../../grammar/gql/GQL.g4"
 
-// grammarSHA256 is the vendored grammar's hash, recorded in
-// internal/grammar/gql/SOURCE.md as byte-identical to upstream
-// antlr/grammars-v4. Every claim in that file — the artefact list, the ISO
-// production-name comparison, the reasons the word "faithful" was withdrawn —
-// is about the upstream file, so an in-place edit here would silently make the
-// note describe a grammar we no longer have.
-const grammarSHA256 = "e1b4a24c6b88dedddc0a1fff97df0fc30bf118cea51539e26d71c717cb737bbf"
+// grammarSHA256 is the vendored grammar's hash AS IT SITS IN THE TREE, which
+// since gqlc-eg4b is upstream antlr/grammars-v4 plus the insertions in
+// localInsertions and nothing else. It is no longer upstream's own hash — that
+// is upstreamSHA256 — and the two must not be confused: every claim in
+// internal/grammar/gql/SOURCE.md outside its "Local modifications" section is a
+// statement about the upstream file, and a drift re-fetch is compared against
+// upstreamSHA256.
+const grammarSHA256 = "25a7e536b7e6ab6b539aaca0af5347e979f29db5880dc2ddd7149251d382ecb9"
+
+// upstreamSHA256 is the hash of the file as vendored, before gqlc's own
+// additions: the value SOURCE.md's two re-fetch commands are checked against.
+// Held here rather than only in prose so the claim "we changed exactly this and
+// nothing else" is a test rather than a promise.
+const upstreamSHA256 = "e1b4a24c6b88dedddc0a1fff97df0fc30bf118cea51539e26d71c717cb737bbf"
+
+// localInsertions is every byte gqlc has added to the vendored grammar. Both
+// entries are pure insertions — no upstream line is edited, reordered or
+// removed — which is what lets TestVendoredGrammarLocalDeltaIsDeclared recover
+// upstream's bytes by deleting them.
+//
+// Keeping the delta as removable text rather than as prose is the point. A bare
+// hash re-pin would record THAT the file changed and leave SOURCE.md's re-fetch
+// procedure permanently unequal with nothing to reconcile it; a reviewer would
+// have to trust a sentence. Rejected alternatives: checking in a pristine copy
+// of a 3774-line file whose whole premise is that there is one copy, and
+// leaving GQL.g4 pristine while patching it inside build-grammar — the second
+// silently breaks the corpus census, which reads this file's text as the
+// definition of the reachable grammar and would then be pinning a grammar that
+// is not the one compiled.
+var localInsertions = []string{
+	`    // gqlc extension, appended last. ISO/IEC 39075 <predefined type> has no
+    // UUID alternative and neither does Cypher 25, so the bare UUID keyword
+    // is gqlc's own proposal (bd gqlc-do1 DESIGN). Appended rather than
+    // inserted because ANTLR resolves an ambiguity by alternative order and
+    // this grammar has been bitten by an unreachable alternative before; last
+    // position cannot shadow an alternative that already decided.
+    | uuidType
+    ;
+
+// gqlc extension. UUID carries no parameters — no length, no precision, no
+// element type — so it needs no parenthetical and the rule is the keyword and
+// the qualifier alone.
+//
+// UUID is RESERVED, like every other type keyword this grammar declares
+// (DATE, DURATION, DECIMAL and the rest) and unlike the ISO
+// <non-reserved word> list, which UUID is not a member of because ISO does
+// not know the word. A property, label or variable spelled uuid therefore
+// stops lexing as an identifier — the escape hatch is the delimited spelling,
+// accent-quoted or double-quoted, pinned by
+// TestPropertyUUIDReservedWordEscapeHatch.
+uuidType
+    : UUID notNull?
+`,
+	"UUID: 'UUID';\n",
+}
 
 // TestVendoredGrammarIsUnmodified fails on any edit to GQL.g4. Editing it is not
-// forbidden — but the change belongs upstream first, and re-pinning here without
-// re-reading SOURCE.md is the failure mode this catches. It cannot see upstream
-// drift; that is a network check, and gqlc-4jm's scope.
+// forbidden — but an ISO-shaped change belongs upstream first, and re-pinning
+// here without re-reading SOURCE.md is the failure mode this catches. It cannot
+// see upstream drift; that is a network check, and gqlc-4jm's scope.
 func TestVendoredGrammarIsUnmodified(t *testing.T) {
 	src, err := os.ReadFile(grammarPath)
 	require.NoError(t, err)
 	require.Equal(t, grammarSHA256, fmt.Sprintf("%x", sha256.Sum256(src)),
 		"GQL.g4 no longer matches the hash internal/grammar/gql/SOURCE.md vendors it under: "+
 			"if the edit is intended, re-verify that file's provenance section and re-pin grammarSHA256")
+}
+
+// TestVendoredGrammarLocalDeltaIsDeclared is the half TestVendoredGrammarIsUnmodified
+// cannot do. That one says the file is the file we last looked at; this one says
+// what in it is ours. Deleting every declared insertion must leave upstream's
+// bytes exactly, so an undeclared edit to an upstream line fails here even
+// though re-pinning the whole-file hash would have hidden it.
+func TestVendoredGrammarLocalDeltaIsDeclared(t *testing.T) {
+	src, err := os.ReadFile(grammarPath)
+	require.NoError(t, err)
+
+	stripped := string(src)
+	for _, ins := range localInsertions {
+		require.Equal(t, 1, strings.Count(stripped, ins),
+			"a localInsertions entry must appear in GQL.g4 exactly once; "+
+				"zero means the delta was reverted or reworded without updating this table, "+
+				"and more than one means it is not the unique region it claims to be:\n%s", ins)
+		stripped = strings.Replace(stripped, ins, "", 1)
+	}
+
+	require.Equal(t, upstreamSHA256, fmt.Sprintf("%x", sha256.Sum256([]byte(stripped))),
+		"GQL.g4 with every declared local insertion removed is not upstream's file: "+
+			"something was changed in place rather than inserted, or an insertion is declared "+
+			"with different bytes than it carries. Add the new region to localInsertions and to "+
+			"internal/grammar/gql/SOURCE.md's Local modifications section — do not repin upstreamSHA256, "+
+			"which is upstream's hash and moves only when upstream does")
 }
 
 // coverageRoots is the one rule every corpus file must enter, and the corpus'
@@ -232,6 +306,7 @@ var (
 		"unsignedBinaryExactNumericType",
 		"unsignedDecimalInteger",
 		"unsignedInteger",
+		"uuidType",
 		"valueType",
 		"verboseBinaryExactNumericType",
 	}
@@ -359,6 +434,7 @@ var (
 		"UNSIGNED_HEXADECIMAL_INTEGER",
 		"UNSIGNED_OCTAL_INTEGER",
 		"USMALLINT",
+		"UUID",
 		"VALUE",
 		"VARBINARY",
 		"VARCHAR",

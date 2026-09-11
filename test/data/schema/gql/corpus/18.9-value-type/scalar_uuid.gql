@@ -1,0 +1,6 @@
+CREATE PROPERTY GRAPH TYPE Seed AS {
+    (:Account {
+        id :: UUID NOT NULL,
+        previousId :: UUID
+    })
+}

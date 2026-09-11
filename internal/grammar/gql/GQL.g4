@@ -1745,6 +1745,28 @@ predefinedType
     | temporalType
     | referenceValueType
     | immaterialValueType
+    // gqlc extension, appended last. ISO/IEC 39075 <predefined type> has no
+    // UUID alternative and neither does Cypher 25, so the bare UUID keyword
+    // is gqlc's own proposal (bd gqlc-do1 DESIGN). Appended rather than
+    // inserted because ANTLR resolves an ambiguity by alternative order and
+    // this grammar has been bitten by an unreachable alternative before; last
+    // position cannot shadow an alternative that already decided.
+    | uuidType
+    ;
+
+// gqlc extension. UUID carries no parameters — no length, no precision, no
+// element type — so it needs no parenthetical and the rule is the keyword and
+// the qualifier alone.
+//
+// UUID is RESERVED, like every other type keyword this grammar declares
+// (DATE, DURATION, DECIMAL and the rest) and unlike the ISO
+// <non-reserved word> list, which UUID is not a member of because ISO does
+// not know the word. A property, label or variable spelled uuid therefore
+// stops lexing as an identifier — the escape hatch is the delimited spelling,
+// accent-quoted or double-quoted, pinned by
+// TestPropertyUUIDReservedWordEscapeHatch.
+uuidType
+    : UUID notNull?
     ;
 
 booleanType
@@ -3479,6 +3501,7 @@ UNSIGNED: 'UNSIGNED';
 UPPER: 'UPPER';
 USE: 'USE';
 USMALLINT: 'USMALLINT';
+UUID: 'UUID';
 VALUE: 'VALUE';
 VARBINARY: 'VARBINARY';
 VARCHAR: 'VARCHAR';

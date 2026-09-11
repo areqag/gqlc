@@ -255,6 +255,19 @@ func (t typeMap) Property(pt graph.PropertyType) (string, bool) {
 		// "map[string]any" keeps it agreeing with the arm that does the
 		// work — the arrangement graph.TypeList already has.
 		return "map[string]any", true
+	case graph.TypeUUID:
+		// agtype's value vocabulary is boolean / integer / float /
+		// string / list / map and nothing else, so there is no shape a
+		// 128-bit identifier comes back from the server as itself in. A
+		// string carrier would round-trip the SPELLING and drop the
+		// declared type, which is the silent widening §5.1 exists to
+		// refuse.
+		//
+		// The refusal carries NO backend name today, because no
+		// enrolled target carries UUID either — see
+		// uncarriedEverywhere, which is where that claim is made and
+		// where the note on when it stops being true lives.
+		return "", false
 	case graph.TypeBytes,
 		graph.TypeInt128, graph.TypeInt256,
 		graph.TypeUint128, graph.TypeUint256,

@@ -102,7 +102,11 @@ const (
 	// outermost context and its fields never read, so a duplicate among them was
 	// unreachable; the encoding that made fields resolve is what made the
 	// duplicate a question with an answer.
-	wantCorpusEntries = 137
+	// 137 → 138 under gqlc-eg4b: 18.9-value-type/scalar_uuid.gql, the first
+	// corpus file whose construct is not ISO's. The UUID keyword is gqlc's own
+	// addition to GQL.g4, so no earlier corpus author could have written this
+	// file — the grammar would not have parsed it.
+	wantCorpusEntries = 138
 	// 68 → 67 under gqlc-4np: 18.2-node-type/property_name_repeated.gql was
 	// demoted from resolves to unsupported, ADR 0030 having decided that a
 	// repeated property name is rejected rather than silently resolved to one
@@ -118,7 +122,10 @@ const (
 	// three files spelling RECORD incidentally, to pin that a collector forwards
 	// a decline, moved to PATH and stayed unsupported rather than flipping, so
 	// counting the retired sentinel's entries would have given 89.
-	wantCorpusResolving = 86
+	//
+	// 86 → 87 under gqlc-eg4b: scalar_uuid.gql resolves, TypeUUID being a
+	// parameterless width the flat enum already had room for.
+	wantCorpusResolving = 87
 	// 18 → 17 under gqlc-4np, the legitimate once-per-case drop this pin exists
 	// to make an author account for: the property_name_repeated case is closed
 	// by ErrDuplicatePropertyName, so it is an unsupported entry now rather than
@@ -134,7 +141,7 @@ const (
 // annexd.Codes is rejected mechanically, so a fabricated one (e.g. GG99, which
 // is not in the vendored snapshot) cannot land whatever the author intended.
 func isValidFeature(v string) bool {
-	return v == "mandatory" || v == "unsourced" || annexd.Has(v)
+	return v == "mandatory" || v == "unsourced" || v == "extension" || annexd.Has(v)
 }
 
 const corpusDir = fixtureDir + "/corpus"
@@ -180,6 +187,16 @@ type corpusEntry struct {
 	//     declined permanently, where the claim being made is "declining this
 	//     is still conformant" — the one thing no snapshot of the standard can
 	//     support without knowing the construct.
+	//   - "extension": the construct is not in ISO GQL at all, so it has no
+	//     Annex D status to cite and neither of the two above is true of it —
+	//     "mandatory" would claim ISO requires it and "unsourced" would claim
+	//     we looked and could not tell. gqlc's own UUID width is the first
+	//     (bd gqlc-eg4b); ISO/IEC 39075 names no UUID value type, and the
+	//     grammar alternative carrying it is gqlc's own addition to a
+	//     vendored file (internal/grammar/gql/SOURCE.md, Local modifications).
+	//     Only honest for a construct GQL.g4 accepts because gqlc put it
+	//     there: a construct ISO does have, that we merely failed to source,
+	//     is "unsourced".
 	//
 	// isValidFeature is the mechanism. An id not in annexd.Codes (e.g. a
 	// plausible but fabricated "GG99") is rejected, which closes the class where
@@ -1310,17 +1327,17 @@ func TestRequiredAlternativesRejectsMalformedExemptions(t *testing.T) {
 	require.Equal(t, []string{thief}, got)
 }
 
-// TestIsValidFeature pins the corpusEntry.feature guard: the two special-case
+// TestIsValidFeature pins the corpusEntry.feature guard: the three special-case
 // tokens and at least one real Annex D code are accepted, and a plausible-but-
 // fabricated id is rejected. The rejection half is the one that matters — that
 // is the class this bead exists to close (bd gqlc-cfj) and a check that admits
 // any /^G../ shape would restore the fabrication hole with a regex over it.
 func TestIsValidFeature(t *testing.T) {
-	for _, v := range []string{"mandatory", "unsourced", "GG02", "GH02", "G002", "GV90"} {
+	for _, v := range []string{"mandatory", "unsourced", "extension", "GG02", "GH02", "G002", "GV90"} {
 		require.True(t, isValidFeature(v), "isValidFeature(%q) is false; a special-case token or real Annex D code must be accepted", v)
 	}
 
-	for _, v := range []string{"GG99", "GX99", "gg02", "GG02 ", "", "Mandatory", "unsourced ", "annexd"} {
+	for _, v := range []string{"GG99", "GX99", "gg02", "GG02 ", "", "Mandatory", "unsourced ", "extension ", "Extension", "annexd"} {
 		require.False(t, isValidFeature(v), "isValidFeature(%q) is true; a value outside the accepted set must be rejected", v)
 	}
 }
