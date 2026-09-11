@@ -3,6 +3,7 @@ package age
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/areqag/gqlc/internal/codegen"
@@ -218,11 +219,83 @@ func rejectOffsetSidecarCollisions(entities []codegen.Entity) error {
 // schema or of the query: a run emitting several targets has to say which
 // of them has no carrier. Every other refusal follows from the input
 // alone, so wrapping it here would misattribute it.
+//
+// EXCEPT where the width is one NO backend carries, which is the whole of
+// what this function does beyond its neo4j twin. The rule both obey is
+// ADR 0035's: a backend names itself exactly when another enrolled
+// backend answers the same declaration differently, because attribution
+// implicates contingency — naming a backend tells the author "this is
+// this backend's answer, and another may differ". This table's refused
+// set has two parts and only one of them is contingent. BYTES and a list
+// whose element carries a zone are refusals neo4j does not share, and the
+// name is owed and load-bearing there. The eight oversized numerics are
+// permanently out on every target under spec §9, so the suffix would
+// point an author at a search for a target that carries INT128 when the
+// only repair is the declared width the message already names.
+//
+// The counter-argument gqlc-oxgyt filed this under, answered rather than
+// dropped: emission short-circuits per target, so an author may see only
+// one target's refusal, and naming the target that failed is orienting
+// even when every target would fail. What the suffix adds is not "this
+// target failed" — the author chose the target and the refusal is the
+// only one they are looking at — it is "another target may differ", which
+// on these eight is false. The entity, the property and the width are all
+// still named, so nothing that localises the defect is lost.
 func nameBackend(err error) error {
 	if !errors.Is(err, codegen.ErrUnrepresentableWidth) && !errors.Is(err, codegen.ErrUnrepresentableTemporal) {
 		return err
 	}
+	if width, ok := codegen.RefusedWidth(err); ok && carriedByNoBackend(width) {
+		return err
+	}
 	return fmt.Errorf("%w, which the Apache AGE backend has no carrier for", err)
+}
+
+// carriedByNoBackend reports whether a width is one spec §9 puts out of
+// reach of every enrolled target rather than of this one — the eight
+// oversized numerics, at any container depth.
+//
+// This is a claim about backends this package cannot see, which is why it
+// is not asserted here: TestAContingentRefusalNamesItsBackend
+// (internal/cli/backends) is the composition root, the only layer holding
+// the enrolled roster, and it reddens both ways — the day one of these
+// widths gains a carrier somewhere, and the day a width refused here
+// without a name turns out to be accepted elsewhere. neo4j's twin rests
+// on the same measurement (see its nameBackend).
+//
+// A CONTAINER is universal exactly when it holds a universal width
+// anywhere inside it, which is the direction that keeps the claim true: a
+// list of INT128 is refused by every target because INT128 is, whatever
+// else the list arm would have said, and a record with one such field is
+// refused whole. The converse does not hold and is not claimed — a
+// container refused for a reason of this backend's own, LIST<TIME> being
+// the standing example, holds no universal width and keeps its name.
+func carriedByNoBackend(pt graph.PropertyType) bool {
+	if pt.Kind() == graph.KindList {
+		return carriedByNoBackend(pt.Elem())
+	}
+	if pt.Kind() == graph.KindRecord {
+		return slices.ContainsFunc(pt.Fields(), func(f graph.RecordField) bool {
+			return carriedByNoBackend(f.Type)
+		})
+	}
+	return slices.Contains(oversizedNumerics, pt)
+}
+
+// oversizedNumerics are the eight widths of spec §9 — the numerics wider
+// than any Go builtin, and the arbitrary-precision decimal. They are
+// named again here rather than read off typeMap.Property's reject arm
+// because that arm answers a different question: it names every width
+// THIS table has no carrier for, BYTES among them, and BYTES is the
+// contingent half this function exists to keep apart. What holds the two
+// in step is TestAUniversallyUncarriedWidthIsRefusedWithoutTheBackendName, which is
+// the cheap half of the claim; the expensive half — that no OTHER target
+// carries them — is the composition root's.
+var oversizedNumerics = []graph.PropertyType{
+	graph.TypeInt128, graph.TypeInt256,
+	graph.TypeUint128, graph.TypeUint256,
+	graph.TypeFloat16, graph.TypeFloat128, graph.TypeFloat256,
+	graph.TypeDecimal,
 }
 
 // rejectUnservedQueries fails a batch whose queries this backend cannot

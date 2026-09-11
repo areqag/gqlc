@@ -697,7 +697,7 @@ func prepareEntityFields(entityName string, props map[string]schema.Property, tm
 		}
 		ty, ok := tm.Property(p.Type)
 		if !ok {
-			return nil, fmt.Errorf("%w: entity %q property %q has %s", ErrUnrepresentableWidth, entityName, p.Name, p.Type)
+			return nil, unrepresentableWidth(p.Type, "%w: entity %q property %q has %s", ErrUnrepresentableWidth, entityName, p.Name, p.Type)
 		}
 		if !tm.StorableProperty(p.Type) {
 			return nil, fmt.Errorf("%w: entity %q property %q has %s", ErrUnstorableProperty, entityName, p.Name, p.Type)
@@ -854,7 +854,7 @@ func admitColumn(q NamedQuery, ci int, col resolver.Column, entities []Entity, e
 			return fmt.Errorf("%w: query %q column %d %q has %s", ErrRecordFieldCollision, q.Name, ci, col.Name, recordFieldDetail(t.Type, record, reason))
 		}
 		if _, ok := tm.Property(t.Type); !ok {
-			return fmt.Errorf("%w: query %q column %d %q has %s", ErrUnrepresentableWidth, q.Name, ci, col.Name, t.Type)
+			return unrepresentableWidth(t.Type, "%w: query %q column %d %q has %s", ErrUnrepresentableWidth, q.Name, ci, col.Name, t.Type)
 		}
 	case resolver.ResolvedNode:
 		if _, ok := entityIndex[entityLookupKey{Kind: EntityNode, Labels: t.Labels}]; !ok {
@@ -908,7 +908,7 @@ func admitParameter(q NamedQuery, pi int, p resolver.ResolvedParameter, tm TypeM
 		return fmt.Errorf("%w: query %q parameter %d $%s has %s", ErrRecordFieldCollision, q.Name, pi, p.Name, recordFieldDetail(prop.Type, record, reason))
 	}
 	if _, ok := tm.Property(prop.Type); !ok {
-		return fmt.Errorf("%w: query %q parameter %d $%s has %s", ErrUnrepresentableWidth, q.Name, pi, p.Name, prop.Type)
+		return unrepresentableWidth(prop.Type, "%w: query %q parameter %d $%s has %s", ErrUnrepresentableWidth, q.Name, pi, p.Name, prop.Type)
 	}
 	return nil
 }
@@ -1594,7 +1594,7 @@ func buildListElemPlan(t resolver.ResolvedType, entities []Entity, entityIndex m
 		}
 		ty, ok := tm.Property(tt.Type)
 		if !ok {
-			return nil, fmt.Errorf("%w: list element has unrepresentable property width %s", ErrUnrepresentableWidth, tt.Type)
+			return nil, unrepresentableWidth(tt.Type, "%w: list element has unrepresentable property width %s", ErrUnrepresentableWidth, tt.Type)
 		}
 		// An element the schema permits to be NULL is emitted as a pointer,
 		// the rule every other nullable position already obeys. Without it

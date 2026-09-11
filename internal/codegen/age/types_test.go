@@ -294,6 +294,61 @@ func TestTypeMapPropertyRejectionReachesTheCaller(t *testing.T) {
 	}
 }
 
+// TestAUniversallyUncarriedWidthIsRefusedWithoutTheBackendName is the
+// other side of the test above, and the two together are the whole of
+// what nameBackend decides (bd gqlc-oxgyt, ADR 0035). The widths above
+// divide the roster, so the suffix is owed. The eight here are out of
+// reach of every target under spec §9, so it is not: it would tell the
+// author another target may differ when none does, and send them looking
+// for one that carries INT128 when the only repair is the declared width
+// the message already names.
+//
+// Everything that localises the defect is still asserted present, because
+// withholding the suffix is the whole change and dropping the rest of the
+// sentence with it would be a different and much worse one. The rows walk
+// containers as well as the bare width: carriedByNoBackend recurses into
+// a list element and a record field, and a row per depth is what says the
+// recursion goes there rather than answering off the top level.
+//
+// What this file cannot assert is the premise — that no OTHER enrolled
+// backend carries these eight. internal/codegen/age imports no sibling
+// backend and must not. TestAContingentRefusalNamesItsBackend
+// (internal/cli/backends) holds that half, over the enrolled roster, and
+// reddens both ways.
+func TestAUniversallyUncarriedWidthIsRefusedWithoutTheBackendName(t *testing.T) {
+	require.NotEmpty(t, age.OversizedNumerics,
+		"the universal width list is empty, so every row below ranges over nothing")
+
+	for _, width := range age.OversizedNumerics {
+		for _, pt := range []graph.PropertyType{
+			width,
+			graph.ListOf(width, false),
+			graph.ListOf(graph.ListOf(width, false), false),
+			graph.RecordOf([]graph.RecordField{{Name: "f", Type: width, NotNull: true}}),
+			graph.ListOf(graph.RecordOf([]graph.RecordField{{Name: "f", Type: width, NotNull: true}}), false),
+		} {
+			t.Run(string(pt), func(t *testing.T) {
+				// The list belongs to internal/codegen/age/errors.go and the
+				// reject arm to types.go, and nothing but this row holds them
+				// in step: a width named in the list that the table went on to
+				// CARRY would have its suffix withheld from a refusal it never
+				// raises, which is invisible until the table changes again.
+				carrier, ok := age.TypeMap{}.Property(pt)
+				require.False(t, ok,
+					"%s is on the universal-width list and typeMap.Property carries it as %q, so the two have drifted", pt, carrier)
+
+				files, err := age.Generate(codegen.Input{Schema: schemaWithPayload(pt)}, "age")
+				require.Nil(t, files)
+				require.ErrorIs(t, err, codegen.ErrUnrepresentableWidth)
+				require.ErrorContains(t, err, `entity "Blob" property "payload" has `+string(pt),
+					"the suffix is withheld, not the sentence: the entity, the property and the width are what the author repairs by")
+				require.NotContains(t, err.Error(), "the Apache AGE backend",
+					"%s is carried by no enrolled backend, so naming this one asserts a contingency that does not hold", pt)
+			})
+		}
+	}
+}
+
 // TestUnservedQueriesOutrankUnrepresentableWidths pins which of the two
 // rejections a batch failing both reports. The width sweep would send
 // the author to a schema that was never the obstacle: a query projecting
