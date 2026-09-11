@@ -34,7 +34,7 @@ import (
 // mis-shaped carrier is what their assertion is about, and one is a
 // hand-edited copy of alice's bytes carrying alice's real graphid. Do
 // not read an in-body literal as something a server emitted, and do not
-// add a capture as one — a capture belongs in the const block above,
+// add a capture as one — a capture belongs in a package-level const,
 // where the census can see it (bd gqlc-28kw).
 //
 // This file is compiled in a throwaway module whose go.mod requires
