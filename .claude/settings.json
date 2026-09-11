@@ -4,7 +4,7 @@
       {
         "hooks": [
           {
-            "command": "bd prime",
+            "command": ".githooks/bd-prime-guarded",
             "type": "command"
           }
         ],
@@ -19,7 +19,7 @@
             "type": "command"
           },
           {
-            "command": "bd prime",
+            "command": ".githooks/bd-prime-guarded",
             "type": "command"
           }
         ],

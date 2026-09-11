@@ -1,0 +1,83 @@
+#!/usr/bin/env bash
+# `bd prime`, refusing the one BEADS_DIR that would make it create a ledger.
+#
+# Upstream defect, recorded in docs/bd-prime-creates-a-ledger.md (bd gqlc-5smcw)
+# and re-measured here 2026-09-10 against bd 1.0.4 (ce242a879): pointed by
+# BEADS_DIR at a directory holding beads config but no database, `bd prime`
+# CREATES the database, exits 0, and says nothing — with BEADS_DIR=<dir 0700>
+# its stderr is empty, not even the permissions warning the doc's run carried.
+# From that instant the path is honoured by every other verb, and each of them
+# answers successfully about an empty fleet: `bd stats` reports 0 issues, `bd
+# ready --json` returns [], `bd show <a bead that exists>` prints nothing at all
+# on stdout and signals only in $?. That put ten agent sessions to work against
+# an empty database for four hours (bd gqlc-zpjuc).
+#
+# The fix belongs in bd, which is /usr/bin/bd -> /usr/lib/node_modules/@beads/bd
+# and is not vendored here, so it cannot be made in this repository. What can be
+# made here is this: `prime` is the amplifier rather than BEADS_DIR itself —
+# every other verb REFUSES such a directory, or ignores BEADS_DIR entirely and
+# falls back to discovery — and the only reason `prime` runs unattended is that
+# .claude/settings.json wires it into SessionStart and PreCompact. So the two
+# call sites run this instead, and it refuses in bd's own register.
+#
+# Refusing takes nothing from first-time setup, which was measured before this
+# was written rather than assumed: a fail-closed guard that forbids its own
+# bootstrap path bricks a fresh checkout, and that is invisible from a workspace
+# already initialised. `bd init --prefix probe` in an empty directory exits 0,
+# creates .beads/embeddeddolt, and the ledger then accepts `bd create` and
+# answers `bd list --all --json -n 0` with the created bead. `init` is the
+# explicit opt-in and this guard never runs in its path; creation stays
+# available, it stops being implicit.
+set -uo pipefail
+
+beads_dir="${BEADS_DIR-}"
+
+# Both names are taken from the deployed binary's own strings (`embeddeddolt`
+# 371 times, `beads.db` 10), not from the one backend this fleet happens to use.
+# A sqlite workspace holds a database this guard must not call missing, and the
+# cost of the wider list is only that the guard refuses less.
+db_names=(embeddeddolt beads.db)
+# EITHER file arms the defect — measured, not inferred from the doc, whose
+# reproduction writes both: with config.yaml alone, and with metadata.json
+# alone, `bd prime` created `embeddeddolt` just the same. An ANDed test over the
+# pair would let both of those single-file directories through.
+config_names=(config.yaml metadata.json)
+
+found_config=()
+found_db=()
+# The emptiness test is not decoration and is not `-d` in disguise: with
+# BEADS_DIR unset the joins below become the ABSOLUTE /config.yaml and
+# /embeddeddolt, so on a host carrying a root-level config.yaml the guard would
+# refuse every session with a message naming an empty BEADS_DIR. A `-d` test
+# beside it was dropped after mutation: no input distinguishes it, because
+# "$dir/config.yaml" cannot exist unless "$dir" is a directory.
+if [ -n "${beads_dir}" ]; then
+    for name in "${config_names[@]}"; do
+        if [ -e "${beads_dir}/${name}" ]; then
+            found_config+=("${name}")
+        fi
+    done
+    for name in "${db_names[@]}"; do
+        if [ -e "${beads_dir}/${name}" ]; then
+            found_db+=("${name}")
+        fi
+    done
+fi
+
+if [ "${#found_config[@]}" -ne 0 ] && [ "${#found_db[@]}" -eq 0 ]; then
+    # bd's own shape when it declines this directory: `Error:` naming the
+    # condition, `Hint:` naming `bd init` as the remedy, nothing on stdout,
+    # non-zero status. Matching it means a reader who has seen `bd stats`
+    # refuse recognises this without learning a second vocabulary.
+    echo "Error: BEADS_DIR holds beads config but no database, and 'bd prime' would create one" >&2
+    echo "       BEADS_DIR=${beads_dir}" >&2
+    echo "       config present: ${found_config[*]}; database absent: ${db_names[*]}" >&2
+    echo "Hint: run 'bd init' in that directory to create a database deliberately, or unset" >&2
+    echo "      BEADS_DIR to let bd discover the workspace from the current directory." >&2
+    echo "      Not primed on purpose: 'bd prime' creates the database, exits 0 and says" >&2
+    echo "      nothing, after which every consumer of this path gets successful, EMPTY" >&2
+    echo "      answers about a fleet that is not theirs — see docs/bd-prime-creates-a-ledger.md" >&2
+    exit 1
+fi
+
+exec bd prime "$@"
