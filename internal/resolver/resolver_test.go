@@ -931,6 +931,53 @@ var invalidFixtureContains = map[string]string{
 	"parameter_type_conflict_property_vs_expr_bool.cypher":   `parameter "x": property:INT (nullable) vs scalar(bool)`,
 	"parameter_type_conflict_clause_slot_vs_string.cypher":   `parameter "x": property:STRING (not null) vs scalar(int)`,
 	"parameter_conflict_via_multi_type_edge_property.cypher": `parameter "x": property:TIMESTAMP (nullable) vs scalar(int)`,
+	// ErrUnknownLabel, screened as the fifth axis of bd gqlc-9vpga. It is the
+	// largest unscreened sentinel built at SEVERAL sites — seven, each with its
+	// own format string — so errors.Is genuinely cannot say which of seven
+	// different diagnoses an author is holding. Three of the seven were held
+	// before this: CloseEdges' deferred-endpoint pair through
+	// anonymous_edge_uninferable_endpoint above, Phase B's case 0 through
+	// unlabelled_optional_hop_empty_intersection, the satisfying-set arm
+	// through TestInlineEndpointCommitsOnTheTypesSatisfyingIt. The arms below
+	// held nothing at all inside this package.
+	//
+	// CloseEdges' SOURCE and TARGET arms (scope.go) are each other's mirror:
+	// one word apart, one sentinel, and reached only through fixtures that were
+	// waived. Measured — rewriting either arm's text as its sibling's leaves
+	// internal/resolver AND internal/cli fully green once the goldens and both
+	// sweep files are regenerated, so which end of the pattern gqlc could not
+	// infer was reported by nothing. The two pins below are what makes those
+	// two mutations die, one each. Both spell the binding as well as the end,
+	// so describeEdgeBinding's NAMED branch is held here too: dropping its
+	// quotes reddens them along with ambiguous_edge_orientation above, which is
+	// the branch's only other pin.
+	"anonymous_source_endpoint.cypher": `cannot infer type of source endpoint of edge "r"`,
+	"empty_inline_endpoint.cypher":     `cannot infer type of target endpoint of edge "r"`,
+	// The label-declaration check inside the SET and REMOVE effect validators.
+	// Two sites, one sentinel, and the same sentence under a different verb —
+	// so the verb is the whole of what tells an author which clause of their
+	// query is at fault, and errors.Is cannot see it. Measured: rewriting
+	// either verb as the other left internal/resolver and internal/cli green
+	// through a regeneration.
+	//
+	// merge_on_create_undeclared_label is pinned alongside them because it is
+	// not a SET clause at all: MERGE ... ON CREATE SET reaches the same
+	// validator, and the pin records that its refusal is reported under SET
+	// with the MERGE variable. A reader meeting `SET a:NotALabel` for a query
+	// that writes no SET should be able to find that stated, and this is it.
+	"set_labels_undeclared.cypher":            `SET n:Nonexistent: label "Nonexistent" not declared on any node type`,
+	"remove_labels_undeclared.cypher":         `REMOVE n:Nonexistent: label "Nonexistent" not declared on any node type`,
+	"merge_on_create_undeclared_label.cypher": `SET a:NotALabel: label "NotALabel" not declared on any node type`,
+	// resolveNodeLabels' undeclared-label arm — the refusal an author meets
+	// first and the most-reached of the seven. Four invalid fixtures produce it
+	// and all four were waived, so within internal/resolver nothing held it:
+	// baring the arm to its label list alone left the package green through a
+	// regeneration. What it is held by is internal/cli's diagnostic-shape
+	// tests, which assert the whole rendered line — four of them redden. That
+	// is a real guard, and it is why this is one pin rather than four; but a
+	// resolver arm whose only assertion lives two packages away is one no
+	// reader of this file could find.
+	"unknown_label.cypher": `NotDeclared is not declared on any node type`,
 }
 
 // invalidFixtureNoMessagePin names the invalid fixtures whose refusal message
@@ -975,6 +1022,13 @@ var invalidFixtureContains = map[string]string{
 //     the scalar kind, drop the temporal kind — because the three pins this arm
 //     already had conflict ResolvedProperty against ResolvedProperty and so say
 //     nothing about any other variant. The two that stay are named below.
+//   - gqlc-9vpga, fifth pass: all thirteen refusing with ErrUnknownLabel. It is
+//     built at SEVEN sites with seven different format strings, which is why it
+//     was taken ahead of the larger ErrUnknownProperty: where a sentinel has one
+//     site errors.Is already settles the arm and a pin only discriminates within
+//     it, but seven sites mean seven diagnoses one errors.Is cannot separate.
+//     Four arms held nothing inside this package and six entries moved. The five
+//     that stay are named below, each against the guard that holds it.
 //
 // THE SCREEN THAT AXIS NEEDED, because it applies to every axis left and
 // nothing above it says so. TestCorpusSweepManifest digests err.Error() for
@@ -1008,15 +1062,43 @@ var invalidFixtureNoMessagePin = map[string]struct{}{
 	"parameter_type_conflict_two_properties.cypher":                  {},
 	"parameter_type_conflict_two_properties_same_nullability.cypher": {},
 
+	// ErrUnknownLabel's five survivors, waived on a measurement. Each names the
+	// guard that holds its arm, because in every case that guard is somewhere a
+	// reader of this map would not look.
+	//
+	// The three below reach resolveNodeLabels' undeclared-label arm and render
+	// BYTE-IDENTICAL text to unknown_label.cypher, which is now pinned on it
+	// ("NotDeclared is not declared on any node type"). Any mutation of the arm
+	// reddens that pin, so a second copy of the same string discriminates
+	// nothing further. What separates these three from it is the clause each
+	// reaches it through — CREATE, a MERGE endpoint, a UNION branch — and that
+	// is a claim about reachability, held by their own presence in the corpus
+	// and by TestSweepReachesEverySentinel, not by a message.
+	"create_unknown_label.cypher":         {},
+	"merge_endpoint_unknown_label.cypher": {},
+	"union_unknown_label_branch.cypher":   {},
+	// Phase B's case 0. Its format string is pinned on
+	// unlabelled_optional_hop_empty_intersection, the other fixture reaching
+	// the same arm; rewriting the arm as its OPTIONAL-match sibling reddens
+	// that pin and TestUnlabelledBindingRefusedWhenNoEdgeIsEvidence, and leaves
+	// this fixture's own subtest green. Both halves were measured, and the
+	// green half is the reason this stays here.
+	"unlabelled_binding_no_edge.cypher": {},
+	// resolveNodeLabels' satisfying-set arm, whose whole message — including
+	// formatDeclaredCarrying's list of the types that do carry the labels — is
+	// asserted with EqualError by TestInlineEndpointCommitsOnTheTypesSatisfyingIt,
+	// over a different query on a different schema. Mutating the arm's prose
+	// reddens that subtest and NOT this fixture's, which is what says the arm is
+	// covered and this entry would add nothing.
+	"label_satisfy_none.cypher": {},
+
 	"ambiguous_edge_orientation_after_inference.cypher":            {},
-	"anonymous_source_endpoint.cypher":                             {},
 	"call_arg_int_at_string.cypher":                                {},
 	"call_arg_type_mismatch.cypher":                                {},
 	"call_yield_property_lookup.cypher":                            {},
 	"certified_collect_unknown_property.cypher":                    {},
 	"certified_list_unknown_property.cypher":                       {},
 	"create_unknown_edge.cypher":                                   {},
-	"create_unknown_label.cypher":                                  {},
 	"delete_bare_property_unknown.cypher":                          {},
 	"delete_edge_property_unknown.cypher":                          {},
 	"delete_property_on_var_length_edge.cypher":                    {},
@@ -1024,13 +1106,9 @@ var invalidFixtureNoMessagePin = map[string]struct{}{
 	"delete_property_unknown_on_multi_type_edge.cypher":            {},
 	"delete_second_target_unknown_property.cypher":                 {},
 	"effect_order_first_failure_wins.cypher":                       {},
-	"empty_inline_endpoint.cypher":                                 {},
-	"label_satisfy_none.cypher":                                    {},
 	"label_satisfy_plural_entity.cypher":                           {},
 	"list_of_edges_projection.cypher":                              {},
 	"list_of_nodes_projection.cypher":                              {},
-	"merge_endpoint_unknown_label.cypher":                          {},
-	"merge_on_create_undeclared_label.cypher":                      {},
 	"merge_on_create_unknown_property.cypher":                      {},
 	"merge_on_match_second_effect_unknown_property.cypher":         {},
 	"merge_on_match_unknown_property.cypher":                       {},
@@ -1052,7 +1130,6 @@ var invalidFixtureNoMessagePin = map[string]struct{}{
 	"plural_endpoint_zero_hop_stays_plural.cypher":                 {},
 	"plural_endpoint_zero_lower_bound_one_hop_stays_plural.cypher": {},
 	"plural_endpoint_zero_lower_bound_stays_plural.cypher":         {},
-	"remove_labels_undeclared.cypher":                              {},
 	"remove_property_on_var_length_edge.cypher":                    {},
 	"remove_property_on_var_length_multi_type_edge.cypher":         {},
 	"remove_property_unknown.cypher":                               {},
@@ -1060,7 +1137,6 @@ var invalidFixtureNoMessagePin = map[string]struct{}{
 	"remove_property_unknown_on_single_type_edge.cypher":           {},
 	"set_entity_on_var_length_edge.cypher":                         {},
 	"set_entity_on_var_length_multi_type_edge.cypher":              {},
-	"set_labels_undeclared.cypher":                                 {},
 	"set_property_on_var_length_edge.cypher":                       {},
 	"set_property_on_var_length_multi_type_edge.cypher":            {},
 	"set_property_unknown_on_multi_type_edge.cypher":               {},
@@ -1078,18 +1154,15 @@ var invalidFixtureNoMessagePin = map[string]struct{}{
 	"union_var_length_binding_optionality_mismatch.cypher":         {},
 	"union_node_type_mismatch.cypher":                              {},
 	"union_third_branch_mismatch.cypher":                           {},
-	"union_unknown_label_branch.cypher":                            {},
 	"unknown_edge.cypher":                                          {},
 	"unknown_edge_multi_type_all_miss.cypher":                      {},
 	"unknown_edge_property.cypher":                                 {},
 	"unknown_edge_undirected.cypher":                               {},
-	"unknown_label.cypher":                                         {},
 	"unknown_property.cypher":                                      {},
 	"unknown_property_union_missing.cypher":                        {},
 	"unknown_property_union_sibling_branch.cypher":                 {},
 	"unknown_property_union_type_differs.cypher":                   {},
 	"unknown_property_via_expr_use.cypher":                         {},
-	"unlabelled_binding_no_edge.cypher":                            {},
 	"untyped_edge.cypher":                                          {},
 	"var_length_edge_property_projection.cypher":                   {},
 }
