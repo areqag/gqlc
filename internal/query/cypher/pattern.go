@@ -58,7 +58,7 @@ func (l *listener) collectPatternPart(part gen.IOC_PatternPartContext, group int
 	}
 	var pathVar string
 	if v := part.OC_Variable(); v != nil {
-		pathVar = v.GetText()
+		pathVar = variableName(v)
 	}
 	var pathMembers []query.PathMember
 	if pathVar != "" {
@@ -199,7 +199,7 @@ func (l *listener) collectNode(n gen.IOC_NodePatternContext, group int, bare boo
 	}
 	variable := ""
 	if v := n.OC_Variable(); v != nil {
-		variable = v.GetText()
+		variable = variableName(v)
 	}
 	l.mineInlineMap(variable, n.OC_Properties())
 	if variable != "" && !l.nameBoundAsUnwind(variable) {
@@ -280,7 +280,7 @@ func (l *listener) collectEdge(r gen.IOC_RelationshipPatternContext, prev, next 
 	var hops *query.EdgeHops
 	if d := r.OC_RelationshipDetail(); d != nil {
 		if v := d.OC_Variable(); v != nil {
-			variable = v.GetText()
+			variable = variableName(v)
 		}
 		l.mineInlineMap(variable, d.OC_Properties())
 		if l.err != nil {
@@ -379,7 +379,7 @@ func edgeHopsFromRangeLiteral(rl gen.IOC_RangeLiteralContext) (query.EdgeHops, e
 // the node's inline labels otherwise (empty labels for the () case).
 func (l *listener) endpoint(n gen.IOC_NodePatternContext) query.Endpoint {
 	if v := n.OC_Variable(); v != nil {
-		e, err := query.NewVarEndpoint(v.GetText())
+		e, err := query.NewVarEndpoint(variableName(v))
 		if err != nil {
 			l.fail(err)
 			return nil
@@ -523,7 +523,7 @@ func nodeLabels(ls gen.IOC_NodeLabelsContext) graph.LabelSet {
 	}
 	var out graph.LabelSet
 	for _, nl := range ls.AllOC_NodeLabel() {
-		out = append(out, nl.OC_LabelName().GetText())
+		out = append(out, labelName(nl.OC_LabelName()))
 	}
 	return out
 }
@@ -542,7 +542,7 @@ func relTypes(rt gen.IOC_RelationshipTypesContext) graph.LabelSet {
 	}
 	out := make(graph.LabelSet, 0, len(names))
 	for _, n := range names {
-		out = append(out, n.GetText())
+		out = append(out, relTypeName(n))
 	}
 	return out
 }

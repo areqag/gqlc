@@ -294,7 +294,7 @@ func (l *listener) typeNonArithmetic(n gen.IOC_NonArithmeticOperatorExpressionCo
 			len(*refs) == preAtomRefLen+1 && (*refs)[preAtomRefLen].Property == "" {
 			(*refs)[preAtomRefLen] = query.Ref{
 				Variable: (*refs)[preAtomRefLen].Variable,
-				Property: lookups[0].OC_PropertyKeyName().GetText(),
+				Property: propertyKeyName(lookups[0].OC_PropertyKeyName()),
 			}
 		}
 		t = query.TypeUnknown{}
@@ -320,7 +320,7 @@ func (l *listener) typeAtom(a gen.IOC_AtomContext, refs *[]query.Ref) query.Type
 	}
 	switch {
 	case a.OC_Variable() != nil:
-		name := a.OC_Variable().GetText()
+		name := variableName(a.OC_Variable())
 		l.appendRef(varRef{name: name})
 		*refs = append(*refs, query.Ref{Variable: name})
 		return l.refType(query.Ref{Variable: name})
