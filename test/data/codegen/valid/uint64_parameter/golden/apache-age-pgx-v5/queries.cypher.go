@@ -75,3 +75,49 @@ func (q *queries) CountersMatching(ctx context.Context, arg CountersMatchingPara
 	}
 	return out, nil
 }
+
+const recordCounterQueryText = `CREATE (c:Counter {id: $id, hits: $hits, misses: $misses, runs: $runs, spans: $spans})`
+
+type RecordCounterParams struct {
+	Id     int64
+	Hits   uint64
+	Misses *uint64
+	Runs   []uint64
+	Spans  *[]uint64
+}
+
+// RecordCounter executes the RecordCounter query.
+//
+//	CREATE (c:Counter {id: $id, hits: $hits, misses: $misses, runs: $runs, spans: $spans})
+func (q *queries) RecordCounter(ctx context.Context, arg RecordCounterParams) error {
+	stmt, err := q.cypherStmt("$gqlc$", recordCounterQueryText, "v0 ag_catalog.agtype")
+	if err != nil {
+		return err
+	}
+	param1, err := agtypeUnsigned(arg.Hits)
+	if err != nil {
+		return fmt.Errorf("RecordCounter: parameter $hits: %w", err)
+	}
+	param2, err := agtypeEncodedNullable(arg.Misses, agtypeUnsigned)
+	if err != nil {
+		return fmt.Errorf("RecordCounter: parameter $misses: %w", err)
+	}
+	param3, err := agtypeEncodedList(arg.Runs, agtypeUnsigned)
+	if err != nil {
+		return fmt.Errorf("RecordCounter: parameter $runs: %w", err)
+	}
+	param4, err := agtypeEncodedNullable(arg.Spans, func(in []uint64) ([]int64, error) {
+		return agtypeEncodedList(in, agtypeUnsigned)
+	})
+	if err != nil {
+		return fmt.Errorf("RecordCounter: parameter $spans: %w", err)
+	}
+	args, err := agtypeArgs(map[string]any{"id": arg.Id, "hits": param1, "misses": param2, "runs": param3, "spans": param4})
+	if err != nil {
+		return err
+	}
+	if _, err := q.db.Exec(ctx, stmt, args); err != nil {
+		return fmt.Errorf("RecordCounter: %w", err)
+	}
+	return nil
+}

@@ -3144,23 +3144,32 @@ test-codegen-live:
 #
 # TestNeo4jRefusesANestedListStoredProperty and
 # TestNeo4jRefusesAMapValuedStoredProperty each start a container of their own,
-# so this half boots FOUR rather than the three the paragraph here used to
+# so the PARALLEL set here is FOUR rather than the three the paragraph used to
 # describe. They boot concurrently and TestLiveSmoke's header measures three at
-# ~4GB peak; a fourth of the same image is ~5.3GB by that arithmetic, which is
-# inside a standard runner's 7GB and is NOT measured -- whoever added the
-# fourth could not run any of them (docker.service disabled host-wide, bd
-# gqlc-p9g2i), so the first real reading is this job. If it dies for memory
-# rather than for an assertion, the remedy is to drop t.Parallel from the
-# map-property probe: that trades one container boot of wall time for a peak of
-# three, and changes no claim the row makes.
+# ~4GB peak; a fourth of the same image is ~5.3GB by that arithmetic, inside a
+# standard runner's 7GB. The docker.service that was disabled host-wide when
+# the fourth landed (bd gqlc-p9g2i) is available again, and this half was run
+# whole on 2026-09-10: 74 RUN / 74 PASS / 0 FAIL, 28.3s, exit 0.
 #
-# Both earn the PR-blocking half rather than the nightly one for one reason.
-# Each is the tripwire under a generation-time refusal that exists SOLELY
-# because this server refuses a write -- nested lists for ADR 0035, map-valued
-# properties for the record carriers' storage ruling -- and a pull request is
+# TestNeo4jRefusesAUint64ParameterAboveMaxInt64 and
+# TestNeo4jNeverHandsBackANullValuedProperty each boot a container too but do
+# NOT call t.Parallel, so go test runs them one at a time outside the set above
+# and the PEAK is unchanged at four (bd gqlc-lr0v6, bd gqlc-wc5j). The price is
+# serial wall time, measured alone on 2026-09-10 at 20.3s and 18.9s, most of it
+# the boot -- the uint64 probe serves BOTH driver majors off its one container
+# rather than taking a second. TestAGERefusesAUint64ParameterAboveMaxInt64 adds
+# no container at all: it binds over a nil DBTX and asserts the value stopped
+# before the send.
+#
+# They earn the PR-blocking half rather than the nightly one for one reason.
+# Each is the tripwire under a claim that exists SOLELY because of what this
+# server does -- nested lists for ADR 0035, map-valued properties for the record
+# carriers' storage ruling, the driver's own overflow refusal for the uint64
+# widen bd gqlc-tzjqu removed, and the absence of any null-valued property for
+# the presence-only gate at writeShapelessFieldDecode -- and a pull request is
 # where that had better still be true.
 test-codegen-live-neo4j:
-    cd test/data/codegen && go test -v -tags codegen_live -run 'TestLiveSmoke|TestEveryBatteryIsTheDeclaredSize|TestEveryBatteryIsNamedInScenarioTables|TestTxMethodSet|TestNeo4jRefusesANestedListStoredProperty|TestNeo4jRefusesAMapValuedStoredProperty|TestAGERefusesAUint64ParameterAboveMaxInt64' -skip 'TestLiveSmoke/apache-age' ./...
+    cd test/data/codegen && go test -v -tags codegen_live -run 'TestLiveSmoke|TestEveryBatteryIsTheDeclaredSize|TestEveryBatteryIsNamedInScenarioTables|TestTxMethodSet|TestNeo4jRefusesANestedListStoredProperty|TestNeo4jRefusesAMapValuedStoredProperty|TestNeo4jRefusesAUint64ParameterAboveMaxInt64|TestNeo4jNeverHandsBackANullValuedProperty|TestAGERefusesAUint64ParameterAboveMaxInt64' -skip 'TestLiveSmoke/apache-age' ./...
 
 # the Apache AGE half of the live battery: the smoke battery's AGE arm, the
 # session-init contract, and the AGE-only probes. The -run alternation below is
@@ -3194,7 +3203,7 @@ test-codegen-live-neo4j:
 # runs nowhere else actually executed. It goes on the whole recipe rather than a
 # second `go test` invocation, which would start a second AGE container.
 test-codegen-live-age:
-    cd test/data/codegen && go test -v -count=1 -tags codegen_live -run 'TestLiveSmoke|TestAGESessionInit|TestAGERefusesRelationshipTypeAlternation|TestAGERefusesTheFunctionsItDoesNotDefine|TestAGERefusesTheSpatialConstructor|TestAGERefusesTheNamespaceItHasNoSchemaFor|TestAGEOffsetSidecar|TestAGEZonedTime|TestAGEStoresANestedListProperty|TestAGEStoresARecordProperty|TestAGEMatchesATemporalListParameter' -skip 'TestLiveSmoke/neo4j' ./...
+    cd test/data/codegen && go test -v -count=1 -tags codegen_live -run 'TestLiveSmoke|TestAGESessionInit|TestAGERefusesRelationshipTypeAlternation|TestAGERefusesTheFunctionsItDoesNotDefine|TestAGERefusesTheSpatialConstructor|TestAGERefusesTheNamespaceItHasNoSchemaFor|TestAGEOffsetSidecar|TestAGEZonedTime|TestAGEStoresANestedListProperty|TestAGEStoresARecordProperty|TestAGEMatchesATemporalListParameter|TestAGENeverHandsBackANullValuedProperty' -skip 'TestLiveSmoke/neo4j' ./...
 
 # call-graph-aware vulnerability scan; run on dependency changes and on the
 # weekly CI schedule ("@latest" deliberate: the vuln DB matters more than

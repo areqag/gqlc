@@ -43,3 +43,21 @@ func (q *queries) CountersMatching(ctx context.Context, arg CountersMatchingPara
 	}
 	return out, nil
 }
+
+const recordCounterQueryText = `CREATE (c:Counter {id: $id, hits: $hits, misses: $misses, runs: $runs, spans: $spans})`
+
+type RecordCounterParams struct {
+	Id     int64
+	Hits   uint64
+	Misses *uint64
+	Runs   []uint64
+	Spans  *[]uint64
+}
+
+// RecordCounter executes the RecordCounter query.
+//
+//	CREATE (c:Counter {id: $id, hits: $hits, misses: $misses, runs: $runs, spans: $spans})
+func (q *queries) RecordCounter(ctx context.Context, arg RecordCounterParams) error {
+	_, err := q.db.run(ctx, recordCounterQueryText, map[string]any{"id": arg.Id, "hits": arg.Hits, "misses": arg.Misses, "runs": arg.Runs, "spans": arg.Spans}, neo4j.AccessModeWrite)
+	return err
+}

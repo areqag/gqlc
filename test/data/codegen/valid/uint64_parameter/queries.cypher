@@ -31,8 +31,22 @@
 // test/data/codegen module, which `just test-codegen-fence` builds and
 // vets, so a composition that renders but does not compile is caught here
 // and nowhere else.
+//
+// RecordCounter IS A WRITE, and it is here because the neo4j claim above
+// cannot be witnessed by a read. The failure a widen reintroduces is a
+// STORE holding a value the caller never wrote, so the absence of the
+// vertex is the assertion and an erroring read has no vertex to be absent.
+// It binds the same four shapes as the read, one CREATE, so the live probe
+// (TestNeo4jRefusesAUint64ParameterAboveMaxInt64) can move one parameter
+// out of range at a time and name the shape that let it through.
+//
+// No property is added for it: :Counter already declares all four, landed
+// with this fixture by bd gqlc-tzjqu.
 
 // name: CountersMatching :many
 MATCH (c:Counter)
 WHERE c.hits = $hits AND c.misses = $misses AND c.runs = $runs AND c.spans = $spans
 RETURN c.id AS id
+
+// name: RecordCounter :exec
+CREATE (c:Counter {id: $id, hits: $hits, misses: $misses, runs: $runs, spans: $spans})

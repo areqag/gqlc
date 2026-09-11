@@ -9,6 +9,7 @@ type ReadQuerier interface {
 }
 
 type WriteQuerier interface {
+	RecordCounter(ctx context.Context, arg RecordCounterParams) error
 }
 
 type Querier interface {
