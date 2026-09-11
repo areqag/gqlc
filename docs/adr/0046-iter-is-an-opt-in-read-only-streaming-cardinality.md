@@ -145,9 +145,31 @@ further item, and the yield below the envelope is fenced on it.
 This was found by the live arm and not by review, on the first run of
 `iterFailureAfterDelivery` against a real server: rows=1, errs=2.
 
+**The unit of work is typed `struct{}`, not `any`, and that is correctness
+rather than taste.** `ExecuteRead` is generic over the work's result and casts
+it unconditionally whenever the work returns no error — `castGeneric` is a bare
+type assertion to `T`. So a work function typed `(any, error)` that returns a
+nil `any` beside a nil error panics inside the driver:
+
+```
+panic: interface conversion: interface is nil, not interface {}
+```
+
+The return that does it is the zero-row path, which is ordinary input rather
+than an edge case: a query whose predicate matches nothing delivers no record
+and reports no error. `struct{}` makes the nil unspellable, so no later edit
+can reintroduce it on a path that happens to succeed. Both neo4j majors are
+affected and identical here (v5 5.28.4, v6 6.2.0); Apache AGE drives pgx with
+no managed envelope and never had it.
+
+This one was found by mutation rather than by the live arm — row 4c below —
+and the gap was in the battery before it was in the code: all three original
+`:iter` rows deliver at least one record, so none of them executed the work's
+plain success return. `iterEmptyStream` is the row that does.
+
 ## The consumer's contract
 
-Stated as three clauses because each is separately falsifiable, and all three
+Stated as four clauses because each is separately falsifiable, and all four
 are witnessed live rather than in a golden
 (`test/data/codegen/live_test.go`, `iterScenarios`):
 
@@ -161,6 +183,11 @@ are witnessed live rather than in a golden
   the section above is what makes it one.
 - **The consumer may stop early.** `break` produces a `false` from `yield`, and
   the emitted body releases what it holds at that point.
+- **An empty result is a sequence that yields nothing, not an error.** A `:iter`
+  query matching no row completes with zero items of either kind. That is the
+  one shape reaching neither of the clauses above — no row, so the exit rule
+  never fires; no failure, so the error path never fires — which is why it
+  needs saying and why it went unmeasured until the section above.
 
 One thing the contract does not promise: that cancelling the context stops the
 sequence. It stops it on neo4j, where each record is pulled off the wire as the
