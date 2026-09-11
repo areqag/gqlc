@@ -47,8 +47,13 @@
 // for apache-age-pgx-v5 alone. live_age_dialect_test.go is swept by
 // TestEveryDialectGapCarriesItsWitness, which reads gap witnesses out of the
 // bodies of the tests its gap table names, so a probe belonging to no dialect
-// gap must not sit there. live_age_ungated_test.go is titled for a measured
-// REFUSAL, and this is the opposite claim.
+// gap must not sit there. The remaining AGE live files are filed by topic and
+// this is not their topic: live_age_session_test.go is the session hook under
+// the deployments it refuses, live_age_zone_test.go the offset sidecar, and
+// live_age_zoned_time_test.go the one width whose round trip this backend
+// cannot complete. gqlc-pcqit's own placement paragraph named a fourth,
+// live_age_ungated_test.go; it has not existed since #1903 folded it into
+// live_age_dialect_test.go, which is the file already ruled out above.
 //
 // COST. AGE rows are nightly and manual only by ADR 0010, so this does not
 // become a PR gate and no pull request pays for the container. It catches the
