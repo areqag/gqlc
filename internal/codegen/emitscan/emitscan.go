@@ -364,8 +364,32 @@ func PackageDecls(file *ast.File) []string {
 
 // FreeIdents names the identifiers a function resolves outside itself —
 // every identifier it mentions, less every name it binds. Flat rather
-// than block-scoped, which errs towards calling a name bound: an
-// emission that captures one therefore fails rather than slips through.
+// than block-scoped: a name bound anywhere in the function counts as
+// bound throughout it, so a read outside the block that binds it is not
+// free.
+//
+// The bound set is the function's own receiver, parameters and results,
+// plus what DeclaredIdents recognises: short variable declarations,
+// var/const declarations, range clauses, type-switch and select
+// bindings (those two through the assignment each holds), and function
+// literals. Over exactly those constructs the flat reading errs towards
+// calling a name bound, which is the direction that makes an emission
+// capturing one fail rather than slip through.
+//
+// That is not the whole of what Go binds, and on the remainder this
+// errs the OTHER way — so read the list above as the limit it is, not
+// as a property of the analysis. Measured 2026-09-10, one row per
+// construct, each binding a name inside a function and reading it back:
+// a local type declaration and that type's field names, a statement
+// label, a parameter name written into a func TYPE in a signature, and
+// a type parameter — on the function or on a generic receiver — are all
+// reported free. The last is live rather than hypothetical, since the
+// age emitter emits func agtypeList[T any](...).
+//
+// What bounds the damage is the one caller that acts on the free set:
+// Scope intersects it with the package's own declarations, and none of
+// those names is a package-level declaration, so each is dropped before
+// a sweep sees it. Widening the bound set is gqlc-db0e.
 func FreeIdents(fn *ast.FuncDecl) map[string]bool {
 	bound := make(map[string]bool)
 	for _, l := range []*ast.FieldList{fn.Recv, fn.Type.Params, fn.Type.Results} {
@@ -426,13 +450,32 @@ func ReferencedIdents(n ast.Node) []string {
 }
 
 // DeclaredIdents returns the identifiers a node binds. Short variable
-// declarations, var/const declarations and range clauses are the whole
-// of what an emitted body uses to introduce a name. Binding is only
-// half of what a parameter can capture, though — see ReferencedIdents
-// for the other half.
+// declarations, var/const declarations, range clauses and function
+// literals are what an emitted body uses to introduce a name; for what
+// it does NOT cover, see FreeIdents' doc comment, which states the
+// limits of the bound set this feeds. Binding is only half of what a
+// parameter can capture, though — see ReferencedIdents for the other
+// half.
+//
+// The function-literal arm reads the literal's parameters AND its
+// results, because a named result binds just as a parameter does. It
+// exists for an emission that has not landed yet: a closure parameter
+// was a name no arm recorded, so FreeIdents called it free and
+// BodyLocals did not call it a local — the one construct where this
+// analysis erred towards calling a name unbound, which is the direction
+// a capture slips through the sweep rather than failing it.
 func DeclaredIdents(n ast.Node) []*ast.Ident {
 	var out []*ast.Ident
 	switch stmt := n.(type) {
+	case *ast.FuncLit:
+		for _, l := range []*ast.FieldList{stmt.Type.Params, stmt.Type.Results} {
+			if l == nil {
+				continue
+			}
+			for _, f := range l.List {
+				out = append(out, f.Names...)
+			}
+		}
 	case *ast.AssignStmt:
 		if stmt.Tok != token.DEFINE {
 			return nil
