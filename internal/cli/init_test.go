@@ -629,10 +629,11 @@ func TestInitAddOverlapRejectedAtPrompt(t *testing.T) {
 	}
 
 	t.Run("input starved after the rejection writes nothing", func(t *testing.T) {
-		// huh's PromptString keeps the last scanned line when the next
-		// Scan hits EOF (internal/accessibility/accessibility.go:145-164),
-		// so the rejected out does reach the bound target; what keeps it
-		// off disk is the §5.4 confirm gate defaulting to Abort.
+		// charm.land/huh/v2's internal/accessibility.PromptString keeps
+		// the last scanned line when the next Scan hits EOF: its loop
+		// breaks on a failed Scan without clearing the input it already
+		// holds. So the rejected out does reach the bound target; what
+		// keeps it off disk is the §5.4 confirm gate defaulting to Abort.
 		cfgPath := filepath.Join(t.TempDir(), config.DefaultFilename)
 		require.NoError(t, addFixtureConfig().Save(cfgPath))
 		before, err := os.ReadFile(cfgPath)

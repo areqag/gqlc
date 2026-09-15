@@ -115,8 +115,10 @@ func TestParamBindExprTemporalLists(t *testing.T) {
 // packer.Uint64, which opens with checkOverflowInt — `if i >
 // math.MaxInt64` sets an OverflowError, and outgoing.end hands that to
 // onPackErr, which fails the connection rather than sending. Read at
-// v5.28.4 (packstream/packer.go:93-96, 260-264; bolt/outgoing.go:377-378,
-// 481-482) and identical at v6.2.0.
+// v5.28.4 (Packer.Uint64 and Packer.checkOverflowInt in
+// packstream/packer.go; the `case reflect.Uint64, reflect.Uint` arms of
+// outgoing.packX and outgoing.packV in bolt/outgoing.go) and identical
+// at v6.2.0.
 //
 // So the defect was never a missing guard. Emitting int64(arg) performed
 // the wrap in OUR code and handed the driver an already-negative int64,
@@ -174,8 +176,9 @@ func TestParamBindExprUnsignedWidthsReachTheDriverUnconverted(t *testing.T) {
 // stand in front of this switch as in front of AGE's: queryfile's cardinality
 // annotation yields the three members or is refused, and codegen's phaseAAdmit
 // admits those three by name and routes every other value through
-// ErrInvalidCardinality (prepare.go:675). neo4j's generate calls
-// codegen.Prepare (generate.go:52) before it renders, so a Cardinality naming
+// ErrInvalidCardinality (the unrecognised-cardinality arm of admitQueryAxes,
+// which phaseAAdmit calls per query, in prepare.go). neo4j's generate calls
+// codegen.Prepare (in generate.go) before it renders, so a Cardinality naming
 // no member cannot reach writeMethod through Generate at all. What is pinned
 // here is a backstop behind that gate, not a diagnostic a real input meets.
 //
