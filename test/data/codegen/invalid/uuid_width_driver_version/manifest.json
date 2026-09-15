@@ -1,0 +1,10 @@
+{
+  "package": "uuidwidthdriverversion",
+  "queryFiles": [
+    "queries.cypher"
+  ],
+  "targets": [
+    "neo4j-go-v5"
+  ],
+  "expectedError": "neo4j.ErrUnrepresentableOnDriverVersion"
+}

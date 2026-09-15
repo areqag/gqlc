@@ -128,7 +128,7 @@ func TestRecordUseAnswersForExactlyTheSharedEncodingSet(t *testing.T) {
 	require.ElementsMatch(t, want, shared,
 		"the premise: the fixture really does reach all five records, so neither walk can be right by reaching none")
 
-	require.Equal(t, shared, neo4j.RecordUseEncodings(prepared),
+	require.Equal(t, shared, neo4j.RecordUseEncodings(prepared, neo4j.TypeMap{}),
 		"conversionUses must answer for exactly the encodings RecordEncodings names — both are sorted, so this compares order too")
 }
 
@@ -206,7 +206,7 @@ func TestRecordHelpersAreEmittedOnlyWhereCalled(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			out := string(neo4j.RenderRecordHelpers("db", all,
-				map[graph.PropertyType]neo4j.CarrierUseFlags{pt: tc.use}))
+				map[graph.PropertyType]neo4j.CarrierUseFlags{pt: tc.use}, neo4j.TargetV5))
 
 			require.Contains(t, out, "type record",
 				"the alias is owed whichever direction is reached — every signature names it")
@@ -265,7 +265,7 @@ func TestRecordHelperErrorsBalanceTheirVerbs(t *testing.T) {
 	)
 	use := neo4j.CarrierUseFlags{Decode: true, Encode: true}
 	out := neo4j.RenderRecordHelpers("db", []graph.PropertyType{pt, inner},
-		map[graph.PropertyType]neo4j.CarrierUseFlags{pt: use, inner: use})
+		map[graph.PropertyType]neo4j.CarrierUseFlags{pt: use, inner: use}, neo4j.TargetV5)
 
 	fset := token.NewFileSet()
 	file, err := parser.ParseFile(fset, "record_neo4j.go", out, 0)
@@ -358,7 +358,7 @@ func TestARecordPropertyGetsASiteNamedAlias(t *testing.T) {
 		},
 	}
 
-	src := string(neo4j.RenderModels("models", []codegen.Entity{e}, nil))
+	src := string(neo4j.RenderModels("models", []codegen.Entity{e}, nil, neo4j.TargetV5))
 
 	// assert and not require, for the reason the age twin records: under
 	// require the Contains failure aborts the NotContains arm, so a
@@ -369,4 +369,79 @@ func TestARecordPropertyGetsASiteNamedAlias(t *testing.T) {
 	assert.NotContains(t, src, "type PlaceAddr struct",
 		"the site name is a DEFINED type, so it is not assignable to the anonymous spelling "+
 			"the Row and Params structs carry")
+}
+
+// TestARecordUUIDFieldIsCarriedOnlyOnV6 is the record half of the driver
+// threading stage 2 of bd gqlc-eg4b added, and the only thing that holds
+// it. Every walk below renderRecordHelpers used to build a bare
+// typeMap{} of its own — writeRecordEncode, writeRecordDecode and
+// recordFileImports each — which was harmless while the table answered
+// the same for both majors, and stops being harmless the moment one
+// width's answer turns on the target.
+//
+// Unthreaded, the failure is SILENT and is not a compile error at either
+// level. codegen.RecordFields hands back ok=false for a record a field
+// of which the table refuses, and every one of those three sites returns
+// early on that — so a record with a UUID field rendered for v6 through
+// an unthreaded walk emits its alias and NOTHING ELSE: no encode
+// function, no decode function, no dbtype import. The emitted package
+// still parses. What then fails is a call site naming a helper that was
+// never declared, which is a whole-fixture symptom and no fixture here
+// can produce one.
+//
+// NO ON-DISK FIXTURE CAN REACH THIS, which is why it is a unit row. A
+// record is a map-valued property and neo4j refuses to store one
+// (ADR 0035, ErrUnstorableProperty in Phase Z), so no schema this
+// backend accepts declares a record property, and the corpus's record
+// fixtures are AGE-only. The path is live all the same: Phase A reaches
+// it from a query COLUMN or PARAMETER, neither of which is stored.
+//
+// Both majors are asserted, and the v5 arm is not a formality — it is
+// what says the threading carries a real answer rather than a constant.
+// A threading that passed v6's table everywhere would leave this test's
+// first half green and this half red.
+func TestARecordUUIDFieldIsCarriedOnlyOnV6(t *testing.T) {
+	rec := graph.RecordOf([]graph.RecordField{
+		{Name: "ref", Type: graph.TypeUUID, NotNull: true},
+		{Name: "seq", Type: graph.TypeInt32, NotNull: true},
+	})
+	use := neo4j.CarrierUseFlags{Decode: true, Encode: true}
+	render := func(target neo4j.DriverTarget) string {
+		return string(neo4j.RenderRecordHelpers("db", []graph.PropertyType{rec},
+			map[graph.PropertyType]neo4j.CarrierUseFlags{rec: use}, target))
+	}
+
+	t.Run("v6 carries it", func(t *testing.T) {
+		_, ok := neo4j.TargetV6.Types().Property(rec)
+		require.True(t, ok,
+			"the premise: v6's table carries a record whose field is a UUID, or this row asserts nothing about threading")
+
+		out := render(neo4j.TargetV6)
+		suffix := codegen.RecordHelperSuffix(rec)
+		// assert, not require: a failing encode arm must not abort the
+		// decode arm, or a mutation screen of one can never see the other.
+		assert.Contains(t, out, "func encode"+suffix+"(",
+			"the encode helper is missing, which is what an unthreaded walk emits — "+
+				"codegen.RecordFields refuses the UUID field against a v5 table and the site returns early")
+		assert.Contains(t, out, "func decode"+suffix+"(",
+			"likewise the decode helper")
+		assert.Contains(t, out, "fromUUID(",
+			"the encode direction widens the field through the neutral carrier's bridge")
+		assert.Contains(t, out, "dbtype.UUID",
+			"the decode direction asserts the driver's carrier, and recordFileImports has to import dbtype for it")
+		assert.Contains(t, out, "neo4j/dbtype",
+			"a file naming dbtype.UUID and importing nothing does not compile")
+	})
+
+	t.Run("v5 does not", func(t *testing.T) {
+		_, ok := neo4j.TargetV5.Types().Property(rec)
+		require.False(t, ok,
+			"v5 has no carrier for UUID, so it has none for a record carrying one; if it does, the two majors no longer differ and this whole test is about nothing")
+
+		out := render(neo4j.TargetV5)
+		assert.NotContains(t, out, "fromUUID(",
+			"v5 emits no bridge for a width it cannot carry")
+		assert.NotContains(t, out, "dbtype.UUID",
+			"nor names the driver type that does not exist in v5.28.4")
+	})
 }

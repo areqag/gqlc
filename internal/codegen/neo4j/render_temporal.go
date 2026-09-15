@@ -46,8 +46,16 @@ type carrierUse struct {
 
 // conversionUses walks the prepared batch ONCE and answers, for both
 // carrier kinds, which directions the emission sites will reach for:
-// temporal keyed by the neutral carrier's name, records keyed by the
-// canonical encoding their helper suffix is derived from.
+// neutral carriers keyed by name, records keyed by the canonical
+// encoding their helper suffix is derived from.
+//
+// The first map holds EVERY neutral carrier (ADR 0033) — the five
+// temporal names and the UUID one — and not only the temporal five, so
+// the split by bridge file is the render layer's and not this walk's.
+// renderTemporalConversions reads it through codegen.TemporalCarriers
+// and renderUUIDConversions through codegen.UUIDCarrier, and each
+// therefore skips the other's entries. A walk that filtered here would
+// have to be run twice over the same positions to answer both.
 //
 // Decode positions are entity properties and row columns (models.go and
 // the per-source files); encode positions are query parameters. A
@@ -64,21 +72,21 @@ type carrierUse struct {
 //
 // Both directions descend into a DECLARED record rather than stopping at
 // its own carrier text. A record's carrier is an anonymous struct, so
-// the leafType the temporal side marks on hands back the whole struct
+// the leafType the carrier side marks on hands back the whole struct
 // and no carrier inside it is ever named — while the record's emitted
 // helper pair calls those carriers' conversions by name.
-func conversionUses(prepared codegen.Prepared) (map[string]carrierUse, map[graph.PropertyType]carrierUse, map[graph.PropertyType]carrierUse) {
-	temporal := make(map[string]carrierUse)
+func conversionUses(prepared codegen.Prepared, tm typeMap) (map[string]carrierUse, map[graph.PropertyType]carrierUse, map[graph.PropertyType]carrierUse) {
+	neutral := make(map[string]carrierUse)
 	records := make(map[graph.PropertyType]carrierUse)
 	unions := make(map[graph.PropertyType]carrierUse)
-	markTemporal := func(goType string, set func(*carrierUse)) {
+	markCarrier := func(goType string, set func(*carrierUse)) {
 		name := leafType(goType)
-		if !isTemporalCarrier(name) {
+		if !isNeutralCarrier(name) {
 			return
 		}
-		use := temporal[name]
+		use := neutral[name]
 		set(&use)
-		temporal[name] = use
+		neutral[name] = use
 	}
 	markRecord := func(encoding graph.PropertyType, set func(*carrierUse)) {
 		use := records[encoding]
@@ -97,21 +105,21 @@ func conversionUses(prepared codegen.Prepared) (map[string]carrierUse, map[graph
 	setDecode := func(u *carrierUse) { u.decode = true }
 	var markDecode func(goType string, width graph.PropertyType)
 	markDecode = func(goType string, width graph.PropertyType) {
-		if members, ok := unionLeafMembers(goType, width); ok {
+		if members, ok := unionLeafMembers(goType, width, tm); ok {
 			markUnion(leafWidth(width), setDecode)
 			for _, m := range members {
 				markDecode(m.GoType, m.Width)
 			}
 			return
 		}
-		if fields, ok := recordLeafFields(goType, width); ok {
+		if fields, ok := recordLeafFields(goType, width, tm); ok {
 			markRecord(leafWidth(width), setDecode)
 			for _, f := range fields {
 				markDecode(f.GoType, f.Width)
 			}
 			return
 		}
-		markTemporal(goType, setDecode)
+		markCarrier(goType, setDecode)
 	}
 
 	// A record's encode body spells each field by the PARAMETER rules —
@@ -122,7 +130,7 @@ func conversionUses(prepared codegen.Prepared) (map[string]carrierUse, map[graph
 	var markEncode func(goType string, width graph.PropertyType, nullable bool)
 	markEncode = func(goType string, width graph.PropertyType, nullable bool) {
 		set := encodeDirection(goType, width, nullable)
-		if members, ok := unionLeafMembers(goType, width); ok {
+		if members, ok := unionLeafMembers(goType, width, tm); ok {
 			markUnion(leafWidth(width), set)
 			// A member is marked as a NON-nullable, NON-list parameter
 			// whatever the position above it was: encode<Suffix>'s arms
@@ -134,14 +142,14 @@ func conversionUses(prepared codegen.Prepared) (map[string]carrierUse, map[graph
 			}
 			return
 		}
-		if fields, ok := recordLeafFields(goType, width); ok {
+		if fields, ok := recordLeafFields(goType, width, tm); ok {
 			markRecord(leafWidth(width), set)
 			for _, f := range fields {
 				markEncode(f.GoType, f.Width, f.Nullable)
 			}
 			return
 		}
-		markTemporal(goType, set)
+		markCarrier(goType, set)
 	}
 
 	for _, e := range prepared.Entities {
@@ -160,7 +168,7 @@ func conversionUses(prepared codegen.Prepared) (map[string]carrierUse, map[graph
 			markEncode(f.GoType, f.Width, f.Nullable)
 		}
 	}
-	return temporal, records, unions
+	return neutral, records, unions
 }
 
 // encodeDirection answers which encode helper ONE parameter position
@@ -213,12 +221,12 @@ func encodeDirection(goType string, width graph.PropertyType, nullable bool) fun
 // here, because a refused union fails preparation before any emission walk
 // runs; it is folded in rather than distinguished so a caller has one
 // question to ask and no unreachable arm to write.
-func unionLeafMembers(goType string, width graph.PropertyType) ([]codegen.UnionMemberPlan, bool) {
+func unionLeafMembers(goType string, width graph.PropertyType, tm typeMap) ([]codegen.UnionMemberPlan, bool) {
 	leaf, elem := leafType(goType), leafWidth(width)
 	if !codegen.IsDeclaredUnion(leaf, elem) {
 		return nil, false
 	}
-	return codegen.UnionMembers(elem, typeMap{}.Property)
+	return codegen.UnionMembers(elem, tm.Property)
 }
 
 // recordLeafFields answers the field plan of the DECLARED record at the
@@ -236,18 +244,47 @@ func unionLeafMembers(goType string, width graph.PropertyType) ([]codegen.UnionM
 // arrive here, because a refused record fails preparation before any
 // emission walk runs; it is folded in rather than distinguished so that
 // a caller has one question to ask and no unreachable arm to write.
-func recordLeafFields(goType string, width graph.PropertyType) ([]codegen.RecordFieldPlan, bool) {
+func recordLeafFields(goType string, width graph.PropertyType, tm typeMap) ([]codegen.RecordFieldPlan, bool) {
 	leaf, elem := leafType(goType), leafWidth(width)
 	if !codegen.IsDeclaredRecord(leaf, elem) {
 		return nil, false
 	}
-	return codegen.RecordFields(elem.Fields(), typeMap{}.Property)
+	return codegen.RecordFields(elem.Fields(), tm.Property)
 }
 
-// isTemporalCarrier reports whether a Go type text is exactly one of the
-// neutral carrier names. Exact, never a prefix or substring test: "Date"
-// is inside "LocalDateTime" and inside entity names a schema chose.
-func isTemporalCarrier(goType string) bool {
+// isNeutralCarrier reports whether a Go type text is exactly one of the
+// gqlc-owned neutral carrier names (ADR 0033) — the five temporal ones
+// or the UUID one. Exact, never a prefix or substring test: "Date" is
+// inside "LocalDateTime" and inside entity names a schema chose.
+//
+// One predicate over both families rather than one per family, because
+// every site that asks is asking the same thing about the carrier and
+// not about the width behind it: the emitted type is gqlc's own, the
+// driver's counterpart is a different type, and the two are bridged by
+// an emitted to<X> / from<X> pair rather than reached directly. That is
+// as true of UUID as of Date. It is what decides narrowExpr against
+// narrowCall (a carrier is a shape change, never a range question, so it
+// has no failure to report), what puts dbtype in a decode site's import
+// block and keeps it out of a bind site's, and what conversionUses marks
+// a direction on.
+//
+// UUID rides here rather than converting inline, even though UUID and
+// dbtype.UUID ARE conversion-compatible and toUUID's whole body is that
+// conversion. A list parameter is why: the driver packs an array by
+// type-switching on dbtype.UUID itself (v6 bolt/outgoing.go packArray),
+// so a []UUID reaches the wire as an UnsupportedTypeError and no Go
+// conversion turns a []UUID into a []dbtype.UUID. The per-element widen
+// has to be an emitted helper, and once one direction owes a helper the
+// other costs a line and buys uniformity at all fifteen sites.
+//
+// Which FILE the pair lands in is a separate question, answered by the
+// two render functions splitting on codegen.TemporalCarriers versus
+// codegen.UUIDCarrier — so a batch naming one family emits that family's
+// bridge alone.
+func isNeutralCarrier(goType string) bool {
+	if goType == codegen.UUIDCarrier {
+		return true
+	}
 	for _, name := range codegen.TemporalCarriers {
 		if goType == name {
 			return true
@@ -334,7 +371,7 @@ func temporalListHelper(leaf string, elemNullable bool) string {
 // width cannot hold; they now go through narrowCall below, which fails
 // the decode instead (ADR 0037, bd gqlc-awtb).
 func narrowExpr(goType, src string) string {
-	if isTemporalCarrier(goType) {
+	if isNeutralCarrier(goType) {
 		return fmt.Sprintf("to%s(%s)", goType, src)
 	}
 	return fmt.Sprintf("%s(%s)", goType, src)
@@ -382,10 +419,10 @@ func narrowCall(goType string, width graph.PropertyType, src string) string {
 // rides on the float helper alone. An unexported function nothing calls
 // fails the emitted package's own lint fence, so an over-broad gate
 // reds the fixture rather than merely emitting a dead line.
-func narrowsANumericWidth(entities []codegen.Entity, prepared []codegen.Query) (ints, floats bool) {
+func narrowsANumericWidth(entities []codegen.Entity, prepared []codegen.Query, tm typeMap) (ints, floats bool) {
 	var visit func(goType string, width graph.PropertyType)
 	visit = func(goType string, width graph.PropertyType) {
-		if members, ok := unionLeafMembers(goType, width); ok {
+		if members, ok := unionLeafMembers(goType, width, tm); ok {
 			// A union's own carrier is `any`, so the leaf test below would
 			// stop here and the narrowing its decode arms call would be
 			// emitted with no declaration. The members ARE the narrowed
@@ -397,7 +434,7 @@ func narrowsANumericWidth(entities []codegen.Entity, prepared []codegen.Query) (
 			return
 		}
 		leaf := leafType(goType)
-		if leaf == driverCarrier(leaf) || isTemporalCarrier(leaf) {
+		if leaf == driverCarrier(leaf) || isNeutralCarrier(leaf) {
 			return
 		}
 		if codegen.IsRecordStruct(leaf) {
@@ -493,7 +530,7 @@ func narrowFloat32(v float64) (float32, error) {
 // width for the reason narrowCall does: the helper's name comes from the
 // canonical encoding, and the struct text cannot be read back into one.
 func widenExpr(goType string, width graph.PropertyType, access string) string {
-	if isTemporalCarrier(goType) {
+	if isNeutralCarrier(goType) {
 		return fmt.Sprintf("from%s(%s)", goType, access)
 	}
 	if codegen.IsDeclaredRecord(goType, width) {
@@ -639,14 +676,23 @@ func %[1]sPtr(v *[]%[2]s) any {
 `, temporalListHelper(name, elemNullable), elem)
 }
 
-// needsTimePackage reports whether any emitted conversion body names the
-// time package. Duration is the one carrier that does not: dbtype.Duration
-// is already a component struct, so both directions are a field copy.
+// needsTimePackage reports whether any conversion body THIS FILE emits
+// names the time package. Duration is the one temporal carrier that does
+// not: dbtype.Duration is already a component struct, so both directions
+// are a field copy.
+//
+// Driven off codegen.TemporalCarriers rather than off the map's own
+// keys, because the map is every neutral carrier's uses and this
+// question is about temporal_neo4j.go alone. Ranging the keys would let
+// the UUID entry — whose bodies live in uuid_neo4j.go and name no time
+// package — put an unused time import in this file, and an emitted
+// package with an unused import does not compile.
 func needsTimePackage(uses map[string]carrierUse) bool {
-	for name, use := range uses {
+	for _, name := range codegen.TemporalCarriers {
 		if name == "Duration" {
 			continue
 		}
+		use := uses[name]
 		if use.decode || use.encode || use.encodePtr {
 			return true
 		}

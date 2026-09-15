@@ -160,7 +160,7 @@ func goTypeNeedsImports(ty string) (bool, bool) {
 // an import in the file that nothing there names.
 func decodeNeedsImports(ty string) (bool, bool) {
 	needDbtype, needTime := goTypeNeedsImports(ty)
-	return needDbtype || isTemporalCarrier(leafType(ty)), needTime
+	return needDbtype || isNeutralCarrier(leafType(ty)), needTime
 }
 
 // renderCypherFile emits one <name>.cypher.go file (spec §5.5). Per
@@ -636,7 +636,7 @@ func paramBindExpr(f codegen.Param, access string) string {
 		return sliceParamBindExpr(f.GoType, f.Width, f.Nullable, access)
 	}
 	if f.Nullable {
-		if isTemporalCarrier(f.GoType) {
+		if isNeutralCarrier(f.GoType) {
 			return fmt.Sprintf("from%sPtr(%s)", f.GoType, access)
 		}
 		if codegen.IsDeclaredRecord(f.GoType, f.Width) {
@@ -792,7 +792,7 @@ func sliceParamBindExpr(goType string, width graph.PropertyType, nullable bool, 
 	leaf, leafWidth := leafType(goType), leafWidth(width)
 	var helper string
 	switch {
-	case isTemporalCarrier(leaf):
+	case isNeutralCarrier(leaf):
 		helper = temporalListHelper(leaf, listElemIsNullable(goType))
 	case codegen.IsDeclaredRecord(leaf, leafWidth):
 		// The second leaf packStruct refuses, and it arrives here for
@@ -949,7 +949,7 @@ func writeSingleColumnDecodeIndent(b *strings.Builder, p codegen.Query, f codege
 	// the shape-changing to<X> for a temporal. A numeric width the driver
 	// over-carries takes neither, because narrowing it can FAIL — those go
 	// through a checked call in each arm below (ADR 0037, bd gqlc-awtb).
-	checked := carrier != f.GoType && !isTemporalCarrier(f.GoType)
+	checked := carrier != f.GoType && !isNeutralCarrier(f.GoType)
 	valueExpr := varName
 	if carrier != f.GoType && !checked {
 		valueExpr = narrowExpr(f.GoType, varName)
@@ -1318,7 +1318,7 @@ func walkListElemBody(b *strings.Builder, p codegen.Query, f codegen.Row, e *cod
 		fmt.Fprintf(b, "%sv, ok := %s.(%s)\n", indent, iterVar, carrier)
 		fmt.Fprintf(b, "%sif !ok {\n%s\t%sfmt.Errorf(\"%s: decode column %%q element %%d: expected %s, got %%T\", %q, i, %s)%s\n%s}\n", indent, indent, exit.open, p.MethodName, carrier, f.ColumnName, iterVar, exit.close, indent)
 		switch {
-		case isTemporalCarrier(base):
+		case isNeutralCarrier(base):
 			// The conversion is bound to a local first when the element is
 			// nullable, because Go has no address of a call result.
 			if e.Nullable {

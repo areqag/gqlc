@@ -92,9 +92,10 @@ func TestAContingentRefusalNamesItsBackend(t *testing.T) {
 			"registry key %q declares no phrase to call itself by, so a refusal of its own could not be told from a shared one", key)
 	}
 
+	known := comparableSentinels(reg)
 	var contested, divergent, shared []graph.PropertyType
 	for _, pt := range declaredWidths(t) {
-		answers := answersByTarget(t, reg, keys, pt)
+		answers := answersByTarget(t, reg, keys, pt, known)
 		accepted, sentinels := tallyAnswers(answers)
 		switch {
 		case len(sentinels) == 0:
@@ -224,7 +225,7 @@ func tallyAnswers(answers map[string]answer) (accepted, sentinels []string) {
 
 // answersByTarget generates a one-property schema carrying pt for every
 // enrolled target and records what each one answered.
-func answersByTarget(t *testing.T, reg codegen.Registry, keys []string, pt graph.PropertyType) map[string]answer {
+func answersByTarget(t *testing.T, reg codegen.Registry, keys []string, pt graph.PropertyType, known []error) map[string]answer {
 	t.Helper()
 
 	answers := make(map[string]answer, len(keys))
@@ -234,13 +235,48 @@ func answersByTarget(t *testing.T, reg codegen.Registry, keys []string, pt graph
 
 		files, err := newGen("widths").Generate(codegen.Input{Schema: schemaWithPayload(pt)})
 		if err != nil {
-			answers[key] = answer{err: err, sentinels: citedSentinels(t, pt, key, err)}
+			answers[key] = answer{err: err, sentinels: citedSentinels(t, pt, key, err, known)}
 			continue
 		}
 		require.NotEmpty(t, files, "%s emitted no files at %s and returned no error, so neither verdict is recorded", pt, key)
 		answers[key] = answer{accepted: true}
 	}
 	return answers
+}
+
+// comparableSentinels is every sentinel a refusal in this sweep may be
+// compared by: the shared front end's reachable set, plus whatever the
+// enrolled backends PUBLISH through their registry entries.
+//
+// The second half is not decoration. A backend may refuse for a reason
+// the front end has no sentinel for — neo4j.ErrUnrepresentableOnDriverVersion
+// is one, raised for a width this backend carries on its other driver
+// major — and such a refusal cites nothing in codegen.AllSentinels. The
+// sweep would then fail it as unreasoned when it is the most precisely
+// reasoned refusal on the roster.
+//
+// Read off the registry rather than by importing the backends, for the
+// reason this file is at the composition root at all: Registry.Sentinels
+// is the published surface, and anything a backend does not publish is
+// one no fixture can name either.
+//
+// Deduplicated by message, because a backend is free to publish a
+// sentinel codegen also declares and the joined key below is a set.
+func comparableSentinels(reg codegen.Registry) []error {
+	sentinels := codegen.AllSentinels()
+	seen := make(map[string]struct{}, len(sentinels))
+	for _, s := range sentinels {
+		seen[s.Error()] = struct{}{}
+	}
+	for _, name := range slices.Sorted(maps.Keys(reg.Sentinels())) {
+		s := reg.Sentinels()[name]
+		if _, dup := seen[s.Error()]; dup {
+			continue
+		}
+		seen[s.Error()] = struct{}{}
+		sentinels = append(sentinels, s)
+	}
+	return sentinels
 }
 
 // citedSentinels renders the sentinel set one refusal cites, as the
@@ -251,19 +287,20 @@ func answersByTarget(t *testing.T, reg codegen.Registry, keys []string, pt graph
 // refusal and let a coincidence read as agreement — and the sweep
 // declares no queries, so every refusal it can raise comes from a schema
 // phase, all of which the taxonomy (docs/specs/
-// codegen-sentinel-taxonomy.md) requires to carry one.
-func citedSentinels(t *testing.T, pt graph.PropertyType, key string, err error) string {
+// codegen-sentinel-taxonomy.md) requires to carry one, or from a
+// backend's own published set.
+func citedSentinels(t *testing.T, pt graph.PropertyType, key string, err error, known []error) string {
 	t.Helper()
 
 	var cited []string
-	for _, sentinel := range codegen.AllSentinels() {
+	for _, sentinel := range known {
 		if errors.Is(err, sentinel) {
 			cited = append(cited, sentinel.Error())
 		}
 	}
 	require.NotEmpty(t, cited,
-		"%s is refused by %s citing none of the codegen sentinels, so its reason cannot be compared with the "+
-			"other targets'; it reads %q", pt, key, err.Error())
+		"%s is refused by %s citing neither a codegen sentinel nor one its backend publishes, so its reason cannot "+
+			"be compared with the other targets'; it reads %q", pt, key, err.Error())
 	slices.Sort(cited)
 	return strings.Join(cited, "+")
 }

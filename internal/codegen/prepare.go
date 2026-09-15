@@ -50,7 +50,14 @@ const (
 // DBTX / SessionInit / EnsureGraph / DropGraph in batches targeting a
 // backend with neither a connection seam nor a graph lifecycle, and the
 // five temporal carriers (ADR 0033) in batches whose surface names no
-// temporal width and so emits no temporal.go. A rename that works in one
+// temporal width and so emits no temporal.go. UUID is the sharpest case
+// of the same rule and the newest row: exactly one enrolled target
+// carries the width at all (neo4j-go-v6, whose driver declares
+// dbtype.UUID; neo4j-go-v5 and apache-age-pgx-v5 refuse it), so on two
+// of three targets the name is reserved against a declaration that
+// cannot appear. Reserved anyway, by D2 Resolved: a schema that
+// generates under one target and is refused under another is the
+// renaming scheme that ruling declined. A rename that works in one
 // batch or against one backend but not another is exactly the "renaming
 // scheme" D2 Resolved refused.
 //
@@ -99,6 +106,7 @@ var reservedIdentifiers = map[string]identifierScope{
 	"LocalTime":          scopePackage,
 	"LocalDateTime":      scopePackage,
 	"Duration":           scopePackage,
+	"UUID":               scopePackage,
 }
 
 // Prepared is the batch derivation the shared phases commit: the emitted
