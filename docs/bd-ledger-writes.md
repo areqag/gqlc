@@ -22,6 +22,14 @@ reconstructs `gqlc-jffyz`'s freeze-time record from its current one rather than
 provoking a fresh refusal, precisely so that no bead had to be written to in
 order to measure the thing that punishes writes.
 
+The second exception is larger and is named here for the same reason. On
+2026-09-14 the ceiling was **removed from the live ledger** by a schema
+migration — a DDL write against the shared fleet DB, authorised by the owner,
+taken with a full `cp -a` backup as the rollback point. Every row of that repair
+was rehearsed on a throwaway copy first and every claim below that it falsifies
+has been corrected in place rather than deleted. See
+[Applying the fix elsewhere](#applying-the-fix-elsewhere).
+
 ## The confirmation line means "accepted", not "changed"
 
     $ bd update <id> --status blocked --assignee somebody   # already both
@@ -107,7 +115,19 @@ exits 0**. Order does not matter — the bad id first or second gives the same
 result. Name one bead per `bd update` whose success you intend to check by exit
 status, or check each bead's state afterwards rather than the command's.
 
-## A bead that grows past ~65535 bytes stops accepting writes, permanently
+## A bead that grows past ~65535 bytes stops accepting writes
+
+> **Retired on this ledger, 2026-09-14** (bd `gqlc-l7d7q`, `gqlc-3q77o`). All
+> thirteen columns involved are `LONGTEXT` now, so **nothing below is a reason to
+> ration what you write into a bead.** The section is kept because two things in
+> it outlive the fix: it is still exactly true of any ledger that has *not* had
+> the migration applied — which includes a fresh clone, since deployed bd
+> v1.0.4 (`ce242a879678`) does not carry upstream `0048`/`0049` at all — and the
+> measuring technique below is still how you find out which ledger you are on.
+> The witness for the repair is `gqlc-jffyz` itself: frozen and un-updatable by
+> anyone for eleven days, it took an `--append-notes` at `rc=0` on 2026-09-14.
+> What was applied, and how `0049` silently under-applies, is under
+> [Applying the fix elsewhere](#applying-the-fix-elsewhere).
 
 Measured 2026-09-03 against the same bd 1.0.4, on a throwaway bead `gqlc-zniam`
 created and deleted for it. The live casualty, `gqlc-jffyz`, was not written to:
@@ -135,7 +155,10 @@ Three consequences, each measured rather than reasoned from the message:
 - **`bd close` still works** — it does not go through that path — but it is a
   one-way door. A closed oversized bead cannot be reopened, and neither
   `--status`, `--priority` nor `--append-notes` will move afterwards. So the
-  bead is closable but never again editable.
+  bead is closable but never again editable. *(This door is what the 2026-09-14
+  migration opened: the cap on `events.old_value` was the whole enforcement, so
+  widening it released every bead already behind it. `gqlc-jffyz` was closed and
+  oversized on both counts and now accepts writes again.)*
 
 **Reads are entirely unaffected**, which is why nothing shows it. `bd show`,
 `bd list` and `bd ready` all answer normally and the bead looks healthy on every
@@ -215,8 +238,68 @@ many sessions — which is exactly the population whose notes hold the handoff. 
 fires first where it costs most.
 
 `--append-notes` is still the right flag (a bare `--notes` replaces, silently
-losing the trail). The tension is real and unresolved here: the discipline that
-makes notes valuable is the one that eventually freezes the bead.
+losing the trail). The tension that used to sit here — the discipline that makes
+notes valuable being the one that eventually freezes the bead — is resolved on
+this ledger rather than merely deferred: `LONGTEXT` is a 4GB type, so appending
+is no longer a slow way of spending a bead.
+
+## Applying the fix elsewhere
+
+Three files, applied in one window on 2026-09-14. The first two are upstream's
+own bytes, taken from `gastownhall/beads` at `f56632adcfab`:
+
+    internal/storage/schema/migrations/0048_widen_event_value_columns.up.sql
+    internal/storage/schema/migrations/0049_longtext_large_content_columns.up.sql
+
+`0048` widens `events.old_value` / `new_value`; `0049` widens the eleven
+large-content columns on `issues`, `wisps` and `comments`. **Neither exists at
+the deployed bd commit** `ce242a879678` (v1.0.4), whose migrations are the 17 Go
+files under `internal/storage/dolt/migrations/` — so these are upstream bytes
+that our bd would never run on its own, and they have to be applied by hand
+against the embedded dolt directory with a matching CLI (dolt v1.86.4, tag
+commit `73fcb4a868c2`, which is exactly the dolt bd 1.0.4 embeds).
+
+**`0049` silently under-applies on dolt 1.86.4, and this is the trap.** It exits
+`0`, prints no error, and moves only **8 of its 11 columns**. The three it skips
+are its single-column `PREPARE`/`EXECUTE` blocks:
+
+    issues.close_reason    wisps.close_reason    comments.text
+
+Its two multi-column blocks apply correctly. **The guards are not the cause** —
+measured directly, the guard subquery for `issues.close_reason` returns `1` and
+`SET @t = (SELECT ...)` reads `1` back, so the guard asks for the fix and the
+fix does not happen. The root cause inside dolt's prepared-statement handling
+was not chased down; it is not needed for the repair. The three are restated
+unguarded, each carrying the nullability and `DEFAULT` read off
+`INFORMATION_SCHEMA` **before** the change, because `MODIFY` replaces the whole
+column definition and dropping a `DEFAULT` regresses inserts that omit it:
+
+    ALTER TABLE issues   MODIFY COLUMN close_reason LONGTEXT DEFAULT '';
+    ALTER TABLE wisps    MODIFY COLUMN close_reason LONGTEXT DEFAULT '';
+    ALTER TABLE comments MODIFY COLUMN `text`       LONGTEXT NOT NULL;
+
+**`rc=0` is not evidence that a DDL applied.** Nothing else reports this failure
+— no stderr, no non-zero exit, and bd keeps working half-migrated — so the only
+verdict is a read-back, which must return zero rows when you are done:
+
+    SELECT TABLE_NAME, COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE() AND COLUMN_TYPE = 'text'
+      AND ( (TABLE_NAME = 'events' AND COLUMN_NAME IN ('old_value','new_value'))
+         OR (TABLE_NAME IN ('issues','wisps') AND COLUMN_NAME IN
+             ('notes','description','design','acceptance_criteria','close_reason'))
+         OR (TABLE_NAME = 'comments' AND COLUMN_NAME = 'text') );
+
+Two notes on rehearsing it, both of which cost time here. The control this
+repair was originally specified against — `bd update gqlc-jffyz` must be refused
+— **was no longer executable**, because `gqlc-jffyz` had since been closed; a
+fresh frozen bead has to be manufactured on the copy instead, and the cheapest
+way is `--notes` of 60000 bytes plus `--description` of 20000, which puts the
+record over the line without any single column exceeding it. And `BEADS_DIR`
+pointing at a copy is not by itself proof that writes land there: create a bead
+on the copy and confirm it is **absent from live**, with both probes run from a
+directory where bd resolves a database. Run from somewhere it resolves nothing
+and the probe returns `no beads database found`, which reads exactly like a
+clean pass.
 
 ## Rules for a scripted write
 
@@ -227,9 +310,12 @@ makes notes valuable is the one that eventually freezes the bead.
 4. **Read back the field that matters**, and for routability read it back with
    `bd ready` — `bd show` will display a bead that `bd ready` will not return.
 5. **Never treat `✓` as a write.**
-6. **On a long-lived bead, do not assume `--append-notes` will keep working.**
-   Past the record-size ceiling every update is refused for good; see the
-   section above for how to measure the headroom.
+6. **On a long-lived bead, `--append-notes` keeps working** — the record-size
+   ceiling that used to make this rule the opposite was removed from this ledger
+   on 2026-09-14. On any ledger that has not had that migration applied, the old
+   rule stands unchanged: past the ceiling every update is refused for good. The
+   section above says how to tell the two apart, and it is a schema read rather
+   than a judgement call.
 
 ## What is gated, and what is not
 
