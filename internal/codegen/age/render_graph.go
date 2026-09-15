@@ -90,13 +90,24 @@ func SessionInit(ctx context.Context, conn *pgx.Conn) error {
 // cannot hold a lock across your processes, so the interlock is yours
 // to arrange.
 //
-// Two limits on that, so it is read for what it is. Whether
-// label-creating DML alone carries the hazard — the first CREATE of a
-// label is DDL inside DML — is NOT established: every configuration
-// measured that cleared the failures also removed one of the two
-// lifecycle calls. And a search of apache/age's issue tracker the same
-// day turned up no report matching those two signatures, which is a
-// search and not a statement about what AGE does or does not fix.
+// That advice stays scoped to these two calls. Label-creating DML on
+// its own — the first CREATE of a label is DDL inside DML — was the
+// obvious candidate to widen it to, and it did not carry the hazard in
+// 0 of 12 trials measured 2026-09-15 on the same image. Each trial ran
+// 8 sessions creating first-labels in a graph of their own alongside 2
+// reading bystanders, all 10 released from a barrier so their windows
+// overlapped (14400 labels; create_graph privilege-refused in every
+// session; the database's graph count flat across every window).
+//
+// Read that as 0 of 12 and not as "safe", on two counts. What the
+// trials count is destruction of a bystander's AGE catalogue caches —
+// the precondition a concurrent create_graph reaches, not the
+// resolution failures above, which neither arm reproduced. And the
+// zeros are only worth the apparatus: a concurrent create_graph
+// destroyed those caches in 3 of 3 control trials on it. A search of
+// apache/age's issue tracker in 2026-08 turned up no report matching
+// those two signatures, which is a search and not a statement about
+// what AGE does or does not fix.
 func (q *Queries) EnsureGraph(ctx context.Context) error {
 	graph, err := q.boundGraph()
 	if err != nil {
