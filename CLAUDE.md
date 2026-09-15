@@ -97,24 +97,36 @@ own call sites: [docs/bd-ledger-queries.md](docs/bd-ledger-queries.md).
 - **Name one bead per `bd update` whose success you check by exit status.** Given
   several ids it is best-effort — it exits 0 having skipped the ones it could not
   resolve. `bd close` differs: it refuses the whole command and writes nothing.
-- **A bead whose serialised record passes ~65535 bytes never accepts another
-  `bd update`.** Every write first records the *whole previous bead* as JSON in a
-  `TEXT` column, so the size of your write is irrelevant and shrinking the notes
-  does not recover it. Reads stay healthy, so the bead looks fine on every board;
-  the only symptom is on the stderr of a write. `bd close` still works, but a
-  closed oversized bead can never be reopened. Two beads of 1656 were over the
-  line on 2026-09-05 and the next largest was 44095, so this is a hazard for
-  heavily-worked beads rather than a fleet-wide one.
-- **What is measured is the stored pre-image, and eyeballing it goes wrong in
-  both directions.** It is the bead record minus `dependencies`, `dependents`
-  and `parent`, compact, HTML-escaped, counted in *bytes*. `bd show --json |
-  jq -c` reads high for a bead with dependencies (by 75438 bytes on one) and low
-  for the 1132 of 1656 that have none. Reading high wastes a bead; reading low
-  tells you to keep appending to one that is already dead. The validated query
-  is in the doc below — do not improvise one.
+- **The ~65535-byte record ceiling was retired from this ledger on 2026-09-14.**
+  Until then, a bead whose serialised record passed ~65535 bytes stopped
+  accepting `bd update` forever — every write first records the *whole previous
+  bead* as JSON into a `TEXT` column, so the size of your write was irrelevant
+  and shrinking the notes did not recover it. Both halves are `LONGTEXT` here
+  now: `events.old_value`/`new_value`, and the eleven large-content columns on
+  `issues`, `wisps` and `comments`. **So do not ration what you write into a
+  bead** — that caution has already cost at least one agent's evidence, and the
+  thing it was protecting against is gone.
+- **A fresh clone does not inherit that fix, so ask rather than assume.** The
+  deployed bd (commit `ce242a879678`, v1.0.4) does not carry upstream's `0048` /
+  `0049` at all — they are post-1.0.4 SQL migrations, applied here by hand. Any
+  column still reading `text` is still capped at 65535 bytes:
+
+  ```sql
+  SELECT TABLE_NAME, COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND COLUMN_TYPE = 'text';
+  ```
+
+- **If you apply those migrations anywhere else, read the schema back —
+  `rc=0` is not evidence a DDL applied.** On dolt 1.86.4, `0049` exits 0 with no
+  error output and moves only 8 of its 11 columns, silently skipping its three
+  single-column `PREPARE`/`EXECUTE` blocks (`issues.close_reason`,
+  `wisps.close_reason`, `comments.text`). The guards are not the cause; they
+  evaluate to 1 and the `ALTER` still does not happen. Nothing else reports it:
+  no stderr, no non-zero exit, and bd keeps working half-migrated.
 
 Measured 2026-08-24 against bd 1.0.4 and 1.2.2, the size ceiling on 2026-09-03,
-and the pre-image's shape and census on 2026-09-05, with the falsifiers and this
+the pre-image's shape and census on 2026-09-05, and the ceiling's removal and
+`0049`'s under-application on 2026-09-14, with the falsifiers and this
 repository's write call-site audit:
 [docs/bd-ledger-writes.md](docs/bd-ledger-writes.md).
 
