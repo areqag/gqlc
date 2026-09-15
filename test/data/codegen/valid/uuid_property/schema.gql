@@ -1,0 +1,11 @@
+CREATE PROPERTY GRAPH TYPE UuidProperty AS {
+    (:Account {
+        id     :: INT64 NOT NULL,
+        ref    :: UUID NOT NULL,
+        prior  :: UUID,
+        trail  :: LIST<UUID>,
+        chain  :: LIST<UUID NOT NULL>,
+        either :: ANY<UUID | STRING>,
+        span   :: DURATION(DAY TO SECOND) NOT NULL
+    })
+}

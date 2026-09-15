@@ -1,57 +1,18 @@
 package neo4j
 
 import (
-	"errors"
-	"fmt"
-
 	"github.com/areqag/gqlc/internal/codegen"
 	"github.com/areqag/gqlc/internal/queryfile"
 )
-
-// nameBackend attributes a storage refusal to this backend.
-//
-// ErrUnstorableProperty ONLY, under a rule that governs both backends: a
-// backend names itself exactly when another enrolled backend answers the
-// same declaration differently. Attribution implicates contingency —
-// naming one tells the author "this is this backend's answer, and another
-// may differ" — so the name is owed where the targets disagree and
-// misleads where they do not. Apache AGE stores the nested list this
-// sentinel refuses, so it is owed here.
-//
-// Width refusals are returned unwrapped BY that rule rather than by an
-// exception to it. Every width this table refuses is one no backend
-// carries — the eight oversized numerics, permanent under spec §9 — so a
-// suffix would send an author looking for a target that carries INT128.
-// AGE's twin does attribute its width refusals and is right to: its
-// refused set additionally holds BYTES and the zoned-element lists, which
-// this table accepts. That premise is measured rather than assumed, and
-// TestAContingentRefusalNamesItsBackend (internal/cli/backends) reddens
-// the day this table refuses a width another target accepts — which is
-// the day the question is re-opened (bd gqlc-fkdwq).
-//
-// The storage wording could not be reused for the width channel, which is
-// what made this a question rather than a copy. ErrUnrepresentableWidth is
-// raised by three sweeps — the entity sweep, the query-column sweep, and
-// the query-parameter sweep — and this suffix is a claim about STORAGE. On
-// the latter two it would be false: a projected INT128 column is not a
-// stored property, and it is refused for want of a carrier. Attributing the
-// storage sentinel alone is what keeps the sentence true wherever it can
-// appear (ADR 0035).
-func nameBackend(err error) error {
-	if !errors.Is(err, codegen.ErrUnstorableProperty) {
-		return err
-	}
-	return fmt.Errorf("%w, which the neo4j backend cannot store as a property", err)
-}
 
 // generate is the pure emission kernel. Determinism per §2.3: input
 // slices are walked in their author-defined order; the output slice is
 // sorted by Path before return. First-error short-circuit: (nil, err)
 // on failure.
 func generate(in codegen.Input, target driverTarget, packageName string) ([]codegen.File, error) {
-	prepared, err := codegen.Prepare(in, typeMap{}, packageName)
+	prepared, err := codegen.Prepare(in, target.types(), packageName)
 	if err != nil {
-		return nil, nameBackend(err)
+		return nil, refuse(err, target)
 	}
 
 	pkg := prepared.Package
@@ -72,7 +33,7 @@ func generate(in codegen.Input, target driverTarget, packageName string) ([]code
 	// One walk answers both conversion kinds, so models.go's record
 	// helpers and temporal_neo4j.go's carrier bridges are gated off the
 	// same reading of the batch (see conversionUses).
-	temporalUse, recordUse, unionUse := conversionUses(prepared)
+	neutralUse, recordUse, unionUse := conversionUses(prepared, target.types())
 
 	files := []codegen.File{
 		{Path: "db.go", Contents: renderDB(pkg, hasOne, hasIter, target)},
@@ -112,7 +73,21 @@ func generate(in codegen.Input, target driverTarget, packageName string) ([]code
 	if codegen.ReferencesTemporalCarrier(prepared) {
 		files = append(files,
 			codegen.File{Path: "temporal.go", Contents: codegen.RenderTemporal(pkg)},
-			codegen.File{Path: "temporal_neo4j.go", Contents: renderTemporalConversions(pkg, temporalUse, target)},
+			codegen.File{Path: "temporal_neo4j.go", Contents: renderTemporalConversions(pkg, neutralUse, target)},
+		)
+	}
+
+	// The neutral UUID carrier and its driver bridge, on exactly the
+	// terms the temporal pair above stands on and triggered separately
+	// from it: uuid.go is byte-identical across every target,
+	// uuid_neo4j.go is this backend's and holds every dbtype mention the
+	// carrier displaced off the public surface. Only the v6 target
+	// reaches here — v5 has no carrier for the width, so Prepare refuses
+	// the batch before emission.
+	if codegen.ReferencesUUIDCarrier(prepared) {
+		files = append(files,
+			codegen.File{Path: "uuid.go", Contents: codegen.RenderUUID(pkg)},
+			codegen.File{Path: "uuid_neo4j.go", Contents: renderUUIDConversions(pkg, neutralUse, target)},
 		)
 	}
 

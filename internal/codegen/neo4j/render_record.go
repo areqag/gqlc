@@ -28,7 +28,7 @@ func renderRecordHelpers(pkg string, encodings []graph.PropertyType, uses map[gr
 		// Every encoding in the set is reached from some position, so
 		// every alias is named by some signature below and none is a
 		// declaration nothing uses.
-		text, ok := codegen.RecordStructText(pt.Fields(), typeMap{}.Property)
+		text, ok := codegen.RecordStructText(pt.Fields(), target.types().Property)
 		if !ok {
 			// Unreachable: a record some field of which this backend
 			// cannot carry is refused at preparation, before any
@@ -44,15 +44,15 @@ func renderRecordHelpers(pkg string, encodings []graph.PropertyType, uses map[gr
 		// directions: the Ptr wrapper nil-checks and calls it, and the
 		// List wrapper calls it per element.
 		if use.encode || use.encodePtr || use.list {
-			writeRecordEncode(&body, pt, suffix, alias)
+			writeRecordEncode(&body, pt, suffix, alias, target.types())
 		}
 		writeRecordWrappers(&body, pt, suffix, alias, use)
 		if use.decode {
-			writeRecordDecode(&body, pt, suffix, alias)
+			writeRecordDecode(&body, pt, suffix, alias, target.types())
 		}
 	}
 
-	needFmt, needTime, needDbtype := recordFileImports(encodings, uses)
+	needFmt, needTime, needDbtype := recordFileImports(encodings, uses, target.types())
 
 	var b strings.Builder
 	b.WriteString(codegen.Header())
@@ -199,8 +199,8 @@ func encode%[1]sListPtr(v *[]%[2]s) any {
 // the wire shape a Cypher expression indexes by the name the schema
 // wrote. The Go side of the same field is the mangle, and RecordFields is
 // what keeps the two in step.
-func writeRecordEncode(b *strings.Builder, pt graph.PropertyType, suffix, alias string) {
-	plan, ok := codegen.RecordFields(pt.Fields(), typeMap{}.Property)
+func writeRecordEncode(b *strings.Builder, pt graph.PropertyType, suffix, alias string, tm typeMap) {
+	plan, ok := codegen.RecordFields(pt.Fields(), tm.Property)
 	if !ok {
 		return
 	}
@@ -285,8 +285,8 @@ func recordEncodeIsFallible(pt graph.PropertyType) bool {
 // Cypher map spells "no value here" both ways and a decoder that told
 // them apart would be reporting the shape of the writer rather than the
 // value.
-func writeRecordDecode(b *strings.Builder, pt graph.PropertyType, suffix, alias string) {
-	plan, ok := codegen.RecordFields(pt.Fields(), typeMap{}.Property)
+func writeRecordDecode(b *strings.Builder, pt graph.PropertyType, suffix, alias string, tm typeMap) {
+	plan, ok := codegen.RecordFields(pt.Fields(), tm.Property)
 	if !ok {
 		return
 	}
@@ -458,7 +458,7 @@ func writeCarrierNarrow(b *strings.Builder, site decodeSite, depth int, goType s
 		fmt.Fprintf(b, "%s\t%s[%s] = %s\n", indent, acc, idx, got)
 		fmt.Fprintf(b, "%s}\n", indent)
 		return acc
-	case isTemporalCarrier(goType):
+	case isNeutralCarrier(goType):
 		out := next()
 		fmt.Fprintf(b, "%s%s := %s\n", indent, out, narrowExpr(goType, held))
 		return out
@@ -529,14 +529,18 @@ func unionElementIsNullable(goType string, width graph.PropertyType) bool {
 //     decode has no field to report about.
 //   - time: time.Time is the carrier for TIMESTAMP, and it appears in the
 //     ALIAS whichever direction is emitted.
-//   - dbtype: the neutral temporal carriers assert against their dbtype
-//     counterparts, which only the decode direction does — the encode
+//   - dbtype: a neutral carrier (ADR 0033) asserts against its dbtype
+//     counterpart, which only the DECODE direction does — the encode
 //     direction names from<X>, and dbtype appears inside that helper's
-//     own file.
-func recordFileImports(encodings []graph.PropertyType, uses map[graph.PropertyType]carrierUse) (needFmt, needTime, needDbtype bool) {
+//     own bridge file rather than here. UUID is a neutral carrier on the
+//     same terms as the five temporal ones and needs no arm of its own,
+//     because it reaches dbtype.UUID through the same emitted pair
+//     (isNeutralCarrier records why the conversion-compatible one is
+//     bridged anyway).
+func recordFileImports(encodings []graph.PropertyType, uses map[graph.PropertyType]carrierUse, tm typeMap) (needFmt, needTime, needDbtype bool) {
 	for _, pt := range encodings {
 		use := uses[pt]
-		plan, ok := codegen.RecordFields(pt.Fields(), typeMap{}.Property)
+		plan, ok := codegen.RecordFields(pt.Fields(), tm.Property)
 		if !ok {
 			continue
 		}
@@ -548,7 +552,7 @@ func recordFileImports(encodings []graph.PropertyType, uses map[graph.PropertyTy
 			if leaf == "time.Time" {
 				needTime = true
 			}
-			if use.decode && isTemporalCarrier(leaf) {
+			if use.decode && isNeutralCarrier(leaf) {
 				needDbtype = true
 			}
 		}

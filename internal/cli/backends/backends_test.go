@@ -7,6 +7,7 @@ import (
 
 	"github.com/areqag/gqlc/internal/cli/backends"
 	"github.com/areqag/gqlc/internal/codegen/age"
+	"github.com/areqag/gqlc/internal/codegen/neo4j"
 	"github.com/areqag/gqlc/internal/config"
 )
 
@@ -42,23 +43,37 @@ func TestRegistryParityWithDriverVocabulary(t *testing.T) {
 		"the sweeps above both pass when config.DriverValues repeats a member; NewRegistry rejects a duplicate key, so the counts diverge only when the vocabulary carries one")
 }
 
-// TestRegistryPublishesTheAgeSentinels is the witness that the wire is
-// live AT THE COMPOSITION ROOT. The pin on the map itself lives in
-// internal/codegen/age, and the conformance corpus consumes the merged
-// result, but neither can see this file: dropping `Sentinels:` from the
+// TestRegistryPublishesTheBackendSentinels is the witness that the wire
+// is live AT THE COMPOSITION ROOT. The pin on each map itself lives in
+// the backend package, and the conformance corpus consumes the merged
+// result, but neither can see this file: dropping `Sentinels:` from an
 // entry below leaves both of those green in their own packages and
-// silently unpublishes every AGE refusal.
+// silently unpublishes that backend's refusals.
 //
-// It asserts the merged map holds exactly what the backend publishes,
-// rather than listing names of its own, because the names are pinned
-// where the symbols are visible and a second list here would only drift
-// from that one.
-func TestRegistryPublishesTheAgeSentinels(t *testing.T) {
+// It asserts the merged map holds exactly the union of what the backends
+// publish, rather than listing names of its own, because the names are
+// pinned where the symbols are visible and a second list here would only
+// drift from those.
+//
+// Each backend is also required to contribute something. The union alone
+// would pass with one side publishing nothing, which is the failure this
+// test was written for and which it could no longer see once there were
+// two publishers — a registry that dropped `Sentinels:` from BOTH neo4j
+// entries still merges to AGE's map, and AGE's map is most of it.
+func TestRegistryPublishesTheBackendSentinels(t *testing.T) {
 	reg, err := backends.Registry()
 	require.NoError(t, err)
 
-	published := age.Sentinels()
-	require.NotEmpty(t, published, "the backend publishes nothing, so this sweep reconciles nothing")
-	require.Equal(t, published, reg.Sentinels(),
-		"the registry's merged sentinels differ from what the AGE entry publishes")
+	merged := make(map[string]error)
+	for name, backend := range map[string]map[string]error{"age": age.Sentinels(), "neo4j": neo4j.Sentinels()} {
+		require.NotEmptyf(t, backend, "the %s backend publishes nothing, so this sweep reconciles nothing for it", name)
+		for key, sentinel := range backend {
+			require.NotContainsf(t, merged, key,
+				"%s publishes %q and so does another backend; the registry resolves one name to one value, so this "+
+					"sweep cannot say which of them the merged map answers with", name, key)
+			merged[key] = sentinel
+		}
+	}
+	require.Equal(t, merged, reg.Sentinels(),
+		"the registry's merged sentinels differ from the union of what the backend entries publish")
 }

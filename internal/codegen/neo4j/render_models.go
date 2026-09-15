@@ -52,7 +52,7 @@ func renderModels(pkg string, entities []codegen.Entity, prepared []codegen.Quer
 	// Each checked-narrowing helper is emitted only where something calls
 	// it, so narrowFloat32 — the only thing in this file that names math —
 	// gates the math import with it.
-	narrowsInts, narrowsFloats := narrowsANumericWidth(entities, prepared)
+	narrowsInts, narrowsFloats := narrowsANumericWidth(entities, prepared, target.types())
 
 	writeModelImports(&b, target, narrowsFloats, anyTime, anyNonNull)
 
@@ -68,7 +68,7 @@ func renderModels(pkg string, entities []codegen.Entity, prepared []codegen.Quer
 	// carriers: that file is emitted from the encoding set alone, which
 	// has no entity in it to take a name from.
 	for _, s := range codegen.RecordSiteAliases(entities) {
-		text, ok := codegen.RecordStructText(s.Width.Fields(), typeMap{}.Property)
+		text, ok := codegen.RecordStructText(s.Width.Fields(), target.types().Property)
 		if !ok {
 			continue
 		}
@@ -348,7 +348,7 @@ func writeEntityFieldDecode(b *strings.Builder, e codegen.Entity, i int, f codeg
 		case isSliceType(f.GoType):
 			writeSliceNarrow(b, e, f, f.GoType, "s", "narrowed", "\t\t")
 			fmt.Fprintf(b, "\t\tout.%s = &narrowed\n", f.Field)
-		case isTemporalCarrier(f.GoType):
+		case isNeutralCarrier(f.GoType):
 			fmt.Fprintf(b, "\t\tnarrowed := %s\n", narrowExpr(f.GoType, "s"))
 			fmt.Fprintf(b, "\t\tout.%s = &narrowed\n", f.Field)
 		case carrier != f.GoType:
@@ -373,7 +373,7 @@ func writeEntityFieldDecode(b *strings.Builder, e codegen.Entity, i int, f codeg
 		narrowed := value + "s"
 		writeSliceNarrow(b, e, f, f.GoType, value, narrowed, "\t")
 		fmt.Fprintf(b, "\tout.%s = %s\n", f.Field, narrowed)
-	case isTemporalCarrier(f.GoType):
+	case isNeutralCarrier(f.GoType):
 		fmt.Fprintf(b, "\tout.%s = %s\n", f.Field, narrowExpr(f.GoType, value))
 	case carrier != f.GoType:
 		narrowed := value + "n"
@@ -565,7 +565,7 @@ func writeSliceNarrow(b *strings.Builder, e codegen.Entity, f codegen.EntityFiel
 	fmt.Fprintf(b, "%s\t%s element %%d: expected %s, got %%T\", %q, i0, elem0)\n", body, fail, carrier, f.PropName)
 	fmt.Fprintf(b, "%s}\n", body)
 	switch {
-	case isTemporalCarrier(base):
+	case isNeutralCarrier(base):
 		if nullable {
 			fmt.Fprintf(b, "%sv0n := %s\n", body, narrowExpr(base, "v0"))
 			fmt.Fprintf(b, "%s%s = append(%s, &v0n)\n", body, dst, dst)

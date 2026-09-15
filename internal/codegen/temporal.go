@@ -83,27 +83,37 @@ type Duration struct {
 // names are in reservedIdentifiers, so Phase A already refused the
 // batch with ErrIdentifierCollision.
 func ReferencesTemporalCarrier(p Prepared) bool {
+	return referencesCarrier(p, temporalCarrierSet)
+}
+
+// referencesCarrier is the walk both emission triggers ask, over the set
+// its caller owns. Shared rather than written twice because the walk is
+// a claim about WHERE the public surface is — entity fields, query
+// parameters, row fields and every nested list element — and a second
+// copy would be a second answer to that question, free to drift from
+// this one the next time a position is added to the prepared surface.
+func referencesCarrier(p Prepared, set map[string]struct{}) bool {
 	for _, e := range p.Entities {
 		for _, f := range e.Fields {
-			if typeTextNamesCarrier(f.GoType) {
+			if typeTextNamesCarrier(f.GoType, set) {
 				return true
 			}
 		}
 	}
 	for _, q := range p.Queries {
 		for _, param := range q.ParamFields {
-			if typeTextNamesCarrier(param.GoType) {
+			if typeTextNamesCarrier(param.GoType, set) {
 				return true
 			}
 		}
 		for _, row := range q.RowFields {
-			if typeTextNamesCarrier(row.GoType) {
+			if typeTextNamesCarrier(row.GoType, set) {
 				return true
 			}
 		}
 		for _, row := range q.RowFields {
 			for elem := row.ListElem; elem != nil; elem = elem.Nested {
-				if typeTextNamesCarrier(elem.GoType) {
+				if typeTextNamesCarrier(elem.GoType, set) {
 					return true
 				}
 			}
@@ -113,22 +123,22 @@ func ReferencesTemporalCarrier(p Prepared) bool {
 }
 
 // typeTextNamesCarrier reports whether one emitted Go type text names a
-// carrier. A qualified type is not descended into: its Sel is another
-// package's identifier, and two of the carrier names collide there —
-// time.Time is the TIMESTAMP carrier and dbtype.Date is what a neo4j
-// conversion still names internally, so a walk that read Sel would
-// report every batch as carrier-bearing.
+// carrier in set. A qualified type is not descended into: its Sel is
+// another package's identifier, and three of the carrier names collide
+// there — time.Time is the TIMESTAMP carrier, and dbtype.Date and
+// dbtype.UUID are what a neo4j conversion still names internally, so a
+// walk that read Sel would report every batch as carrier-bearing.
 //
 // A text go/parser rejects is an emitter bug, and this answers true for
-// it: emitting a temporal.go nothing references still compiles, while
+// it: emitting a carrier file nothing references still compiles, while
 // omitting one something references does not, so the unparseable case
 // takes the side that cannot break the generated package.
-func typeTextNamesCarrier(text string) bool {
+func typeTextNamesCarrier(text string, set map[string]struct{}) bool {
 	expr, err := parser.ParseExpr(text)
 	if err != nil {
 		return true
 	}
-	return exprNamesCarrier(expr)
+	return exprNamesCarrier(expr, set)
 }
 
 // exprNamesCarrier is typeTextNamesCarrier's walk, named so the *ast.Field
@@ -139,19 +149,19 @@ func typeTextNamesCarrier(text string) bool {
 // than on *ast.StructType because ast.Inspect reaches that node kind in
 // three places — StructType.Fields, InterfaceType.Methods and
 // FuncType.Params/Results — and the property is the same at all three.
-func exprNamesCarrier(expr ast.Expr) bool {
+func exprNamesCarrier(expr ast.Expr, set map[string]struct{}) bool {
 	found := false
 	ast.Inspect(expr, func(n ast.Node) bool {
 		switch node := n.(type) {
 		case *ast.SelectorExpr:
 			return false
 		case *ast.Field:
-			if node.Type != nil && exprNamesCarrier(node.Type) {
+			if node.Type != nil && exprNamesCarrier(node.Type, set) {
 				found = true
 			}
 			return false
 		case *ast.Ident:
-			if _, isCarrier := temporalCarrierSet[node.Name]; isCarrier {
+			if _, isCarrier := set[node.Name]; isCarrier {
 				found = true
 			}
 		}

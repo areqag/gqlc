@@ -226,9 +226,9 @@ func rejectOffsetSidecarCollisions(entities []codegen.Entity) error {
 // backend answers the same declaration differently, because attribution
 // implicates contingency — naming a backend tells the author "this is
 // this backend's answer, and another may differ". This table's refused
-// set has two parts and only one of them is contingent. BYTES and a list
-// whose element carries a zone are refusals neo4j does not share, and the
-// name is owed and load-bearing there. The eight oversized numerics are
+// set has two parts and only one of them is contingent. BYTES, UUID and a
+// list whose element carries a zone are refusals neo4j does not share, and
+// the name is owed and load-bearing there. The eight oversized numerics are
 // permanently out on every target under spec §9, so the suffix would
 // point an author at a search for a target that carries INT128 when the
 // only repair is the declared width the message already names.
@@ -286,21 +286,20 @@ func carriedByNoBackend(pt graph.PropertyType) bool {
 // widths no enrolled target carries, so that a refusal of one withholds
 // this backend's name.
 //
-// It is oversizedNumerics plus graph.TypeUUID, and the two are kept as
-// separate lists because they are claims of different durability rather
-// than one list someone split. The eight below are permanent under spec
-// §9 — no Go builtin is that wide and none is coming. UUID is here
-// because no target carries it TODAY and neo4j's driver already ships
-// dbtype.UUID at v6.2.0: stage 2 of bd gqlc-eg4b gives neo4j-go-v6 that
-// carrier, and on the day it does, UUID divides the roster, this entry
-// becomes false, and the refusal below starts owing the AGE name. The
-// composition root reds when that happens
-// (TestAContingentRefusalNamesItsBackend), which is the intended way for
-// it to be noticed, so removing this entry is part of landing stage 2
-// and not a separate cleanup.
-var uncarriedEverywhere = slices.Concat(oversizedNumerics, []graph.PropertyType{
-	graph.TypeUUID,
-})
+// It is oversizedNumerics and nothing else. It held graph.TypeUUID too
+// until stage 2 of bd gqlc-eg4b gave neo4j-go-v6 the dbtype.UUID carrier
+// that shipped in neo4j-go-driver v6.2.0; the entry was removed in that
+// same change, because it had gone from true to false and a stale one is
+// AGE withholding a name it owes. UUID now divides the roster, so this
+// table's refusal of it is contingent and carries the AGE name like
+// BYTES does. That was not left to be noticed later: the composition
+// root reds on it (TestAContingentRefusalNamesItsBackend), which is what
+// made the two halves one change.
+//
+// The remaining eight are of a different durability, which is why the
+// two were separate lists while there were two: they are permanent under
+// spec §9 — no Go builtin is that wide and none is coming.
+var uncarriedEverywhere = slices.Clone(oversizedNumerics)
 
 // oversizedNumerics are the eight widths of spec §9 — the numerics wider
 // than any Go builtin, and the arbitrary-precision decimal. They are

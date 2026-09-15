@@ -58,9 +58,9 @@ func TestTemporalUsesAccumulatesListPtrRegardlessOfParameterOrder(t *testing.T) 
 		t.Run(tc.name, func(t *testing.T) {
 			prepared := paramsOf(tc.params...)
 
-			require.Contains(t, neo4j.TemporalUseNames(prepared), "Date",
+			require.Contains(t, neo4j.TemporalUseNames(prepared, neo4j.TypeMap{}), "Date",
 				"Date reached no emission site at all")
-			use := neo4j.TemporalUseOf(prepared, "Date")
+			use := neo4j.TemporalUseOf(prepared, "Date", neo4j.TypeMap{})
 			require.True(t, use.List, "the list helper is not reached, so there is nothing for listPtr to qualify")
 			require.True(t, use.ListPtr,
 				"listPtr is false, so from<X>ListPtr is not emitted while paramBindExpr still calls it. "+
@@ -92,18 +92,18 @@ func TestElementNullabilityPicksADisjointListHelper(t *testing.T) {
 		codegen.Param{RawName: "c", Field: "C", GoType: "[]Duration", Nullable: true},
 	)
 
-	date := neo4j.TemporalUseOf(prepared, "Date")
+	date := neo4j.TemporalUseOf(prepared, "Date", neo4j.TypeMap{})
 	require.True(t, date.ListElem, "a []*Date parameter did not reach the element-nullable helper")
 	require.False(t, date.ListElemPtr, "the whole list is not nullable, so no Ptr wrapper is owed")
 	require.False(t, date.List, "the plain from<X>List takes []Date and nothing here calls it")
 	require.False(t, date.ListPtr, "likewise its wrapper")
 
-	local := neo4j.TemporalUseOf(prepared, "LocalTime")
+	local := neo4j.TemporalUseOf(prepared, "LocalTime", neo4j.TypeMap{})
 	require.True(t, local.ListElem, "a nullable []*LocalTime parameter still owes the element-nullable helper it wraps")
 	require.True(t, local.ListElemPtr, "a nullable list of nullable elements owes the Ptr wrapper too")
 	require.False(t, local.List, "the plain helper is not reached by *[]*LocalTime at either position")
 
-	dur := neo4j.TemporalUseOf(prepared, "Duration")
+	dur := neo4j.TemporalUseOf(prepared, "Duration", neo4j.TypeMap{})
 	require.True(t, dur.List, "the NOT NULL-element control lost the plain helper")
 	require.True(t, dur.ListPtr, "the NOT NULL-element control is nullable as a whole and owes the Ptr wrapper")
 	require.False(t, dur.ListElem, "a []Duration parameter must not reach the element-nullable helper")
@@ -123,7 +123,7 @@ func TestTemporalUsesIgnoresNonCarrierParameters(t *testing.T) {
 	require.Empty(t, neo4j.TemporalUseNames(paramsOf(
 		codegen.Param{RawName: "a", Field: "A", GoType: "[]any", Nullable: true},
 		codegen.Param{RawName: "b", Field: "B", GoType: "[]byte", Nullable: false},
-	)), "a non-carrier leaf reached an emission site")
+	), neo4j.TypeMap{}), "a non-carrier leaf reached an emission site")
 }
 
 // TestTemporalUsesSeesACarrierHidingInsideARecord is a reproduction, and
@@ -132,7 +132,7 @@ func TestTemporalUsesIgnoresNonCarrierParameters(t *testing.T) {
 // temporalUses marks on the emitted Go type TEXT, through
 // leafType, which strips "[]" prefixes and nothing else. A declared
 // record's carrier text is an anonymous struct, so leafType hands back
-// the whole struct and isTemporalCarrier says no — the DATE field inside
+// the whole struct and isNeutralCarrier says no — the DATE field inside
 // it is never marked.
 //
 // The consequence is not a missing optimisation. renderModels emits the
@@ -164,7 +164,7 @@ func TestTemporalUsesSeesACarrierHidingInsideARecord(t *testing.T) {
 			Entities: []codegen.Entity{{Name: "Place", Fields: []codegen.EntityField{
 				{PropName: "addr", Field: "Addr", GoType: structText, Width: width},
 			}}},
-		}, "Date")
+		}, "Date", neo4j.TypeMap{})
 		require.True(t, use.Decode,
 			"the record's decode helper calls toDate, so the bridge file owes it")
 	})
@@ -174,7 +174,7 @@ func TestTemporalUsesSeesACarrierHidingInsideARecord(t *testing.T) {
 			Queries: []codegen.Query{{ParamFields: []codegen.Param{
 				{RawName: "p", Field: "P", GoType: structText, Width: width},
 			}}},
-		}, "Date")
+		}, "Date", neo4j.TypeMap{})
 		require.True(t, use.Encode, "the NOT NULL field calls fromDate, so the bridge file owes it")
 		require.True(t, use.EncodePtr, "the nullable field calls fromDatePtr, which is a separate declaration")
 	})
@@ -192,7 +192,7 @@ func TestTemporalUsesSeesACarrierHidingInsideARecord(t *testing.T) {
 			Queries: []codegen.Query{{ParamFields: []codegen.Param{
 				{RawName: "p", Field: "P", GoType: listText, Width: listWidth},
 			}}},
-		}, "Date")
+		}, "Date", neo4j.TypeMap{})
 		require.True(t, use.Encode, "encode<X>List calls encode<X> per element, which calls fromDate")
 		require.True(t, use.EncodePtr, "and fromDatePtr for the nullable field")
 		require.False(t, use.List,
@@ -204,6 +204,6 @@ func TestTemporalUsesSeesACarrierHidingInsideARecord(t *testing.T) {
 			Entities: []codegen.Entity{{Name: "Place", Fields: []codegen.EntityField{
 				{PropName: "addr", Field: "Addr", GoType: "map[string]any", Width: graph.TypeAnyRecord},
 			}}},
-		}), "RECORD<ANY> declares no fields, so no carrier can be hiding in one")
+		}, neo4j.TypeMap{}), "RECORD<ANY> declares no fields, so no carrier can be hiding in one")
 	})
 }

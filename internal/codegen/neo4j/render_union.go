@@ -28,7 +28,7 @@ func renderUnionHelpers(pkg string, encodings []graph.PropertyType, uses map[gra
 	for _, pt := range encodings {
 		use := uses[pt]
 		suffix := codegen.UnionHelperSuffix(pt)
-		members, ok := codegen.UnionMembers(pt, typeMap{}.Property)
+		members, ok := codegen.UnionMembers(pt, target.types().Property)
 		if !ok {
 			// Unreachable: a union a member of which this backend cannot
 			// carry is refused at preparation, before any emission walk
@@ -100,7 +100,7 @@ func encode%[1]sListPtr(v *[]%[3]s) (any, error) {
 		}
 	}
 
-	needTime, needDbtype := unionFileImports(encodings, uses)
+	needTime, needDbtype := unionFileImports(encodings, uses, target.types())
 
 	var b strings.Builder
 	b.WriteString(codegen.Header())
@@ -238,13 +238,17 @@ func unionFail(pt graph.PropertyType, direction string, depth int, tail string) 
 //     not emitted at all when no helper is.
 //   - time: time.Time is TIMESTAMP's carrier, and it is named as a case
 //     type in whichever direction is emitted.
-//   - dbtype: the neutral temporal carriers dispatch on their dbtype
-//     counterparts, which only the decode direction does — the encode
-//     direction names from<X>, whose own file holds the dbtype mention.
-func unionFileImports(encodings []graph.PropertyType, uses map[graph.PropertyType]carrierUse) (needTime, needDbtype bool) {
+//   - dbtype: a neutral carrier (ADR 0033) dispatches on its dbtype
+//     counterpart, which only the DECODE direction does — the encode
+//     direction names from<X>, whose own bridge file holds the dbtype
+//     mention. UUID is a neutral carrier on the same terms as the five
+//     temporal ones and needs no arm of its own, because it reaches
+//     dbtype.UUID through the same emitted pair (isNeutralCarrier
+//     records why the conversion-compatible one is bridged anyway).
+func unionFileImports(encodings []graph.PropertyType, uses map[graph.PropertyType]carrierUse, tm typeMap) (needTime, needDbtype bool) {
 	for _, pt := range encodings {
 		use := uses[pt]
-		members, ok := codegen.UnionMembers(pt, typeMap{}.Property)
+		members, ok := codegen.UnionMembers(pt, tm.Property)
 		if !ok {
 			continue
 		}
@@ -253,7 +257,7 @@ func unionFileImports(encodings []graph.PropertyType, uses map[graph.PropertyTyp
 			if leaf == "time.Time" {
 				needTime = true
 			}
-			if use.decode && isTemporalCarrier(leaf) {
+			if use.decode && isNeutralCarrier(leaf) {
 				needDbtype = true
 			}
 		}

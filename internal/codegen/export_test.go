@@ -29,4 +29,6 @@ var (
 	ReservedIdentifiers  = reservedIdentifiers
 	SweepIdentifiers     = sweepIdentifiers
 	TypeTextNamesCarrier = typeTextNamesCarrier
+	TemporalCarrierSet   = temporalCarrierSet
+	UUIDCarrierSet       = uuidCarrierSet
 )

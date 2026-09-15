@@ -175,7 +175,7 @@ dead, and that no dead site hides in it.
 | `ErrOutOfC6Scope` | A parameter whose name mangles to no Go field name — `$_`, `$__`, any name of nothing but underscores — in a query binding two or more parameters. Arity-conditional because the emission is: the no-parameter and one-parameter forms take the bare typed argument and derive no identifier from the parameter name at all, so `$_` is served there and stays served. Deferred rather than permanent, which is why it sits here and not under an unrepresentability: a stage spelling `Params` fields positionally would admit it. Before `gqlc-2m2v` the two-or-more form emitted a struct field with no name and a bind expression reading `arg.,`, and `go/format` refused the file as `ErrFormatFailure` — an error naming a template bug, handed to an author whose query was what went wrong. | Phase B |
 | `ErrRowFieldCollision` | Two columns of one query deriving one `Row` field. | Phase B |
 | `ErrUnrepresentableTemporal` | A projected column whose temporal kind the target's type table has no carrier for. Phase B, not Phase A: Phase A does not ask the type table about temporal kinds, so the refusal lands at the row-field derivation site. **Assembled** since bd `gqlc-dy40s`, and it was a fixture until then: `unrepresentable_temporal_duration_column` projected `duration.between(...)` at `apache-age-pgx-v5`, the last temporal spelling AGE's dialect gate did not hold. Closing that gap refuses the text ahead of the carrier, so the fixture was deleted and the sentinel entered `assembledOnlySentinels`. The case is `column-temporal`, and it differs from the fixture in its argument as well as its form — its kind names no member of the constant block, so it is refused on every backend rather than on the one with no carrier for a duration. | Phase B |
-| `ErrIdentifierCollision` | Two exported top-level identifiers colliding across the seven swept sources — the emitter's own package-scope declarations, entity structs, decode helpers, method names, `<Method>Params`, `<Method>Row`, edge-union interfaces. The first source is seeded from the `scopePackage` half of the reserved set: a `NODE TYPE Queries` or an edge-union interface deriving `ReadQuerier` redeclares a name `db.go` or `querier.go` already holds, which the Phase A gate does not see because that one reads a query's name (`gqlc-e6mh`). The `scopeMethod` half — `WithTx`, `Begin`, `Commit`, `Rollback`, `EnsureGraph`, `DropGraph` — stays out: those are methods on `*Queries` or `*Tx` and share no scope with a package-level type. The seeded half is uniform across targets while two of the declarations behind it are not — `DBTX` and `SessionInit` come from the Apache AGE emission alone, so seeding them refuses a name a neo4j-only batch leaves free. A false refusal, taken per D2 Resolved rather than admitting an input under one target and refusing it under another. §6 enumerates all twenty-two rows with the target each is declared by and the target each would actually break. | identifier sweep |
+| `ErrIdentifierCollision` | Two exported top-level identifiers colliding across the seven swept sources — the emitter's own package-scope declarations, entity structs, decode helpers, method names, `<Method>Params`, `<Method>Row`, edge-union interfaces. The first source is seeded from the `scopePackage` half of the reserved set: a `NODE TYPE Queries` or an edge-union interface deriving `ReadQuerier` redeclares a name `db.go` or `querier.go` already holds, which the Phase A gate does not see because that one reads a query's name (`gqlc-e6mh`). The `scopeMethod` half — `WithTx`, `Begin`, `Commit`, `Rollback`, `EnsureGraph`, `DropGraph` — stays out: those are methods on `*Queries` or `*Tx` and share no scope with a package-level type. The seeded half is uniform across targets while three of the declarations behind it are not — `DBTX` and `SessionInit` come from the Apache AGE emission alone, and `UUID` from `neo4j-go-v6` alone, so seeding them refuses a name the other targets leave free. A false refusal, taken per D2 Resolved rather than admitting an input under one target and refusing it under another. §6 enumerates all twenty-three rows with the target each is declared by and the target each would actually break. | identifier sweep |
 | `ErrFormatFailure` | An emitted file whose raw contents `go/format.Source` rejects. Assembled: a `NamedQuery.Name` that is not a Go identifier — `"Fetch Me"` — which is emitted as a method name and refused by the formatter with every template correct. `Name`'s doc says "must already be a valid exported Go identifier ... Enforced by the queryfile front end; Generate does not re-validate", and that is the pipeline-vs-contract argument §5.1 rejects: `Name` is an exported field of an exported struct, so what the front end enforces does not bound what a caller hands over, and no gate between the envelope and emission looks at it again. The case is `format-failure-query-name`. Not a phase of `Prepare` at all, which is what makes this row unlike every other one here: `Prepare` accepts the input, the emission renders it, and the refusal is the formatter's verdict on bytes this package produced. A reader who wants the check that *should* have caught it is looking for a `Name` validation on the envelope, not for a missing arm in a switch. | `Finalise` (post-emission, `emit.go`) |
 
 ## 3. Branches no input reaches
@@ -579,6 +579,7 @@ every target emits them for such a batch.
 | `LocalTime` | `scopePackage` | every target | every target |
 | `LocalDateTime` | `scopePackage` | every target | every target |
 | `Duration` | `scopePackage` | every target | every target |
+| `UUID` | `scopePackage` | `neo4j-go-v6` | `neo4j-go-v6` |
 
 The set is refused uniformly, so a row is over-broad on a target where
 neither an entity nor a query taking that name would collide. *Breaks
@@ -617,18 +618,18 @@ call-site-ambiguity grounds ruled on `gqlc-3d0l` for the shipped
 accessor shape, `docs/specs/codegen-tx-object.md` §9.1).
 `reservedIdentifiers` records this at its declaration. Every
 `scopePackage` row stands on the collision ground instead, the five
-temporal carriers included: on a target whose
-emission declares `temporal.go` the carrier is a package-level type, and
-an entity or query of the same name redeclares it; none of the five is
-ever refused for call-site shape.
+temporal carriers and `UUID` included: on a target whose
+emission declares `temporal.go` or `uuid.go` the carrier is a
+package-level type, and an entity or query of the same name redeclares
+it; none of the six is ever refused for call-site shape.
 
 The §2 sweep seeds source 0 with the `scopePackage` subset alone, so a
 method-scope name is not among the identifiers it compares; Phase A's
 membership check is what stands between such a query and the
 redeclaration, and `TestReservedIdentifiersAreUniformAcrossBackends`
-requires it for all twenty-two rows.
+requires it for all twenty-three rows.
 
-On a neo4j target the over-broad rows are six of the twenty-two: `DBTX`
+On `neo4j-go-v6` the over-broad rows are six of the twenty-three: `DBTX`
 and `SessionInit`, which neo4j never declares; `EnsureGraph` and
 `DropGraph`, which only `apache-age-pgx-v5` declares — on that target a
 query of either name collides, on neo4j neither name is taken on either
@@ -636,14 +637,27 @@ half; and `Commit` and `Rollback`, which are over-broad on
 `apache-age-pgx-v5` as well, for the receiver reason above rather than
 because the target leaves the name free. The five temporal carriers are
 not among the six: the neo4j emission declares every one of them, so an
-entity or query of any of those names collides there. `WithTx` and
+entity or query of any of those names collides there. Neither is `UUID`,
+for the same reason and on this target alone. `WithTx` and
 `Begin` are not among the six either: every target declares them on
 `*Queries`, so refusing a query of either name is the collision rather
 than a false refusal.
 
-On `apache-age-pgx-v5` the over-broad rows are two of the twenty-two: the
-same `Commit` and `Rollback`, over-broad for the receiver reason above
-rather than because the target leaves the name free. The five temporal
+On `neo4j-go-v5` the over-broad rows are those six and `UUID`, seven of
+the twenty-three. That row is the only one whose over-breadth splits two
+MAJORS of one backend rather than two backends: `dbtype.UUID` landed in
+neo4j-go-driver v6.2.0 and v5.28.4 has no counterpart, so `uuid.go` is
+emitted on one of the two and the name is free on the other. It is the
+sharpest case of the uniformity cost this section is about, and it is
+taken on the same D2 Resolved grounds as `DBTX` — a name that generated
+under `neo4j-go-v5` and was refused under `neo4j-go-v6` would make the
+reserved set a function of the driver version an author happened to pin.
+
+On `apache-age-pgx-v5` the over-broad rows are three of the twenty-three:
+the same `Commit` and `Rollback`, over-broad for the receiver reason
+above rather than because the target leaves the name free, and `UUID`,
+which this backend refuses as a width and so never declares as a carrier.
+The five temporal
 carriers sat here too until that backend admitted `DATE`, `LOCAL TIME`
 and `DURATION`, and then zoned `TIME`; it now emits `temporal.go` on the
 same trigger every target does, so the *Declared by* cells the corpus
@@ -652,15 +666,23 @@ shows what reserves a name is the emission and not the admission: nothing
 on this target reaches it, since `internal/graph` has no LOCALDATETIME
 property width at all and `typeMap.Temporal` refuses every expression
 kind, and it is declared anyway, because `temporal.go` declares the five
-together whichever width triggered the file.
+together whichever width triggered the file. `UUID` does not ride that
+rule, and the difference is the file boundary rather than a decision:
+`uuid.go` has one trigger of its own, so a target reaching no UUID emits
+no carrier — where a target reaching one temporal width of five emits all
+five.
 
-Six and two count the target axis alone. The batch axis moves them: on a
-batch with no `:one` query nothing declares `ErrNoRows` or
-`ErrMultipleResults`, and on a batch whose surface names no temporal
-width nothing emits `temporal.go` and so nothing declares the five
-carriers. Either target gains two over-broad rows on a batch of the first
-shape and five more again on one of both shapes — thirteen for a
-neo4j-only batch, nine for an AGE-only one. `NODE TYPE DBTX` is refused
-on a name neo4j leaves free — taken per D2 Resolved, one uniform set
-rather than a name that generates under one target and is refused under
-another.
+Six, seven and three count the target axis alone. The batch axis moves
+them: on a batch with no `:one` query nothing declares `ErrNoRows` or
+`ErrMultipleResults`; on a batch whose surface names no temporal width
+nothing emits `temporal.go` and so nothing declares the five carriers;
+and on a batch whose surface names no UUID nothing emits `uuid.go`.
+Every target gains two over-broad rows on a batch of the first shape and
+five more again on one of the second — and `neo4j-go-v6` gains the
+`UUID` row on one of the third, which the other two targets already
+count. Fourteen for a batch of all three shapes under either neo4j major,
+ten for an AGE-only one. `NODE TYPE DBTX` is refused
+on a name neo4j leaves free, and `NODE TYPE UUID` on one that
+`neo4j-go-v5` and `apache-age-pgx-v5` leave free — both taken per D2
+Resolved, one uniform set rather than a name that generates under one
+target and is refused under another.
