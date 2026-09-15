@@ -51,7 +51,8 @@ type typeMap struct{}
 // STRUCTURE: typescan.PropertyArms skips any decl whose `fn.Recv == nil` and
 // takes the method name as an argument, so a table moved to a plain function
 // is invisible to it — the walk is propertyArmNames in decoder_test.go, and
-// it feeds TWO obligations: types_test.go:123 and decoder_test.go:206. That
+// it feeds TWO obligations: TestTypeMapProperty in types_test.go and
+// TestDecoderProbeCoversTheTypeTable in decoder_test.go. That
 // does not pass vacuously at either. types_test.go asserts
 // `require.NotEmpty(t, arms, ...)` before ranging over them, precisely so a
 // walk that read nothing cannot hold the table to nothing, and

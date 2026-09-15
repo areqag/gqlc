@@ -478,8 +478,9 @@ func TestUnservedColumnFallThroughIsNotANinthVariant(t *testing.T) {
 	// one does. Every non-value form goes to Prepare directly as a column
 	// type and comes back ErrOutOfC6Scope, spelling the arriving type's own
 	// String — the same expression the fall-through reaches, from a switch
-	// that is not this one. Prepare is entered the way generate.go:46 enters
-	// it, so this is the gate behind the fall-through and not a third one.
+	// that is not this one. Prepare is entered the way this package's own
+	// generate enters it (generate.go), so this is the gate behind the
+	// fall-through and not a third one.
 	//
 	// phaseAAdmit is what answers: Prepare returns on Phase A before reaching
 	// phaseBDerive, whose own default is labelled for a Phase A miss. The

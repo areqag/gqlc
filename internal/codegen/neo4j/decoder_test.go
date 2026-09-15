@@ -962,7 +962,7 @@ func TestEmittedDecodersNarrowThroughACheck(t *testing.T) {
 				//
 				// Exactly one paren level can arrive, so a single unwrap
 				// would be equivalent here: every emission is walked after
-				// codegen.Finalise ran format.Source over it (emit.go:26),
+				// codegen.Finalise ran format.Source over it (emit.go),
 				// and gofmt collapses ((int32))(v) to (int32)(v) — measured,
 				// to any depth. Unparen is the stdlib spelling of that
 				// unwrap and does not depend on the collapse holding.
@@ -1049,8 +1049,8 @@ func emissionsUnderNarrowingGuard(t *testing.T) map[string]string {
 // accident and the defect hides.
 //
 // The interleaving is spelled in the NAMES, not in the declaration
-// order, and that is not decoration. prepareEntityFields sorts an
-// entity's properties by property name (prepare.go:561), so a schema
+// order, and that is not decoration. prepareEntityFields (in
+// prepare.go) sorts an entity's properties by property name, so a schema
 // that alternates as written but groups when sorted emits a run of
 // required properties and no gap at all -- which is what the first
 // draft of this probe did, and it reported a 4-offset rather than the

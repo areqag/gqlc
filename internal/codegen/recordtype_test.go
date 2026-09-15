@@ -217,7 +217,7 @@ func TestRecordStructTextSettlesUnderFinaliseAtEveryPosition(t *testing.T) {
 
 // TestRecordStructTextIsAGoTypeExpression holds the property the rest of
 // the pipeline reads the carrier text with. typeTextNamesCarrier
-// (temporal.go:126) parses carrier text as a Go expression to decide
+// (in temporal.go) parses carrier text as a Go expression to decide
 // whether the generated package needs its temporal carriers declared,
 // and treats a PARSE FAILURE as "yes" — so a record text that did not
 // parse would not fail, it would silently over-emit. This asserts the

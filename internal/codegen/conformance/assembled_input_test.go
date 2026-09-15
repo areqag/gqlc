@@ -52,8 +52,9 @@ import (
 // unknown-variant sites by a second route, so deleting
 // column-unknown-variant or list-elem-unknown-variant here leaves the
 // fence green. Deleting edge-union-arity, whose site nothing else
-// reaches, reddens naming prepare.go:660. What the fence guards is that
-// each site has *a* witness, not that this file is it.
+// reaches, reddens naming admitEdgeUnionCandidates' candidate-count
+// refusal in prepare.go — the `len(edgeKeys) < 2` arm. What the fence
+// guards is that each site has *a* witness, not that this file is it.
 type AssembledInputSuite struct {
 	suite.Suite
 
