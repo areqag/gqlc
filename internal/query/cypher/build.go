@@ -329,7 +329,20 @@ func (rb *rawBinding) toBinding() (query.Binding, error) {
 	var err error
 	switch {
 	case rb.kind == graph.Edge:
-		b, err = rb.toEdgeBinding()
+		// The single polarity flip from the listener's zero-value-safe inverted
+		// rawBinding.undirected to the model's positive directed field lives here
+		// (Stage 5 §4): directed = !undirected.
+		directed := !rb.undirected
+		switch {
+		case rb.hops != nil && rb.optionalGroup > 0:
+			b, err = query.NewNullableVarLengthEdgeBindingInGroup(rb.variable, rb.labels, rb.source, rb.target, directed, *rb.hops, rb.optionalGroup)
+		case rb.hops != nil:
+			b, err = query.NewVarLengthEdgeBinding(rb.variable, rb.labels, rb.source, rb.target, directed, *rb.hops)
+		case rb.optionalGroup > 0:
+			b, err = query.NewNullableEdgeBindingInGroup(rb.variable, rb.labels, rb.source, rb.target, directed, rb.optionalGroup)
+		default:
+			b, err = query.NewEdgeBinding(rb.variable, rb.labels, rb.source, rb.target, directed)
+		}
 	case rb.optionalGroup > 0:
 		b, err = query.NewNullableNodeBindingInGroup(rb.variable, rb.labels, rb.optionalGroup)
 	default:
@@ -339,25 +352,6 @@ func (rb *rawBinding) toBinding() (query.Binding, error) {
 		return nil, err
 	}
 	return rb.markRequiredReferences(b), nil
-}
-
-// toEdgeBinding routes an edge raw binding through the four-way
-// (OPTIONAL-introduced × var-length) choice of edge constructors.
-func (rb *rawBinding) toEdgeBinding() (query.EdgeBinding, error) {
-	// The single polarity flip from the listener's zero-value-safe inverted
-	// rawBinding.undirected to the model's positive directed field lives here
-	// (Stage 5 §4): directed = !undirected.
-	directed := !rb.undirected
-	switch {
-	case rb.hops != nil && rb.optionalGroup > 0:
-		return query.NewNullableVarLengthEdgeBindingInGroup(rb.variable, rb.labels, rb.source, rb.target, directed, *rb.hops, rb.optionalGroup)
-	case rb.hops != nil:
-		return query.NewVarLengthEdgeBinding(rb.variable, rb.labels, rb.source, rb.target, directed, *rb.hops)
-	case rb.optionalGroup > 0:
-		return query.NewNullableEdgeBindingInGroup(rb.variable, rb.labels, rb.source, rb.target, directed, rb.optionalGroup)
-	default:
-		return query.NewEdgeBinding(rb.variable, rb.labels, rb.source, rb.target, directed)
-	}
 }
 
 // markRequiredReferences post-mutates the constructed binding with the raw

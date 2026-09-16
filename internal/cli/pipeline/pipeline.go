@@ -194,9 +194,12 @@ func runTarget(baseDir string, tgt config.Target, backends codegen.Registry, gen
 
 	// Stage 5 — construct the front end once, outside the query loop.
 	// The same registry feeds both the parser and the resolver.
-	queryParser, err := newTargetQueryParser(tgt.QueryLang, reg)
-	if err != nil {
-		return TargetResult{}, nil, nil, err
+	var queryParser query.Parser
+	switch tgt.QueryLang {
+	case config.QueryLangOpenCypher:
+		queryParser = cypher.New(cypher.WithRegistry(reg))
+	default:
+		return TargetResult{}, nil, nil, fmt.Errorf("internal: no pipeline mapping for query_language %q", string(tgt.QueryLang))
 	}
 	res := resolver.New(sch, resolver.WithRegistry(reg))
 
@@ -248,16 +251,6 @@ func loadTargetSchema(lang config.SchemaLang, schemaPath string) (schema.Schema,
 		return sch, nil
 	default:
 		return schema.Schema{}, fmt.Errorf("internal: no pipeline mapping for schema_language %q", string(lang))
-	}
-}
-
-// newTargetQueryParser constructs the query front end for the QueryLang axis.
-func newTargetQueryParser(lang config.QueryLang, reg procsig.Registry) (query.Parser, error) {
-	switch lang {
-	case config.QueryLangOpenCypher:
-		return cypher.New(cypher.WithRegistry(reg)), nil
-	default:
-		return nil, fmt.Errorf("internal: no pipeline mapping for query_language %q", string(lang))
 	}
 }
 

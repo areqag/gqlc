@@ -214,15 +214,7 @@ func writeUnionDecoder(b *strings.Builder, p unionPlan) {
 		b.WriteString("\t}\n")
 	}
 
-	writeUnionNumericArms(b, p.pt, byFamily)
-
-	fmt.Fprintf(b, "\treturn nil, fmt.Errorf(%q, raw)\n}\n",
-		"decode "+string(p.pt)+": %q is no member's wire shape")
-}
-
-// writeUnionNumericArms emits the integer and float probes of one union
-// decoder. Integer before float, agtypeValue's rule.
-func writeUnionNumericArms(b *strings.Builder, pt graph.PropertyType, byFamily map[string]codegen.UnionMemberPlan) {
+	// Integer before float, agtypeValue's rule.
 	numeric := []struct {
 		family string
 		probe  string
@@ -251,9 +243,12 @@ func writeUnionNumericArms(b *strings.Builder, pt graph.PropertyType, byFamily m
 			continue
 		}
 		fmt.Fprintf(b, "\tif _, err := %s(body); err == nil {\n", n.probe)
-		writeUnionNarrow(b, pt, m, "\t\t")
+		writeUnionNarrow(b, p.pt, m, "\t\t")
 		b.WriteString("\t}\n")
 	}
+
+	fmt.Fprintf(b, "\treturn nil, fmt.Errorf(%q, raw)\n}\n",
+		"decode "+string(p.pt)+": %q is no member's wire shape")
 }
 
 // writeUnionNarrow emits the body of one dispatch arm: the member's own
