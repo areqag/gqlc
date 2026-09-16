@@ -26,25 +26,50 @@ import (
 func renderUnionHelpers(pkg string, encodings []graph.PropertyType, uses map[graph.PropertyType]carrierUse, target driverTarget) []byte {
 	var body strings.Builder
 	for _, pt := range encodings {
-		use := uses[pt]
-		suffix := codegen.UnionHelperSuffix(pt)
-		members, ok := codegen.UnionMembers(pt, target.types().Property)
-		if !ok {
-			// Unreachable: a union a member of which this backend cannot
-			// carry is refused at preparation, before any emission walk
-			// builds the encoding set. Skipping rather than panicking,
-			// because a helper the batch never calls is the only thing
-			// lost and generation has no channel here to report through.
-			continue
-		}
-		// The plain encode helper stands under both other encode
-		// directions: the Ptr wrapper nil-checks and calls it, and the
-		// List wrapper calls it per element.
-		if use.encode || use.encodePtr || use.list {
-			writeUnionEncode(&body, pt, suffix, members)
-		}
-		if use.encodePtr {
-			fmt.Fprintf(&body, `
+		writeUnionEncodingHelpers(&body, pt, uses[pt], target)
+	}
+
+	needTime, needDbtype := unionFileImports(encodings, uses, target.types())
+
+	var b strings.Builder
+	b.WriteString(codegen.Header())
+	b.WriteString("package ")
+	b.WriteString(pkg)
+	b.WriteString("\n\n")
+	b.WriteString("import (\n")
+	b.WriteString("\t\"fmt\"\n")
+	if needTime {
+		b.WriteString("\t\"time\"\n")
+	}
+	if needDbtype {
+		b.WriteString("\n\t\"" + target.dbtypeImport + "\"\n")
+	}
+	b.WriteString(")\n")
+	b.WriteString(body.String())
+	return []byte(b.String())
+}
+
+// writeUnionEncodingHelpers emits whichever of one closed-union
+// encoding's conversion helpers use calls.
+func writeUnionEncodingHelpers(body *strings.Builder, pt graph.PropertyType, use carrierUse, target driverTarget) {
+	suffix := codegen.UnionHelperSuffix(pt)
+	members, ok := codegen.UnionMembers(pt, target.types().Property)
+	if !ok {
+		// Unreachable: a union a member of which this backend cannot
+		// carry is refused at preparation, before any emission walk
+		// builds the encoding set. Skipping rather than panicking,
+		// because a helper the batch never calls is the only thing
+		// lost and generation has no channel here to report through.
+		return
+	}
+	// The plain encode helper stands under both other encode
+	// directions: the Ptr wrapper nil-checks and calls it, and the
+	// List wrapper calls it per element.
+	if use.encode || use.encodePtr || use.list {
+		writeUnionEncode(body, pt, suffix, members)
+	}
+	if use.encodePtr {
+		fmt.Fprintf(body, `
 // encode%[1]sPtr binds a nullable %[2]s parameter: a nil pointer is the
 // Cypher null the schema's nullability declared, and is the call site's
 // answer rather than the member set's — no member matches nil, so
@@ -56,9 +81,9 @@ func encode%[1]sPtr(v *%[3]s) (any, error) {
 	return encode%[1]s(*v)
 }
 `, suffix, pt, codegen.UnionCarrierText)
-		}
-		if use.list {
-			fmt.Fprintf(&body, `
+	}
+	if use.list {
+		fmt.Fprintf(body, `
 // encode%[1]sList validates a list of %[2]s parameters element by
 // element. A nil element binds the Cypher null the schema's element
 // nullability declared; whether that nullability was declared is the
@@ -81,10 +106,10 @@ func encode%[1]sList(v []%[3]s) ([]any, error) {
 	return out, nil
 }
 `, suffix, pt, codegen.UnionCarrierText,
-				strconv.Quote("encode %s element %d: %w"), strconv.Quote(string(pt)))
-		}
-		if use.listPtr {
-			fmt.Fprintf(&body, `
+			strconv.Quote("encode %s element %d: %w"), strconv.Quote(string(pt)))
+	}
+	if use.listPtr {
+		fmt.Fprintf(body, `
 // encode%[1]sListPtr binds a nullable list of %[2]s: a nil pointer is the
 // Cypher null the schema's nullability declared, not an empty list.
 func encode%[1]sListPtr(v *[]%[3]s) (any, error) {
@@ -94,30 +119,10 @@ func encode%[1]sListPtr(v *[]%[3]s) (any, error) {
 	return encode%[1]sList(*v)
 }
 `, suffix, pt, codegen.UnionCarrierText)
-		}
-		if use.decode {
-			writeUnionDecode(&body, pt, suffix, members)
-		}
 	}
-
-	needTime, needDbtype := unionFileImports(encodings, uses, target.types())
-
-	var b strings.Builder
-	b.WriteString(codegen.Header())
-	b.WriteString("package ")
-	b.WriteString(pkg)
-	b.WriteString("\n\n")
-	b.WriteString("import (\n")
-	b.WriteString("\t\"fmt\"\n")
-	if needTime {
-		b.WriteString("\t\"time\"\n")
+	if use.decode {
+		writeUnionDecode(body, pt, suffix, members)
 	}
-	if needDbtype {
-		b.WriteString("\n\t\"" + target.dbtypeImport + "\"\n")
-	}
-	b.WriteString(")\n")
-	b.WriteString(body.String())
-	return []byte(b.String())
 }
 
 // writeUnionEncode emits encode<Suffix>: the bind-time validation of an
