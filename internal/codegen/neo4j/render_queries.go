@@ -355,15 +355,11 @@ func zeroValueText(p codegen.Query) string {
 	if p.Cardinality == queryfile.CardinalityMany {
 		return "nil"
 	}
-	if len(p.RowFields) == 1 {
-		return singleColumnZeroText(p.RowFields[0])
+	if len(p.RowFields) != 1 {
+		return p.MethodName + "Row{}"
 	}
-	return p.MethodName + "Row{}"
-}
-
-// singleColumnZeroText is zeroValueText's answer for a single-column
-// projection, whose return type is the column's own.
-func singleColumnZeroText(f codegen.Row) string {
+	// A single-column projection's return type is the column's own.
+	f := p.RowFields[0]
 	if f.Nullable {
 		return "nil"
 	}
@@ -405,7 +401,7 @@ func goTypeZeroText(goType string) string {
 		"LocalDateTime", "Duration":
 		// The six temporal property widths carry a struct, whose zero
 		// is a composite literal and not the numeric zero the default
-		// arm spells. singleColumnZeroText's ColumnTemporal arm does not
+		// arm spells. zeroValueText's ColumnTemporal arm does not
 		// cover them: that is the kind a temporal *expression* takes, and a
 		// projection of a stored TIMESTAMP property is ColumnProperty.
 		// Unreached until a fixture ran a :one over one, at which point
