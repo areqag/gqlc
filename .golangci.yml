@@ -44,6 +44,8 @@ linters:
     # function complexity — both, deliberately; see the settings below
     - gocyclo
     - gocognit
+    # the traces an extraction leaves when it went wrong; see the settings below
+    - dupl
     # tests
     - testifylint
     - thelper
@@ -143,6 +145,32 @@ linters:
       min-complexity: 10
     gocognit:
       min-complexity: 15
+    # WHAT A BAD EXTRACTION LEAVES BEHIND. The three complexity sweeps of
+    # 2026-09-16 (bd gqlc-eus0, gqlc-ek1w, gqlc-vzly) extracted about a hundred
+    # helpers, and "this split made the code harder to read" is not something a
+    # linter can count. Three of the ways a split goes wrong DO leave a
+    # countable trace, and the settings here and under revive gate two of them:
+    #
+    #   - a helper that needs a long parameter list to carry the state it used
+    #     to share: revive `argument-limit` at 8 (bd gqlc-9vks). Measured before
+    #     it was set, 15 functions stood above 8, 13 of them one family of
+    #     column-decode writers in internal/codegen/neo4j sharing a nine-name
+    #     signature the sweeps had extended; those became site structs.
+    #   - a split that copied a body instead of sharing one: `dupl` at 100
+    #     tokens, production files only (tests are tables, and the exclusion
+    #     below is the complexity gate's). Measured at 100, two production pairs
+    #     existed and both were the SET/REMOVE shape the sweeps had already
+    #     fixed once for properties. gocritic's dupBranchBody covers the
+    #     switch-arm version; it is in gocritic's default set (pinning it here
+    #     draws a "no need to enable" warning on every run) and found nothing.
+    #
+    # The third trace, a `bool` parameter the helper takes to switch behaviour,
+    # was measured and DECLINED as a gate: revive `flag-parameter` fires on any
+    # bool read in a branch, and 47 of its 57 findings predate the sweeps and
+    # are domain data (`nullable`, `directed`, `notNull`, `isWrite`) rather than
+    # control coupling. A gate at that precision would be paid in nolints.
+    dupl:
+      threshold: 100
     ireturn:
       # return structs, not interfaces — with two deliberate exceptions: the
       # marker-sealed sums of the query model (Binding, Endpoint, Projection,
@@ -217,6 +245,9 @@ linters:
         - name: unused-parameter
         - name: var-declaration
         - name: var-naming
+        # see the "WHAT A BAD EXTRACTION LEAVES BEHIND" block above
+        - name: argument-limit
+          arguments: [8]
   exclusions:
     generated: lax
     paths:
@@ -241,10 +272,15 @@ linters:
       # wrong. It is an exemption for TEST HARNESSES, not a licence for
       # unreadable tests; if a test grows genuinely nested logic, that logic
       # wants to be a helper under test in its own right.
+      #
+      # dupl rides the same exemption for the same reason: two table-driven
+      # tests that share thirty lines of harness are two tables, and measured
+      # at 100 tokens 27 of its 31 findings were in _test.go.
       - path: _test\.go
         linters:
           - gocyclo
           - gocognit
+          - dupl
 
 issues:
   # golangci-lint keeps ONE issue per source line by default and says nothing
