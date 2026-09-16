@@ -187,23 +187,25 @@ func writeUnionDecode(b *strings.Builder, pt graph.PropertyType, suffix string, 
 // shape it arrived as, and narrows it to that member's declared width.
 func decode%s(v %s) (any, error) {
 `, suffix, pt, suffix, codegen.UnionCarrierText)
-	site := decodeSite{
-		zero: "nil",
-		fail: func(depth int, tail string) (format, args string) {
-			return unionFail(pt, "decode", depth, tail)
-		},
-	}
 	// One counter across the whole helper rather than a per-arm one, so no
 	// two locals in any of the nested scopes can share a name. Positional
 	// for the reason writeRecordDecode's are, and starting past `t` so the
 	// switch guard cannot be shadowed.
 	n := 0
 	next := func() string { n++; return fmt.Sprintf("v%d", n) }
+	site := decodeSite{
+		b:    b,
+		next: next,
+		zero: "nil",
+		fail: func(depth int, tail string) (format, args string) {
+			return unionFail(pt, "decode", depth, tail)
+		},
+	}
 	b.WriteString("\tswitch t := v.(type) {\n")
 	for _, m := range members {
 		carrier := driverCarrier(m.GoType)
 		fmt.Fprintf(b, "\tcase %s:\n", carrier)
-		got := writeCarrierNarrow(b, site, 0, m.GoType, m.Width, carrier, "t", "\t\t", next)
+		got := writeCarrierNarrow(site, 0, m.GoType, m.Width, carrier, "t", "\t\t")
 		fmt.Fprintf(b, "\t\treturn %s, nil\n", got)
 	}
 	b.WriteString("\t}\n")

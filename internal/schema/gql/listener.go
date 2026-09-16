@@ -468,74 +468,92 @@ func (l *listener) nodeContent(f gen.INodeTypeFillerContext) (fillerContent, err
 	if f == nil {
 		return fillerContent{}, nil
 	}
-
-	var fc fillerContent
+	var parts fillerParts
 	if kls := f.NodeTypeKeyLabelSet(); kls != nil {
-		fc.hasKeyLabelSet = true
-		labels, err := labelSet(kls.LabelSetPhrase())
-		if err != nil {
-			return fillerContent{}, err
-		}
-		fc.keyLabels = labels
+		parts.hasKeyLabelSet = true
+		parts.keyLabels = kls.LabelSetPhrase()
 	}
+	if ic := f.NodeTypeImpliedContent(); ic != nil {
+		parts.impliedLabels, parts.props = nodeImplied(ic)
+	}
+	return l.readFillerContent(parts)
+}
 
-	ic := f.NodeTypeImpliedContent()
-	if ic == nil {
-		return fc, nil
-	}
+// nodeImplied reads the `=> :Implied { ... }` half of a node type filler into
+// its label set phrase and its property types specification, each nil where
+// the content omits it.
+func nodeImplied(ic gen.INodeTypeImpliedContentContext) (gen.ILabelSetPhraseContext, gen.IPropertyTypesSpecificationContext) {
+	var labels gen.ILabelSetPhraseContext
+	var props gen.IPropertyTypesSpecificationContext
 	if ls := ic.NodeTypeLabelSet(); ls != nil {
-		labels, err := labelSet(ls.LabelSetPhrase())
-		if err != nil {
-			return fillerContent{}, err
-		}
-		fc.impliedLabels = labels
+		labels = ls.LabelSetPhrase()
 	}
-	var spec gen.IPropertyTypesSpecificationContext
 	if pts := ic.NodeTypePropertyTypes(); pts != nil {
-		spec = pts.PropertyTypesSpecification()
+		props = pts.PropertyTypesSpecification()
 	}
-	props, err := l.properties(spec)
-	if err != nil {
-		return fillerContent{}, err
-	}
-	fc.props = props
-	return fc, nil
+	return labels, props
 }
 
 // edgeContent is the edge-type counterpart of nodeContent, splitting an edge type
-// filler at `=>` on the same terms. The two cannot share one helper because the
-// grammar gives node and edge fillers distinct generated types.
+// filler at `=>` on the same terms. The grammar gives node and edge fillers
+// distinct generated types, so the walk down to the three phrases cannot be
+// shared; what the two share, through readFillerContent, is everything after it.
 func (l *listener) edgeContent(f gen.IEdgeTypeFillerContext) (fillerContent, error) {
 	if f == nil {
 		return fillerContent{}, nil
 	}
-
-	var fc fillerContent
+	var parts fillerParts
 	if kls := f.EdgeTypeKeyLabelSet(); kls != nil {
-		fc.hasKeyLabelSet = true
-		labels, err := labelSet(kls.LabelSetPhrase())
-		if err != nil {
-			return fillerContent{}, err
-		}
-		fc.keyLabels = labels
+		parts.hasKeyLabelSet = true
+		parts.keyLabels = kls.LabelSetPhrase()
 	}
+	if ic := f.EdgeTypeImpliedContent(); ic != nil {
+		parts.impliedLabels, parts.props = edgeImplied(ic)
+	}
+	return l.readFillerContent(parts)
+}
 
-	ic := f.EdgeTypeImpliedContent()
-	if ic == nil {
-		return fc, nil
-	}
+// edgeImplied is nodeImplied over an edge type filler's implied content.
+func edgeImplied(ic gen.IEdgeTypeImpliedContentContext) (gen.ILabelSetPhraseContext, gen.IPropertyTypesSpecificationContext) {
+	var labels gen.ILabelSetPhraseContext
+	var props gen.IPropertyTypesSpecificationContext
 	if ls := ic.EdgeTypeLabelSet(); ls != nil {
-		labels, err := labelSet(ls.LabelSetPhrase())
-		if err != nil {
-			return fillerContent{}, err
-		}
-		fc.impliedLabels = labels
+		labels = ls.LabelSetPhrase()
 	}
-	var spec gen.IPropertyTypesSpecificationContext
 	if pts := ic.EdgeTypePropertyTypes(); pts != nil {
-		spec = pts.PropertyTypesSpecification()
+		props = pts.PropertyTypesSpecification()
 	}
-	props, err := l.properties(spec)
+	return labels, props
+}
+
+// fillerParts is a node or edge type filler reduced to the three phrases the
+// two grammars have in common, each nil where the filler omits it. Only the key
+// label set needs a presence flag beside its phrase: resolve() infers an absent
+// one (GG22), whereas an absent implied label set or property list is simply
+// empty.
+type fillerParts struct {
+	hasKeyLabelSet bool
+	keyLabels      gen.ILabelSetPhraseContext
+	impliedLabels  gen.ILabelSetPhraseContext
+	props          gen.IPropertyTypesSpecificationContext
+}
+
+// readFillerContent reads a filler's three phrases into a fillerContent, in the
+// order the filler declares them, so the first phrase that fails to read is the
+// error returned.
+func (l *listener) readFillerContent(parts fillerParts) (fillerContent, error) {
+	fc := fillerContent{hasKeyLabelSet: parts.hasKeyLabelSet}
+	keyLabels, err := labelSet(parts.keyLabels)
+	if err != nil {
+		return fillerContent{}, err
+	}
+	fc.keyLabels = keyLabels
+	impliedLabels, err := labelSet(parts.impliedLabels)
+	if err != nil {
+		return fillerContent{}, err
+	}
+	fc.impliedLabels = impliedLabels
+	props, err := l.properties(parts.props)
 	if err != nil {
 		return fillerContent{}, err
 	}
