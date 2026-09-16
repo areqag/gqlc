@@ -509,8 +509,13 @@ func decodeTarget(w wireTarget) (Target, error) {
 		return Target{}, err
 	}
 	g := w.Gen.Go
-	if err := missingGoGenKey(g); err != nil {
-		return Target{}, err
+	switch {
+	case g.Package == nil:
+		return Target{}, missingField("gen.go.package", "")
+	case g.Out == nil:
+		return Target{}, missingField("gen.go.out", "")
+	case g.Driver == nil:
+		return Target{}, missingField("gen.go.driver", joinValues(DriverValues()))
 	}
 	if err := checkTargetValues(w, g); err != nil {
 		return Target{}, err
@@ -549,20 +554,6 @@ func missingTargetKey(w wireTarget) error {
 		return missingField("gen", "")
 	case w.Gen.Go == nil:
 		return missingField("gen.go", "")
-	}
-	return nil
-}
-
-// missingGoGenKey reports the first required gen.go key, in §2.3 wire
-// order, that the entry omits.
-func missingGoGenKey(g *wireGo) error {
-	switch {
-	case g.Package == nil:
-		return missingField("gen.go.package", "")
-	case g.Out == nil:
-		return missingField("gen.go.out", "")
-	case g.Driver == nil:
-		return missingField("gen.go.driver", joinValues(DriverValues()))
 	}
 	return nil
 }

@@ -2563,54 +2563,36 @@ func validateSetPropertyEffect(sc *scope, e query.SetPropertyEffect, s schema.Sc
 func validatePropertyEffectTarget(sc *scope, ref query.Ref, s schema.Schema, clause effectClause, verb string) error {
 	v := ref.Variable
 	p := ref.Property
-	if ok, err := validateNodeLanePropertyTarget(sc, v, p, clause); ok {
+	if nt, ok := sc.nodeTypes[v]; ok {
+		if _, ok := nt.Properties[p]; !ok {
+			return fmt.Errorf("%w: %s%s.%s", ErrUnknownProperty, clause.prefix(), v, p)
+		}
+		return nil
+	}
+	if nts, ok := sc.nodeCands[v]; ok {
+		_, err := unionNodeProperty(nts, v, p, false, clause)
 		return err
 	}
-	if ok, err := validateEdgeLanePropertyTarget(sc, v, p, s, clause, verb); ok {
+	if et, ok := sc.edgeTypes[v]; ok {
+		if sc.edgeBindings[v].Hops() != nil {
+			return fmt.Errorf("%w: %s on variable-length edge %q", ErrInvalidEffectTarget, verb, v)
+		}
+		if _, ok := et.Properties[p]; !ok {
+			return fmt.Errorf("%w: %s%s.%s", ErrUnknownProperty, clause.prefix(), v, p)
+		}
+		return nil
+	}
+	if cands, ok := sc.edgeCands[v]; ok {
+		if sc.edgeBindings[v].Hops() != nil {
+			return fmt.Errorf("%w: %s on variable-length edge %q", ErrInvalidEffectTarget, verb, v)
+		}
+		_, err := unionProperty(cands, s, v, p, false, clause)
 		return err
 	}
 	if _, ok := sc.carriedResolvedTypes[v]; ok {
 		return fmt.Errorf("%w: %s %s.%s: %q resolves to a projection alias, not an entity binding", ErrInvalidEffectTarget, verb, v, p, v)
 	}
 	return fmt.Errorf("%w: %s %s.%s: %q not in any Part scope", ErrInvalidEffectTarget, verb, v, p, v)
-}
-
-// validateNodeLanePropertyTarget is the node half of validatePropertyEffectTarget;
-// ok is false when v is in neither node lane.
-func validateNodeLanePropertyTarget(sc *scope, v, p string, clause effectClause) (bool, error) {
-	if nt, ok := sc.nodeTypes[v]; ok {
-		if _, ok := nt.Properties[p]; !ok {
-			return true, fmt.Errorf("%w: %s%s.%s", ErrUnknownProperty, clause.prefix(), v, p)
-		}
-		return true, nil
-	}
-	if nts, ok := sc.nodeCands[v]; ok {
-		_, err := unionNodeProperty(nts, v, p, false, clause)
-		return true, err
-	}
-	return false, nil
-}
-
-// validateEdgeLanePropertyTarget is the edge half of validatePropertyEffectTarget;
-// ok is false when v is in neither edge lane.
-func validateEdgeLanePropertyTarget(sc *scope, v, p string, s schema.Schema, clause effectClause, verb string) (bool, error) {
-	if et, ok := sc.edgeTypes[v]; ok {
-		if sc.edgeBindings[v].Hops() != nil {
-			return true, fmt.Errorf("%w: %s on variable-length edge %q", ErrInvalidEffectTarget, verb, v)
-		}
-		if _, ok := et.Properties[p]; !ok {
-			return true, fmt.Errorf("%w: %s%s.%s", ErrUnknownProperty, clause.prefix(), v, p)
-		}
-		return true, nil
-	}
-	if cands, ok := sc.edgeCands[v]; ok {
-		if sc.edgeBindings[v].Hops() != nil {
-			return true, fmt.Errorf("%w: %s on variable-length edge %q", ErrInvalidEffectTarget, verb, v)
-		}
-		_, err := unionProperty(cands, s, v, p, false, clause)
-		return true, err
-	}
-	return false, nil
 }
 
 // validateSetEntityEffect resolves the target variable against the entity

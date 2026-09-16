@@ -277,7 +277,12 @@ func run(ctx context.Context, out io.Writer, cfg config, src source) error {
 	rep := &reporter{w: out}
 	rep.printf("%s", render(findings))
 
-	closes := plannedCloses(findings)
+	closes := 0
+	for _, f := range findings {
+		if f.Verdict == verdictClose {
+			closes++
+		}
+	}
 	refusals := len(findings) - closes
 
 	if !cfg.act {
@@ -302,16 +307,6 @@ func run(ctx context.Context, out io.Writer, cfg config, src source) error {
 	closed, applyErr := apply(ctx, rep, findings, freshBound.any, src.closeIssue, cfg.repo)
 	rep.printf("ghorphan: closed %d of %d planned issue(s), refused %d.\n", closed, closes, refusals)
 	return errors.Join(applyErr, rep.err)
-}
-
-func plannedCloses(findings []finding) int {
-	closes := 0
-	for _, f := range findings {
-		if f.Verdict == verdictClose {
-			closes++
-		}
-	}
-	return closes
 }
 
 // writeBoundaryBindings re-reads the ledger and returns its bindings, or the
