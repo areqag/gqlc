@@ -43,17 +43,29 @@ func (r rawSchema) resolve() (schema.Schema, error) {
 		declared: make(map[string]bool),
 		types:    s.Nodes,
 	}
+	if err := r.resolveNodes(s.Nodes, idx); err != nil {
+		return schema.Schema{}, err
+	}
+	if err := r.resolveEdges(s.Edges, idx); err != nil {
+		return schema.Schema{}, err
+	}
+	return s, nil
+}
+
+// resolveNodes is the first phase: it fills nodes with every declared node type
+// and idx with what the edge phase will resolve endpoints against.
+func (r rawSchema) resolveNodes(nodes map[graph.LabelSetKey]schema.NodeType, idx nodeIndex) error {
 	nodeKeyLabels := make(map[string]bool)
 	nodeImplied := make([]graph.LabelSet, 0, len(r.nodes))
 	for _, n := range r.nodes {
 		key, complete, ok := labelSets(n.hasKeyLabelSet, n.keyLabels, n.impliedLabels)
 		if !ok {
-			return schema.Schema{}, ErrUnnamedNodeType
+			return ErrUnnamedNodeType
 		}
-		if _, dup := s.Nodes[key]; dup {
-			return schema.Schema{}, ErrDuplicateNodeType
+		if _, dup := nodes[key]; dup {
+			return ErrDuplicateNodeType
 		}
-		s.Nodes[key] = schema.NodeType{
+		nodes[key] = schema.NodeType{
 			KeyLabels:      key,
 			CompleteLabels: complete,
 			Name:           n.name,
@@ -62,19 +74,7 @@ func (r rawSchema) resolve() (schema.Schema, error) {
 		for _, label := range key.Split() {
 			nodeKeyLabels[label] = true
 		}
-		if n.alias != "" {
-			idx.aliases[n.alias] = key
-		}
-		if n.name != "" {
-			idx.declared[n.name] = true
-		}
-		// Every label the type answers to, implied ones included: idx.declared
-		// exists to tell "you named a type where an alias belongs" apart from
-		// "no such type", and an author who writes an implied label has made
-		// that same mistake.
-		for _, label := range complete.Split() {
-			idx.declared[label] = true
-		}
+		idx.record(n, key, complete)
 		if n.hasKeyLabelSet {
 			nodeImplied = append(nodeImplied, n.impliedLabels)
 		}
@@ -85,34 +85,30 @@ func (r rawSchema) resolve() (schema.Schema, error) {
 	//
 	// Deferred past the loop because a collision is order-independent: a later
 	// declaration's key label can collide with an earlier one's implied label.
-	if err := rejectInheritance(nodeImplied, nodeKeyLabels); err != nil {
-		return schema.Schema{}, err
-	}
+	return rejectInheritance(nodeImplied, nodeKeyLabels)
+}
 
+// resolveEdges is the second phase: every edge's endpoints resolved against idx,
+// which the node phase has finished filling.
+func (r rawSchema) resolveEdges(edges map[schema.EdgeKey]schema.EdgeType, idx nodeIndex) error {
 	edgeKeyLabels := make(map[string]bool)
 	edgeImplied := make([]graph.LabelSet, 0, len(r.edges))
 	for _, e := range r.edges {
 		key, complete, ok := labelSets(e.hasKeyLabelSet, e.keyLabels, e.impliedLabels)
 		if !ok {
-			return schema.Schema{}, ErrUnnamedEdgeType
+			return ErrUnnamedEdgeType
 		}
 		if len(key.Split()) > 1 {
-			return schema.Schema{}, ErrMultiLabelEdgeType
+			return ErrMultiLabelEdgeType
 		}
-		source, err := e.source.resolve(idx)
+		edgeKey, err := e.resolveKey(idx, key)
 		if err != nil {
-			return schema.Schema{}, err
+			return err
 		}
-		target, err := e.target.resolve(idx)
-		if err != nil {
-			return schema.Schema{}, err
+		if _, dup := edges[edgeKey]; dup {
+			return ErrDuplicateEdgeType
 		}
-
-		edgeKey := schema.EdgeKey{Source: source, KeyLabels: key, Target: target}
-		if _, dup := s.Edges[edgeKey]; dup {
-			return schema.Schema{}, ErrDuplicateEdgeType
-		}
-		s.Edges[edgeKey] = schema.EdgeType{
+		edges[edgeKey] = schema.EdgeType{
 			EdgeKey:        edgeKey,
 			CompleteLabels: complete,
 			Name:           e.name,
@@ -125,11 +121,21 @@ func (r rawSchema) resolve() (schema.Schema, error) {
 			edgeImplied = append(edgeImplied, e.impliedLabels)
 		}
 	}
-	if err := rejectInheritance(edgeImplied, edgeKeyLabels); err != nil {
-		return schema.Schema{}, err
-	}
+	return rejectInheritance(edgeImplied, edgeKeyLabels)
+}
 
-	return s, nil
+// resolveKey resolves the edge's two endpoints, source first, and pairs them
+// with its key label set.
+func (e rawEdge) resolveKey(idx nodeIndex, key graph.LabelSetKey) (schema.EdgeKey, error) {
+	source, err := e.source.resolve(idx)
+	if err != nil {
+		return schema.EdgeKey{}, err
+	}
+	target, err := e.target.resolve(idx)
+	if err != nil {
+		return schema.EdgeKey{}, err
+	}
+	return schema.EdgeKey{Source: source, KeyLabels: key, Target: target}, nil
 }
 
 // labelSets turns a declaration's two raw label sets into the pair the model
@@ -203,6 +209,24 @@ type nodeIndex struct {
 	aliases  map[string]graph.LabelSetKey
 	declared map[string]bool
 	types    map[graph.LabelSetKey]schema.NodeType
+}
+
+// record enters one declared node type: its alias, if it binds one, and every
+// identifier it answers to.
+func (idx nodeIndex) record(n rawNode, key, complete graph.LabelSetKey) {
+	if n.alias != "" {
+		idx.aliases[n.alias] = key
+	}
+	if n.name != "" {
+		idx.declared[n.name] = true
+	}
+	// Every label the type answers to, implied ones included: idx.declared
+	// exists to tell "you named a type where an alias belongs" apart from
+	// "no such type", and an author who writes an implied label has made
+	// that same mistake.
+	for _, label := range complete.Split() {
+		idx.declared[label] = true
+	}
 }
 
 // resolve maps an edge endpoint to the canonical key of the declared node type it
