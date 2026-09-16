@@ -44,26 +44,7 @@ func (l *listener) collectCall(
 		return
 	}
 
-	// Argument mining: refs, parameter uses, and per-position mined
-	// types. The args slice (0ig) is retained on every CallBinding
-	// minted from this CALL clause and consumed by the resolver's
-	// argument-site assignability walk. Refs/params routing preserves
-	// the Stage-13 "no silent parser info drop" invariant.
-	var args []query.CallArg
-	if len(argExprs) > 0 {
-		args = make([]query.CallArg, 0, len(argExprs))
-	}
-	for _, e := range argExprs {
-		t, _, params := l.typeExpressionMining(e)
-		args = append(args, query.NewCallArg(t))
-		for _, p := range params {
-			n := parameterName(p)
-			if n == "" {
-				continue
-			}
-			l.addParameterUse(n, p, query.NewExprUse(t, query.ExprInProjection))
-		}
-	}
+	args := l.collectCallArgs(argExprs)
 
 	// Arity check (explicit invocations only): implicit invocation
 	// binds args from parameters at runtime, so its arity is
@@ -98,6 +79,24 @@ func (l *listener) collectCall(
 		// oC_RegularQuery — see EnterOC_StandaloneCall doc).
 		l.setCallStandalone()
 	}
+}
+
+// collectCallArgs is a CALL's argument mining: refs, parameter uses, and
+// per-position mined types. The args slice (0ig) is retained on every
+// CallBinding minted from this CALL clause and consumed by the resolver's
+// argument-site assignability walk. Refs/params routing preserves the
+// Stage-13 "no silent parser info drop" invariant.
+func (l *listener) collectCallArgs(argExprs []gen.IOC_ExpressionContext) []query.CallArg {
+	var args []query.CallArg
+	if len(argExprs) > 0 {
+		args = make([]query.CallArg, 0, len(argExprs))
+	}
+	for _, e := range argExprs {
+		t, _, params := l.typeExpressionMining(e)
+		args = append(args, query.NewCallArg(t))
+		l.addExprUses(params, t, query.ExprInProjection)
+	}
+	return args
 }
 
 // extractProcedureName concatenates the oC_Namespace tokens with '.' and

@@ -279,21 +279,9 @@ func (l *listener) collectEdge(r gen.IOC_RelationshipPatternContext, prev, next 
 	var labels graph.LabelSet
 	var hops *query.EdgeHops
 	if d := r.OC_RelationshipDetail(); d != nil {
-		if v := d.OC_Variable(); v != nil {
-			variable = variableName(v)
-		}
-		l.mineInlineMap(variable, d.OC_Properties())
+		variable, labels, hops = l.collectEdgeDetail(d)
 		if l.err != nil {
 			return
-		}
-		labels = relTypes(d.OC_RelationshipTypes())
-		if rl := d.OC_RangeLiteral(); rl != nil {
-			h, err := edgeHopsFromRangeLiteral(rl)
-			if err != nil {
-				l.fail(err)
-				return
-			}
-			hops = &h
 		}
 	}
 
@@ -312,27 +300,57 @@ func (l *listener) collectEdge(r gen.IOC_RelationshipPatternContext, prev, next 
 		return
 	}
 	if !l.nameBoundAsUnwind(variable) {
-		// 0kq: detect a required chain re-reference of an OPTIONAL-introduced edge
-		// variable. A re-reference in a required clause (group == 0) on an edge that
-		// was previously introduced as OPTIONAL (optionalGroup > 0) witnesses that
-		// the edge is non-null on all surviving rows. Set the flag monotonically on
-		// the raw binding after mergeBinding updates it.
-		part := l.curPart
-		priorIdx, alreadyBound := part.byVar[variable]
-		isOptionalIntroduced := alreadyBound && part.bindings[priorIdx].optionalGroup > 0
-		// 5xg: an edge is grammatically never bare — it always sits inside
-		// -[...]- between two node positions — so the parameter is a
-		// compile-time constant false at this site.
-		l.mergeBinding(variable, graph.Edge, labels, source, target, group, !directed, hops, false)
-		if isOptionalIntroduced && group == 0 {
-			// The variable was OPTIONAL-introduced and this occurrence is in a
-			// required (non-OPTIONAL) clause — mark the binding as chain-witnessed.
-			if idx, ok := part.byVar[variable]; ok {
-				part.bindings[idx].referencedInRequiredChain = true
-			}
-		}
+		l.mergeNamedEdge(variable, labels, source, target, group, directed, hops)
 	}
 	l.recordPathEdge(variable)
+}
+
+// collectEdgeDetail reads the bracketed [...] part of a relationship pattern:
+// its variable name, its relationship types and its hop range. Inline
+// properties are mined against the variable; a failure there or in the hop
+// range sets l.err.
+func (l *listener) collectEdgeDetail(d gen.IOC_RelationshipDetailContext) (variable string, labels graph.LabelSet, hops *query.EdgeHops) {
+	if v := d.OC_Variable(); v != nil {
+		variable = variableName(v)
+	}
+	l.mineInlineMap(variable, d.OC_Properties())
+	if l.err != nil {
+		return variable, labels, hops
+	}
+	labels = relTypes(d.OC_RelationshipTypes())
+	if rl := d.OC_RangeLiteral(); rl != nil {
+		h, err := edgeHopsFromRangeLiteral(rl)
+		if err != nil {
+			l.fail(err)
+			return variable, labels, hops
+		}
+		hops = &h
+	}
+	return variable, labels, hops
+}
+
+// mergeNamedEdge merges a named edge occurrence into the part's bindings.
+//
+// 0kq: detect a required chain re-reference of an OPTIONAL-introduced edge
+// variable. A re-reference in a required clause (group == 0) on an edge that
+// was previously introduced as OPTIONAL (optionalGroup > 0) witnesses that
+// the edge is non-null on all surviving rows. Set the flag monotonically on
+// the raw binding after mergeBinding updates it.
+func (l *listener) mergeNamedEdge(variable string, labels graph.LabelSet, source, target query.Endpoint, group int, directed bool, hops *query.EdgeHops) {
+	part := l.curPart
+	priorIdx, alreadyBound := part.byVar[variable]
+	isOptionalIntroduced := alreadyBound && part.bindings[priorIdx].optionalGroup > 0
+	// 5xg: an edge is grammatically never bare — it always sits inside
+	// -[...]- between two node positions — so the parameter is a
+	// compile-time constant false at this site.
+	l.mergeBinding(variable, graph.Edge, labels, source, target, group, !directed, hops, false)
+	if isOptionalIntroduced && group == 0 {
+		// The variable was OPTIONAL-introduced and this occurrence is in a
+		// required (non-OPTIONAL) clause — mark the binding as chain-witnessed.
+		if idx, ok := part.byVar[variable]; ok {
+			part.bindings[idx].referencedInRequiredChain = true
+		}
+	}
 }
 
 // edgeHopsFromRangeLiteral reads a variable-length relationship's hop range
