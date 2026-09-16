@@ -163,6 +163,13 @@ func (s Sweep) Run() []Finding {
 		})
 	}
 
+	return append(found, s.differentialFindings()...)
+}
+
+// differentialFindings is the resolved half: what the emitted package
+// declares and what its methods resolve, baseline against probe.
+func (s Sweep) differentialFindings() []Finding {
+	var found []Finding
 	wantDeclared, wantResolved, err := Scope(s.Baseline)
 	if err != nil {
 		return append(found, Finding{Detail: "baseline: " + err.Error()})
@@ -517,26 +524,17 @@ func ReferencedIdents(n ast.Node) []string {
 			out = append(out, ReferencedIdents(e.Value)...)
 			return false
 		case *ast.FuncDecl:
-			out = append(out, signatureIdents(e.Recv, e.Type)...)
-			if e.Body != nil {
-				out = append(out, ReferencedIdents(e.Body)...)
-			}
+			out = append(out, funcIdents(e.Recv, e.Type, e.Body)...)
 			return false
 		case *ast.FuncLit:
-			out = append(out, signatureIdents(nil, e.Type)...)
-			out = append(out, ReferencedIdents(e.Body)...)
+			out = append(out, funcIdents(nil, e.Type, e.Body)...)
 			return false
-		case *ast.FuncType:
-			// Reached only as a TYPE, since the two arms above consume
-			// the signature of a declaration and of a literal first. A
-			// name here binds nothing any body can read.
-			out = append(out, fieldTypeIdents(e.TypeParams, e.Params, e.Results)...)
-			return false
-		case *ast.StructType:
-			out = append(out, fieldTypeIdents(e.Fields)...)
-			return false
-		case *ast.InterfaceType:
-			out = append(out, fieldTypeIdents(e.Methods)...)
+		case *ast.FuncType, *ast.StructType, *ast.InterfaceType:
+			// A func type is reached here only as a TYPE, since the two
+			// arms above consume the signature of a declaration and of
+			// a literal first. A name here binds nothing any body can
+			// read.
+			out = append(out, fieldTypeIdents(e)...)
 			return false
 		case *ast.LabeledStmt:
 			out = append(out, ReferencedIdents(e.Stmt)...)
@@ -549,6 +547,16 @@ func ReferencedIdents(n ast.Node) []string {
 		}
 		return true
 	})
+	return out
+}
+
+// funcIdents reads a function declaration or literal: its signature,
+// then its body where it has one.
+func funcIdents(recv *ast.FieldList, typ *ast.FuncType, body *ast.BlockStmt) []string {
+	out := signatureIdents(recv, typ)
+	if body != nil {
+		out = append(out, ReferencedIdents(body)...)
+	}
 	return out
 }
 
@@ -575,7 +583,16 @@ func signatureIdents(recv *ast.FieldList, typ *ast.FuncType) []string {
 // fieldTypeIdents reads the types in field lists whose names are never
 // scope bindings: a struct's fields, an interface's methods, and the
 // parameters, results and type parameters of a func type.
-func fieldTypeIdents(lists ...*ast.FieldList) []string {
+func fieldTypeIdents(n ast.Node) []string {
+	var lists []*ast.FieldList
+	switch t := n.(type) {
+	case *ast.FuncType:
+		lists = []*ast.FieldList{t.TypeParams, t.Params, t.Results}
+	case *ast.StructType:
+		lists = []*ast.FieldList{t.Fields}
+	case *ast.InterfaceType:
+		lists = []*ast.FieldList{t.Methods}
+	}
 	var out []string
 	for _, l := range lists {
 		if l == nil {
@@ -613,33 +630,45 @@ func DeclaredIdents(n ast.Node) []*ast.Ident {
 		// at all, and ReferencedIdents excludes them per occurrence.
 		out = append(out, stmt.Name)
 	case *ast.FuncLit:
-		for _, l := range []*ast.FieldList{stmt.Type.Params, stmt.Type.Results} {
-			if l == nil {
-				continue
-			}
-			for _, f := range l.List {
-				out = append(out, f.Names...)
-			}
-		}
+		out = append(out, funcLitBindings(stmt)...)
 	case *ast.AssignStmt:
 		if stmt.Tok != token.DEFINE {
 			return nil
 		}
-		for _, lhs := range stmt.Lhs {
-			if id, ok := lhs.(*ast.Ident); ok {
-				out = append(out, id)
-			}
-		}
+		out = append(out, definedIdents(stmt.Lhs)...)
 	case *ast.ValueSpec:
 		out = append(out, stmt.Names...)
 	case *ast.RangeStmt:
 		if stmt.Tok != token.DEFINE {
 			return nil
 		}
-		for _, e := range []ast.Expr{stmt.Key, stmt.Value} {
-			if id, ok := e.(*ast.Ident); ok {
-				out = append(out, id)
-			}
+		out = append(out, definedIdents([]ast.Expr{stmt.Key, stmt.Value})...)
+	}
+	return out
+}
+
+// funcLitBindings is the names a function literal's parameters and
+// results introduce.
+func funcLitBindings(lit *ast.FuncLit) []*ast.Ident {
+	var out []*ast.Ident
+	for _, l := range []*ast.FieldList{lit.Type.Params, lit.Type.Results} {
+		if l == nil {
+			continue
+		}
+		for _, f := range l.List {
+			out = append(out, f.Names...)
+		}
+	}
+	return out
+}
+
+// definedIdents is the identifiers among the operands of a := binding;
+// any other operand shape binds nothing.
+func definedIdents(exprs []ast.Expr) []*ast.Ident {
+	var out []*ast.Ident
+	for _, e := range exprs {
+		if id, ok := e.(*ast.Ident); ok {
+			out = append(out, id)
 		}
 	}
 	return out

@@ -36,79 +36,21 @@ func parse(r io.Reader) ([]AnnotatedQuery, error) {
 	// the parser. Users pathological beyond this are outside C0 scope.
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 
-	var (
-		out         []AnnotatedQuery
-		curName     string
-		curCard     Cardinality
-		curBody     strings.Builder
-		haveCurrent bool
-		lineno      int
-	)
-
-	flush := func() {
-		out = append(out, AnnotatedQuery{
-			Name:        curName,
-			Cardinality: curCard,
-			Text:        bodyText(curBody.String()),
-		})
-		curBody.Reset()
-	}
-
+	var acc queryAccumulator
+	lineno := 0
 	for scanner.Scan() {
 		lineno++
-		line := scanner.Text()
-
-		if annotationLine.MatchString(line) {
-			m := annotationLine.FindStringSubmatch(line)
-			name, cardTok := m[1], m[2]
-
-			card, ok := parseCardinality(cardTok)
-			if !ok {
-				return nil, fmt.Errorf("%w: line %d: %q", ErrUnknownCardinality, lineno, cardTok)
-			}
-			if !identName.MatchString(name) {
-				return nil, fmt.Errorf("%w: line %d: %q", ErrInvalidQueryName, lineno, name)
-			}
-
-			if haveCurrent {
-				if bodyText(curBody.String()) == "" {
-					return nil, fmt.Errorf("%w: line %d: %q has no body", ErrMissingAnnotation, lineno, curName)
-				}
-				flush()
-			}
-			curName = name
-			curCard = card
-			haveCurrent = true
-			continue
+		if err := acc.line(lineno, scanner.Text()); err != nil {
+			return nil, err
 		}
-
-		if annotationPrefix.MatchString(line) {
-			return nil, fmt.Errorf("%w: line %d: %q", ErrMalformedAnnotation, lineno, line)
-		}
-
-		if !haveCurrent {
-			// Pre-first-annotation: only comments and blank lines allowed
-			// (spec §4.1 file-header comments). "//" any content is a
-			// comment; blank / whitespace-only is fine.
-			trimmed := strings.TrimSpace(line)
-			if trimmed == "" || strings.HasPrefix(trimmed, "//") {
-				continue
-			}
-			return nil, fmt.Errorf("%w: line %d", ErrTextBeforeAnnotation, lineno)
-		}
-
-		curBody.WriteString(line)
-		curBody.WriteByte('\n')
 	}
 	if err := scanner.Err(); err != nil {
 		return nil, err
 	}
 
-	if haveCurrent {
-		if bodyText(curBody.String()) == "" {
-			return nil, fmt.Errorf("%w: %q has no body", ErrMissingAnnotation, curName)
-		}
-		flush()
+	out, err := acc.finish()
+	if err != nil {
+		return nil, err
 	}
 	if len(out) == 0 {
 		return nil, ErrNoQueries
@@ -116,15 +58,105 @@ func parse(r io.Reader) ([]AnnotatedQuery, error) {
 
 	// Duplicate-name detection runs after emission (spec §4.4): a linear
 	// pass, no set carried through the walk.
+	if err := checkDuplicateQueryNames(out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// queryAccumulator is parse's walk state: the queries flushed so far and
+// the one whose body is still being collected.
+type queryAccumulator struct {
+	out         []AnnotatedQuery
+	curName     string
+	curCard     Cardinality
+	curBody     strings.Builder
+	haveCurrent bool
+}
+
+func (a *queryAccumulator) flush() {
+	a.out = append(a.out, AnnotatedQuery{
+		Name:        a.curName,
+		Cardinality: a.curCard,
+		Text:        bodyText(a.curBody.String()),
+	})
+	a.curBody.Reset()
+}
+
+// line consumes one input line: an annotation opens the next query, a
+// malformed one is rejected, and anything else is body text once the
+// first annotation has been seen.
+func (a *queryAccumulator) line(lineno int, line string) error {
+	if m := annotationLine.FindStringSubmatch(line); m != nil {
+		return a.startQuery(lineno, m[1], m[2])
+	}
+
+	if annotationPrefix.MatchString(line) {
+		return fmt.Errorf("%w: line %d: %q", ErrMalformedAnnotation, lineno, line)
+	}
+
+	if !a.haveCurrent {
+		// Pre-first-annotation: only comments and blank lines allowed
+		// (spec §4.1 file-header comments). "//" any content is a
+		// comment; blank / whitespace-only is fine.
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "//") {
+			return nil
+		}
+		return fmt.Errorf("%w: line %d", ErrTextBeforeAnnotation, lineno)
+	}
+
+	a.curBody.WriteString(line)
+	a.curBody.WriteByte('\n')
+	return nil
+}
+
+// startQuery validates an annotation line's two captures, flushes the
+// query in progress, and opens the one the annotation names.
+func (a *queryAccumulator) startQuery(lineno int, name, cardTok string) error {
+	card, ok := parseCardinality(cardTok)
+	if !ok {
+		return fmt.Errorf("%w: line %d: %q", ErrUnknownCardinality, lineno, cardTok)
+	}
+	if !identName.MatchString(name) {
+		return fmt.Errorf("%w: line %d: %q", ErrInvalidQueryName, lineno, name)
+	}
+
+	if a.haveCurrent {
+		if bodyText(a.curBody.String()) == "" {
+			return fmt.Errorf("%w: line %d: %q has no body", ErrMissingAnnotation, lineno, a.curName)
+		}
+		a.flush()
+	}
+	a.curName = name
+	a.curCard = card
+	a.haveCurrent = true
+	return nil
+}
+
+// finish flushes the last query at end of input and returns everything
+// collected.
+func (a *queryAccumulator) finish() ([]AnnotatedQuery, error) {
+	if a.haveCurrent {
+		if bodyText(a.curBody.String()) == "" {
+			return nil, fmt.Errorf("%w: %q has no body", ErrMissingAnnotation, a.curName)
+		}
+		a.flush()
+	}
+	return a.out, nil
+}
+
+// checkDuplicateQueryNames reports the first name declared twice, by the
+// positions of its first two declarations.
+func checkDuplicateQueryNames(out []AnnotatedQuery) error {
 	seen := make(map[string]int, len(out))
 	for i, q := range out {
 		if first, dup := seen[q.Name]; dup {
-			return nil, fmt.Errorf("%w: %q at positions %d and %d", ErrDuplicateQueryName, q.Name, first, i)
+			return fmt.Errorf("%w: %q at positions %d and %d", ErrDuplicateQueryName, q.Name, first, i)
 		}
 		seen[q.Name] = i
 	}
-
-	return out, nil
+	return nil
 }
 
 // bodyText renders a query's accumulated lines into the statement text handed

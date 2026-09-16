@@ -16,19 +16,7 @@ func generate(in codegen.Input, target driverTarget, packageName string) ([]code
 	}
 
 	pkg := prepared.Package
-	// hasOne gates renderDB's :one sentinels; hasIter gates its streaming
-	// seam. Both are "does the batch hold at least one", and neither can
-	// break early now that two answers come out of the walk.
-	hasOne, hasIter := false, false
-	for _, p := range prepared.Queries {
-		switch p.Cardinality {
-		case queryfile.CardinalityOne:
-			hasOne = true
-		case queryfile.CardinalityIter:
-			hasIter = true
-		case queryfile.CardinalityMany, queryfile.CardinalityExec:
-		}
-	}
+	hasOne, hasIter := batchCardinalities(prepared.Queries)
 
 	// One walk answers both conversion kinds, so models.go's record
 	// helpers and temporal_neo4j.go's carrier bridges are gated off the
@@ -103,4 +91,22 @@ func generate(in codegen.Input, target driverTarget, packageName string) ([]code
 	}
 
 	return codegen.Finalise(files)
+}
+
+// batchCardinalities reports whether the batch holds at least one :one
+// query and at least one :iter query. hasOne gates renderDB's :one
+// sentinels; hasIter gates its streaming seam. Both are "does the batch
+// hold at least one", and neither can break early now that two answers
+// come out of the walk.
+func batchCardinalities(queries []codegen.Query) (hasOne, hasIter bool) {
+	for _, p := range queries {
+		switch p.Cardinality {
+		case queryfile.CardinalityOne:
+			hasOne = true
+		case queryfile.CardinalityIter:
+			hasIter = true
+		case queryfile.CardinalityMany, queryfile.CardinalityExec:
+		}
+	}
+	return hasOne, hasIter
 }

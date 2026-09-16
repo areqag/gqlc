@@ -49,7 +49,12 @@ func (l *listener) collectProjection(body gen.IOC_ProjectionBodyContext) {
 			return
 		}
 	}
+	l.mineOrderSkipLimit(body)
+}
 
+// mineOrderSkipLimit mines the parameters under a projection body's ORDER
+// BY, SKIP and LIMIT sub-clauses.
+func (l *listener) mineOrderSkipLimit(body gen.IOC_ProjectionBodyContext) {
 	// ORDER BY is accept-and-ignored at the clause-structure level (its sort
 	// keys do not enter the model — sort-key structure is below the
 	// type-interface boundary, ADR 0003), but a parameter under a sort key
@@ -97,39 +102,15 @@ func (l *listener) collectUnwind(c gen.IOC_UnwindContext) {
 	if variable == "" {
 		return
 	}
-	// The three-way collision sweep (entity / path / unwind): the byVar map
-	// only covers entity bindings, so path and unwind names have to be checked
-	// against their own slices before this UnwindBinding is appended.
-	// Spec §4.3 amend: same-name path or same-name earlier UNWIND in the same
-	// part is a kind conflict, symmetric with the Stage 8 pathBindings-vs-byVar
-	// check in buildPart.
-	if _, clash := l.curPart.byVar[variable]; clash {
+	if l.unwindVariableClashes(variable) {
 		l.fail(fmt.Errorf("%w: %q", ErrVariableKindConflict, variable))
 		return
-	}
-	for _, pb := range l.curPart.pathBindings {
-		if pb.Variable() == variable {
-			l.fail(fmt.Errorf("%w: %q", ErrVariableKindConflict, variable))
-			return
-		}
-	}
-	for _, ub := range l.curPart.unwindBindings {
-		if ub.Variable() == variable {
-			l.fail(fmt.Errorf("%w: %q", ErrVariableKindConflict, variable))
-			return
-		}
 	}
 	sourceType, refs, params := l.typeExpressionMining(c.OC_Expression())
 	for _, ref := range refs {
 		l.appendRef(varRef{name: ref.Variable})
 	}
-	for _, p := range params {
-		name := parameterName(p)
-		if name == "" {
-			continue
-		}
-		l.addParameterUse(name, p, query.NewExprUse(sourceType, query.ExprInProjection))
-	}
+	l.addExprUses(params, sourceType, query.ExprInProjection)
 	elemType := unwindElementType(sourceType)
 	ub, err := query.NewUnwindBinding(variable, elemType)
 	if err != nil {
@@ -137,6 +118,29 @@ func (l *listener) collectUnwind(c gen.IOC_UnwindContext) {
 		return
 	}
 	l.appendUnwindBinding(ub)
+}
+
+// unwindVariableClashes is the three-way collision sweep (entity / path /
+// unwind): the byVar map only covers entity bindings, so path and unwind
+// names have to be checked against their own slices before an
+// UnwindBinding is appended. Spec §4.3 amend: same-name path or same-name
+// earlier UNWIND in the same part is a kind conflict, symmetric with the
+// Stage 8 pathBindings-vs-byVar check in buildPart.
+func (l *listener) unwindVariableClashes(variable string) bool {
+	if _, clash := l.curPart.byVar[variable]; clash {
+		return true
+	}
+	for _, pb := range l.curPart.pathBindings {
+		if pb.Variable() == variable {
+			return true
+		}
+	}
+	for _, ub := range l.curPart.unwindBindings {
+		if ub.Variable() == variable {
+			return true
+		}
+	}
+	return false
 }
 
 // unwindElementType extracts the element type from an UNWIND source
@@ -246,17 +250,22 @@ func (l *listener) classifyProjection(e gen.IOC_ExpressionContext) (query.Projec
 	if atom == nil {
 		return nil, false
 	}
-	lookups := len(nae.AllOC_PropertyLookup())
-
-	switch {
-	case atom.OC_Variable() != nil:
+	if atom.OC_Variable() != nil {
 		ref, ok := refFromNonArithmetic(nae)
 		if !ok {
 			return nil, false
 		}
 		l.appendRef(varRef{name: ref.Variable})
 		return query.NewRefProjection(ref, l.refType(ref)), true
+	}
+	return l.classifyAtomProjection(atom, len(nae.AllOC_PropertyLookup()))
+}
 
+// classifyAtomProjection classifies the non-variable bare atoms (count(*),
+// scalar literal, function invocation); lookups is the number of property
+// lookups chained onto the atom, and any lookup makes each of them residual.
+func (l *listener) classifyAtomProjection(atom gen.IOC_AtomContext, lookups int) (query.Projection, bool) {
+	switch {
 	case atom.COUNT() != nil:
 		// The count-star atom count(*): the degenerate aggregate, AggCount with no
 		// referenced binding. A property lookup on it (count(*).x) is residual.
@@ -302,40 +311,58 @@ func (l *listener) refType(r query.Ref) query.Type {
 		return query.TypeUnknown{}
 	}
 	if idx, ok := l.curPart.byVar[r.Variable]; ok {
-		rb := l.curPart.bindings[idx]
-		switch rb.kind {
-		case graph.Node:
-			return query.TypeNode{}
-		case graph.Edge:
-			if rb.hops != nil {
-				return query.NewTypeList(query.TypeEdge{})
-			}
-			return query.TypeEdge{}
+		if t, ok := entityBindingType(l.curPart.bindings[idx]); ok {
+			return t
 		}
 	}
-	for _, pb := range l.curPart.pathBindings {
-		if pb.Variable() == r.Variable {
-			return query.TypePath{}
-		}
-	}
-	for _, ub := range l.curPart.unwindBindings {
-		if ub.Variable() == r.Variable {
-			return ub.ElementType()
-		}
-	}
-	// Stage 14: a bare RETURN on a CALL YIELD variable types as the
-	// CallBinding's ResultType — mirrors UnwindBinding's ElementType
-	// participation above. A property lookup on the CallBinding falls
-	// through to TypeUnknown at the top of the function.
-	for _, cb := range l.curPart.callBindings {
-		if cb.Variable() == r.Variable {
-			return cb.ResultType()
-		}
+	if t, ok := l.curPart.scopedVariableType(r.Variable); ok {
+		return t
 	}
 	if t, ok := l.curPart.imported[r.Variable]; ok {
 		return t
 	}
 	return query.TypeUnknown{}
+}
+
+// entityBindingType is the Stage-6 type a whole entity binding projects
+// as: TypeNode for a node, TypeEdge for an edge, list<edge> for a
+// variable-length edge (Stage 8). ok is false for any other kind.
+func entityBindingType(rb *rawBinding) (query.Type, bool) {
+	switch rb.kind {
+	case graph.Node:
+		return query.TypeNode{}, true
+	case graph.Edge:
+		if rb.hops != nil {
+			return query.NewTypeList(query.TypeEdge{}), true
+		}
+		return query.TypeEdge{}, true
+	}
+	return nil, false
+}
+
+// scopedVariableType looks variable up among the part's path, unwind and
+// CALL YIELD bindings, in that order.
+func (p *rawPart) scopedVariableType(variable string) (query.Type, bool) {
+	for _, pb := range p.pathBindings {
+		if pb.Variable() == variable {
+			return query.TypePath{}, true
+		}
+	}
+	for _, ub := range p.unwindBindings {
+		if ub.Variable() == variable {
+			return ub.ElementType(), true
+		}
+	}
+	// Stage 14: a bare RETURN on a CALL YIELD variable types as the
+	// CallBinding's ResultType — mirrors UnwindBinding's ElementType
+	// participation above. A property lookup on the CallBinding falls
+	// through to TypeUnknown at the top of refType.
+	for _, cb := range p.callBindings {
+		if cb.Variable() == variable {
+			return cb.ResultType(), true
+		}
+	}
+	return nil, false
 }
 
 // classifyFunction maps a function invocation to a FuncProjection or, when its
@@ -447,49 +474,50 @@ func (l *listener) classifyAggregateCall(fi gen.IOC_FunctionInvocationContext, f
 		params = append(params, moreParams...)
 	}
 	resultType := aggregateResultType(fn, operand)
-	for _, p := range params {
-		name := parameterName(p)
-		if name == "" {
-			continue
-		}
-		l.addParameterUse(name, p, query.NewExprUse(resultType, query.ExprInProjection))
-	}
+	l.addExprUses(params, resultType, query.ExprInProjection)
 	distinct := fi.DISTINCT() != nil
-	// collect, min and max mint the ref-valued-leaf certificate, and they mint
-	// it under different depth conditions because they put refs at the leaf for
-	// different reasons (spec ruling-p9qgu §3.1).
-	//
-	// collect(T) = list<T> puts the operand's values at the result type's
-	// unknown leaf verbatim, which is what the certificate asserts. ANY depth
-	// qualifies: collect(p.id) and collect([p.id, p.age]) both put refs at the
-	// leaf.
-	//
-	// min/max SELECT rather than fold — the result is one of the operand's own
-	// values, unchanged — so a bare `var`/`var.prop` operand makes the result
-	// exactly as representable as the property is. Depth 0 EXACTLY, and that is
-	// deliberate: min([p.id, p.age]) orders LISTS, and whether a list ordering
-	// is well-defined enough to type its result is a question the ruling does
-	// not open. Depth 0 is what keeps it closed by construction.
-	//
-	// sum folds outside the operand's declared width and is declined
-	// PERMANENTLY, not deferred (ruling §3.2): committing the operand's width
-	// fails ADR 0037 reads on data the schema permits, and committing a wider
-	// one is a claim about the driver's accumulator that the schema cannot
-	// make. avg/stDev/percentile* are engine-dependent by function identity,
-	// before any operand is looked at. For all of them an unknown means
-	// something no schema lookup is entitled to overwrite (spec
-	// model-change-f45qn §1 answer 3).
-	//
-	// DISTINCT is orthogonal and does not block minting.
-	leavesAreRefs := false
+	return query.NewAggregateProjectionWithAxes(fn, refs, distinct, resultType, aggregateLeavesAreRefs(fn, args))
+}
+
+// aggregateLeavesAreRefs decides whether an aggregate call mints the
+// ref-valued-leaf certificate.
+//
+// collect, min and max mint the ref-valued-leaf certificate, and they mint
+// it under different depth conditions because they put refs at the leaf for
+// different reasons (spec ruling-p9qgu §3.1).
+//
+// collect(T) = list<T> puts the operand's values at the result type's
+// unknown leaf verbatim, which is what the certificate asserts. ANY depth
+// qualifies: collect(p.id) and collect([p.id, p.age]) both put refs at the
+// leaf.
+//
+// min/max SELECT rather than fold — the result is one of the operand's own
+// values, unchanged — so a bare `var`/`var.prop` operand makes the result
+// exactly as representable as the property is. Depth 0 EXACTLY, and that is
+// deliberate: min([p.id, p.age]) orders LISTS, and whether a list ordering
+// is well-defined enough to type its result is a question the ruling does
+// not open. Depth 0 is what keeps it closed by construction.
+//
+// sum folds outside the operand's declared width and is declined
+// PERMANENTLY, not deferred (ruling §3.2): committing the operand's width
+// fails ADR 0037 reads on data the schema permits, and committing a wider
+// one is a claim about the driver's accumulator that the schema cannot
+// make. avg/stDev/percentile* are engine-dependent by function identity,
+// before any operand is looked at. For all of them an unknown means
+// something no schema lookup is entitled to overwrite (spec
+// model-change-f45qn §1 answer 3).
+//
+// DISTINCT is orthogonal and does not block minting.
+func aggregateLeavesAreRefs(fn query.AggregateFunc, args []gen.IOC_ExpressionContext) bool {
 	switch {
 	case fn == query.AggCollect && len(args) == 1:
-		_, leavesAreRefs = refValuedShape(args[0])
+		_, leavesAreRefs := refValuedShape(args[0])
+		return leavesAreRefs
 	case (fn == query.AggMin || fn == query.AggMax) && len(args) == 1:
 		d, ok := refValuedShape(args[0])
-		leavesAreRefs = ok && d == 0
+		return ok && d == 0
 	}
-	return query.NewAggregateProjectionWithAxes(fn, refs, distinct, resultType, leavesAreRefs)
+	return false
 }
 
 // mineClauseSlotParameter mines a bare $p atom from a SKIP or LIMIT expression,
@@ -739,6 +767,18 @@ func (l *listener) addParameterUse(name string, node antlr.Tree, use query.Use) 
 	l.approved[node] = true
 }
 
+// addExprUses records an ExprUse{enclosing, position} on every named
+// parameter the rich typer mined, in mined order.
+func (l *listener) addExprUses(params []antlr.Tree, enclosing query.Type, position query.ExprPosition) {
+	for _, p := range params {
+		name := parameterName(p)
+		if name == "" {
+			continue
+		}
+		l.addParameterUse(name, p, query.NewExprUse(enclosing, position))
+	}
+}
+
 // currentPartIndex returns the branch-relative index of the Part collection
 // handlers currently write into — len(curBranch.parts)-1 by construction of
 // the priming discipline at listener.go:EnterOC_SingleQuery and
@@ -812,57 +852,55 @@ func attributeUse(u query.Use, part, branch int) query.Use {
 func (l *listener) collectSetItem(item gen.IOC_SetItemContext) {
 	switch {
 	case item.OC_PropertyExpression() != nil && item.OC_Expression() != nil:
-		target, ok := propertyExpressionRef(item.OC_PropertyExpression())
-		if !ok {
-			l.fail(fmt.Errorf("%w: SET %s", ErrNestedPropertyTarget, item.OC_PropertyExpression().GetText()))
-			return
-		}
-		l.appendRef(varRef{name: target.Variable})
-		valueType, refs, params := l.typeExpressionMining(item.OC_Expression())
-		for _, p := range params {
-			name := parameterName(p)
-			if name == "" {
-				continue
-			}
-			l.addParameterUse(name, p, query.NewExprUse(valueType, query.ExprInSetValue))
-		}
-		eff, err := query.NewSetPropertyEffect(target, valueType, refs)
-		if err != nil {
-			l.fail(err)
-			return
-		}
-		l.appendEffect(eff)
-
+		l.collectSetProperty(item)
 	case item.OC_Variable() != nil && item.OC_NodeLabels() != nil:
-		variable := variableName(item.OC_Variable())
-		l.appendRef(varRef{name: variable})
-		labels := nodeLabels(item.OC_NodeLabels())
-		eff, err := query.NewSetLabelsEffect(variable, labels)
-		if err != nil {
-			l.fail(err)
-			return
-		}
-		l.appendEffect(eff)
-
+		l.collectSetLabels(item)
 	case item.OC_Variable() != nil && item.OC_Expression() != nil:
-		variable := variableName(item.OC_Variable())
-		l.appendRef(varRef{name: variable})
-		op := setItemOp(item)
-		valueType, refs, params := l.typeExpressionMining(item.OC_Expression())
-		for _, p := range params {
-			name := parameterName(p)
-			if name == "" {
-				continue
-			}
-			l.addParameterUse(name, p, query.NewExprUse(valueType, query.ExprInSetValue))
-		}
-		eff, err := query.NewSetEntityEffect(variable, op, valueType, refs)
-		if err != nil {
-			l.fail(err)
-			return
-		}
-		l.appendEffect(eff)
+		l.collectSetEntity(item)
 	}
+}
+
+func (l *listener) collectSetProperty(item gen.IOC_SetItemContext) {
+	target, ok := propertyExpressionRef(item.OC_PropertyExpression())
+	if !ok {
+		l.fail(fmt.Errorf("%w: SET %s", ErrNestedPropertyTarget, item.OC_PropertyExpression().GetText()))
+		return
+	}
+	l.appendRef(varRef{name: target.Variable})
+	valueType, refs, params := l.typeExpressionMining(item.OC_Expression())
+	l.addExprUses(params, valueType, query.ExprInSetValue)
+	eff, err := query.NewSetPropertyEffect(target, valueType, refs)
+	if err != nil {
+		l.fail(err)
+		return
+	}
+	l.appendEffect(eff)
+}
+
+func (l *listener) collectSetLabels(item gen.IOC_SetItemContext) {
+	variable := variableName(item.OC_Variable())
+	l.appendRef(varRef{name: variable})
+	labels := nodeLabels(item.OC_NodeLabels())
+	eff, err := query.NewSetLabelsEffect(variable, labels)
+	if err != nil {
+		l.fail(err)
+		return
+	}
+	l.appendEffect(eff)
+}
+
+func (l *listener) collectSetEntity(item gen.IOC_SetItemContext) {
+	variable := variableName(item.OC_Variable())
+	l.appendRef(varRef{name: variable})
+	op := setItemOp(item)
+	valueType, refs, params := l.typeExpressionMining(item.OC_Expression())
+	l.addExprUses(params, valueType, query.ExprInSetValue)
+	eff, err := query.NewSetEntityEffect(variable, op, valueType, refs)
+	if err != nil {
+		l.fail(err)
+		return
+	}
+	l.appendEffect(eff)
 }
 
 // collectRemoveItem dispatches one REMOVE item (Stage 12 spec §4.4). Two

@@ -194,6 +194,22 @@ func Tables(filename, src string) (map[string]Table, error) {
 		return nil, fmt.Errorf("parse %s: %w", filename, err)
 	}
 
+	fileBound := fileBindings(f)
+	out := map[string]Table{}
+	for _, decl := range f.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok || fn.Recv != nil || fn.Body == nil || !strings.HasPrefix(fn.Name.Name, "Test") {
+			continue
+		}
+		if t, seen := rangeTable(fn.Body, bindings(fn.Body, fileBound)); seen {
+			out[fn.Name.Name] = t
+		}
+	}
+	return out, nil
+}
+
+// fileBindings collects the file-level names bound to a value.
+func fileBindings(f *ast.File) map[string]ast.Expr {
 	fileBound := map[string]ast.Expr{}
 	for _, decl := range f.Decls {
 		gen, ok := decl.(*ast.GenDecl)
@@ -204,34 +220,28 @@ func Tables(filename, src string) (map[string]Table, error) {
 			bindValueSpec(fileBound, spec)
 		}
 	}
+	return fileBound
+}
 
-	out := map[string]Table{}
-	for _, decl := range f.Decls {
-		fn, ok := decl.(*ast.FuncDecl)
-		if !ok || fn.Recv != nil || fn.Body == nil || !strings.HasPrefix(fn.Name.Name, "Test") {
-			continue
-		}
-		bound := bindings(fn.Body, fileBound)
-		var t Table
-		seen := false
-		ast.Inspect(fn.Body, func(n ast.Node) bool {
-			rng, ok := n.(*ast.RangeStmt)
-			if !ok || rng.X == nil {
-				return true
-			}
-			seen = true
-			if n, ok := staticLen(rng.X, bound); ok {
-				t.Rows += n
-			} else {
-				t.Dynamic++
-			}
+// rangeTable sums the range loops in one test body into a Table. The
+// bool is whether the body ranges at all.
+func rangeTable(body *ast.BlockStmt, bound map[string]ast.Expr) (Table, bool) {
+	var t Table
+	seen := false
+	ast.Inspect(body, func(n ast.Node) bool {
+		rng, ok := n.(*ast.RangeStmt)
+		if !ok || rng.X == nil {
 			return true
-		})
-		if seen {
-			out[fn.Name.Name] = t
 		}
-	}
-	return out, nil
+		seen = true
+		if n, ok := staticLen(rng.X, bound); ok {
+			t.Rows += n
+		} else {
+			t.Dynamic++
+		}
+		return true
+	})
+	return t, seen
 }
 
 // ambiguous marks a name the enclosing body binds more than once, so a
@@ -308,18 +318,24 @@ func staticLen(expr ast.Expr, bound map[string]ast.Expr) (int, bool) {
 		}
 		return staticLen(target, bound)
 	case *ast.BasicLit:
-		if e.Kind != token.INT {
-			return 0, false
-		}
-		n, err := strconv.Atoi(e.Value)
-		if err != nil || n < 0 {
-			return 0, false
-		}
-		return n, true
+		return literalLen(e)
 	case *ast.ParenExpr:
 		return staticLen(e.X, bound)
 	}
 	return 0, false
+}
+
+// literalLen reads a range over a literal, which runs when the literal
+// is a non-negative integer.
+func literalLen(e *ast.BasicLit) (int, bool) {
+	if e.Kind != token.INT {
+		return 0, false
+	}
+	n, err := strconv.Atoi(e.Value)
+	if err != nil || n < 0 {
+		return 0, false
+	}
+	return n, true
 }
 
 // Declared is what a backend's corpus test writes down, in the parent,
@@ -518,22 +534,28 @@ func Entered(dir, profile string) (map[string]bool, error) {
 		if err != nil {
 			return nil, fmt.Errorf("corpusrun: %s does not parse: %w", base, err)
 		}
-		for _, decl := range file.Decls {
-			fn, ok := decl.(*ast.FuncDecl)
-			if !ok || fn.Body == nil {
-				continue
-			}
-			from := fset.Position(fn.Body.Pos()).Line
-			to := fset.Position(fn.Body.End()).Line
-			for _, b := range covered[base] {
-				if b.start >= from && b.end <= to {
-					out[fn.Name.Name] = true
-					break
-				}
+		markEntered(out, fset, file, covered[base])
+	}
+	return out, nil
+}
+
+// markEntered records in out each function declared in file whose body
+// holds at least one of the covered blocks.
+func markEntered(out map[string]bool, fset *token.FileSet, file *ast.File, covered []block) {
+	for _, decl := range file.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok || fn.Body == nil {
+			continue
+		}
+		from := fset.Position(fn.Body.Pos()).Line
+		to := fset.Position(fn.Body.End()).Line
+		for _, b := range covered {
+			if b.start >= from && b.end <= to {
+				out[fn.Name.Name] = true
+				break
 			}
 		}
 	}
-	return out, nil
 }
 
 type block struct{ start, end int }
@@ -562,22 +584,32 @@ func coveredBlocks(profile string) (map[string][]block, error) {
 		if count == 0 {
 			continue
 		}
-		from, to, ok := strings.Cut(fields[0], ",")
-		if !ok {
-			return nil, fmt.Errorf("corpusrun: coverage line %q has no block range", line)
-		}
-		start, err := lineOf(from)
+		ran, err := coverageSpan(line, fields[0])
 		if err != nil {
-			return nil, fmt.Errorf("corpusrun: coverage line %q has an unreadable start line: %w", line, err)
-		}
-		end, err := lineOf(to)
-		if err != nil {
-			return nil, fmt.Errorf("corpusrun: coverage line %q has an unreadable end line: %w", line, err)
+			return nil, err
 		}
 		base := filepath.Base(name)
-		covered[base] = append(covered[base], block{start, end})
+		covered[base] = append(covered[base], ran)
 	}
 	return covered, nil
+}
+
+// coverageSpan reads a profile block's `start.col,end.col` range into the
+// lines it spans. line is the whole profile line, for the refusal.
+func coverageSpan(line, rng string) (block, error) {
+	from, to, ok := strings.Cut(rng, ",")
+	if !ok {
+		return block{}, fmt.Errorf("corpusrun: coverage line %q has no block range", line)
+	}
+	start, err := lineOf(from)
+	if err != nil {
+		return block{}, fmt.Errorf("corpusrun: coverage line %q has an unreadable start line: %w", line, err)
+	}
+	end, err := lineOf(to)
+	if err != nil {
+		return block{}, fmt.Errorf("corpusrun: coverage line %q has an unreadable end line: %w", line, err)
+	}
+	return block{start, end}, nil
 }
 
 // lineOf reads the line out of a profile's line.column position. A

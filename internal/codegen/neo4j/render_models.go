@@ -339,28 +339,7 @@ func writeEntityFieldDecode(b *strings.Builder, e codegen.Entity, i int, f codeg
 	}
 	carrier := driverCarrier(f.GoType)
 	if f.Nullable {
-		fmt.Fprintf(b, "\tif v, ok := %s.Props[%q]; ok {\n", arg, f.PropName)
-		fmt.Fprintf(b, "\t\ts, ok := v.(%s)\n", carrier)
-		b.WriteString("\t\tif !ok {\n")
-		fmt.Fprintf(b, "\t\t\treturn %s{}, fmt.Errorf(\"decode %s.%s: property %%q: expected %s, got %%T\", %q, v)\n", e.Name, e.Name, f.Field, carrier, f.PropName)
-		b.WriteString("\t\t}\n")
-		switch {
-		case isSliceType(f.GoType):
-			writeSliceNarrow(b, e, f, f.GoType, "s", "narrowed", "\t\t")
-			fmt.Fprintf(b, "\t\tout.%s = &narrowed\n", f.Field)
-		case isNeutralCarrier(f.GoType):
-			fmt.Fprintf(b, "\t\tnarrowed := %s\n", narrowExpr(f.GoType, "s"))
-			fmt.Fprintf(b, "\t\tout.%s = &narrowed\n", f.Field)
-		case carrier != f.GoType:
-			fmt.Fprintf(b, "\t\tnarrowed, err := %s\n", narrowCall(f.GoType, f.Width, "s"))
-			fmt.Fprintf(b, "\t\tif err != nil {\n")
-			fmt.Fprintf(b, "\t\t\treturn %s{}, fmt.Errorf(\"decode %s.%s: %%w\", err)\n", e.Name, e.Name, f.Field)
-			b.WriteString("\t\t}\n")
-			fmt.Fprintf(b, "\t\tout.%s = &narrowed\n", f.Field)
-		default:
-			fmt.Fprintf(b, "\t\tout.%s = &s\n", f.Field)
-		}
-		b.WriteString("\t}\n")
+		writeNullableEntityFieldDecode(b, e, f, arg, carrier)
 		return
 	}
 	value := valueName(i)
@@ -385,6 +364,35 @@ func writeEntityFieldDecode(b *strings.Builder, e codegen.Entity, i int, f codeg
 	default:
 		fmt.Fprintf(b, "\tout.%s = %s\n", f.Field, value)
 	}
+}
+
+// writeNullableEntityFieldDecode emits writeEntityFieldDecode's nullable
+// path: Props lookup + type assertion against the driver's carrier +
+// narrow-convert into a local of the emitted Go type + address-of-local
+// into the pointer field.
+func writeNullableEntityFieldDecode(b *strings.Builder, e codegen.Entity, f codegen.EntityField, arg, carrier string) {
+	fmt.Fprintf(b, "\tif v, ok := %s.Props[%q]; ok {\n", arg, f.PropName)
+	fmt.Fprintf(b, "\t\ts, ok := v.(%s)\n", carrier)
+	b.WriteString("\t\tif !ok {\n")
+	fmt.Fprintf(b, "\t\t\treturn %s{}, fmt.Errorf(\"decode %s.%s: property %%q: expected %s, got %%T\", %q, v)\n", e.Name, e.Name, f.Field, carrier, f.PropName)
+	b.WriteString("\t\t}\n")
+	switch {
+	case isSliceType(f.GoType):
+		writeSliceNarrow(b, e, f, f.GoType, "s", "narrowed", "\t\t")
+		fmt.Fprintf(b, "\t\tout.%s = &narrowed\n", f.Field)
+	case isNeutralCarrier(f.GoType):
+		fmt.Fprintf(b, "\t\tnarrowed := %s\n", narrowExpr(f.GoType, "s"))
+		fmt.Fprintf(b, "\t\tout.%s = &narrowed\n", f.Field)
+	case carrier != f.GoType:
+		fmt.Fprintf(b, "\t\tnarrowed, err := %s\n", narrowCall(f.GoType, f.Width, "s"))
+		fmt.Fprintf(b, "\t\tif err != nil {\n")
+		fmt.Fprintf(b, "\t\t\treturn %s{}, fmt.Errorf(\"decode %s.%s: %%w\", err)\n", e.Name, e.Name, f.Field)
+		b.WriteString("\t\t}\n")
+		fmt.Fprintf(b, "\t\tout.%s = &narrowed\n", f.Field)
+	default:
+		fmt.Fprintf(b, "\t\tout.%s = &s\n", f.Field)
+	}
+	b.WriteString("\t}\n")
 }
 
 // writeShapelessFieldDecode emits the read of a property of no declared

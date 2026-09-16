@@ -2,6 +2,7 @@ package age
 
 import (
 	"errors"
+	"slices"
 
 	"github.com/areqag/gqlc/internal/codegen"
 	"github.com/areqag/gqlc/internal/queryfile"
@@ -118,21 +119,12 @@ func generate(in codegen.Input, packageName string) (files []codegen.File, err e
 	}
 
 	pkg := prepared.Package
-	hasOne := false
 	var h helpers
 	h.forEntities(entities)
-	for _, p := range prepared.Queries {
-		if p.Cardinality == queryfile.CardinalityOne {
-			hasOne = true
-		}
-		if len(p.ParamFields) > 0 {
-			h.args = true
-		}
-		h.forParams(p.ParamFields)
-		for _, f := range p.RowFields {
-			h.need(f.GoType, f.Width)
-		}
-	}
+	h.forQueries(prepared.Queries)
+	hasOne := slices.ContainsFunc(prepared.Queries, func(p codegen.Query) bool {
+		return p.Cardinality == queryfile.CardinalityOne
+	})
 
 	files = []codegen.File{
 		{Path: "db.go", Contents: renderDB(pkg, len(prepared.Queries) > 0, hasOne)},
@@ -153,6 +145,15 @@ func generate(in codegen.Input, packageName string) (files []codegen.File, err e
 	if renderFaultHook != nil {
 		renderFaultHook()
 	}
+	files = append(files, sourceFiles(pkg, prepared)...)
+	return codegen.Finalise(files)
+}
+
+// sourceFiles renders the files that follow models.go: temporal.go when
+// the prepared surface references a temporal carrier, then one
+// `<name>.cypher.go` per source file.
+func sourceFiles(pkg string, prepared codegen.Prepared) []codegen.File {
+	var files []codegen.File
 	// The neutral temporal carriers, emitted byte-identically on every
 	// backend and only when the prepared surface references one (ADR
 	// 0033). No driver bridge follows them here: the neo4j targets pair
@@ -171,5 +172,5 @@ func generate(in codegen.Input, packageName string) (files []codegen.File, err e
 			Contents: renderCypherFile(pkg, group.queries),
 		})
 	}
-	return codegen.Finalise(files)
+	return files
 }

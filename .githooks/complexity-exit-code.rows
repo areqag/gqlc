@@ -83,9 +83,9 @@ run_complexity() {
     rc=$?
 }
 
-# A function gocyclo refuses. The gate is `min-complexity: 24` and a linter
-# fires STRICTLY above its setting, so 30 sequential branches clears it with
-# room the threshold can move into without silently emptying these rows.
+# A function gocyclo refuses. The gate is `min-complexity: 10` and a linter
+# fires STRICTLY above its setting, so 30 sequential branches clears it by a
+# wide margin; these rows do not empty unless the gate is ever raised past 30.
 over_complex_go() {
     local dest="$1" pkg="$2" i
     {

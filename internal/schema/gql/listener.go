@@ -384,16 +384,41 @@ func (l *listener) EnterEdgeTypePattern(c *gen.EdgeTypePatternContext) {
 		e.name = decoded
 	}
 
-	// The edge type filler is the bracketed arc content `[:LABEL { props }]`: it
-	// carries the edge's label set and properties. Both directed alternatives
-	// expose canonical source->target via these accessors (the grammar already
-	// swaps a left-pointing arc's endpoints).
-	//
-	// Reading the source first is what makes a defective pair report the source's
-	// rejection, and the pick is by role rather than written position — for `<-`
-	// the source is the rightmost endpoint — so respelling an edge in the other
-	// direction does not move its diagnostic to the other end.
-	// TestEndpointFillerMixedRejectionsReportTheSource goes red on either swap.
+	filler, src, dst, refErr := directedPatternParts(directed)
+	if refErr != nil {
+		l.fail(refErr)
+		return
+	}
+	e.source = src
+	e.target = dst
+
+	fc, err := l.edgeContent(filler)
+	if err != nil {
+		l.fail(err)
+		return
+	}
+	e.hasKeyLabelSet = fc.hasKeyLabelSet
+	e.keyLabels = fc.keyLabels
+	e.impliedLabels = fc.impliedLabels
+	e.props = fc.props
+
+	l.raw.edges = append(l.raw.edges, e)
+}
+
+// directedPatternParts reads a directed edge type pattern's filler and its two
+// endpoints in canonical source->target order.
+//
+// The edge type filler is the bracketed arc content `[:LABEL { props }]`: it
+// carries the edge's label set and properties. Both directed alternatives
+// expose canonical source->target via these accessors (the grammar already
+// swaps a left-pointing arc's endpoints).
+//
+// Reading the source first is what makes a defective pair report the source's
+// rejection, and the pick is by role rather than written position — for `<-`
+// the source is the rightmost endpoint — so respelling an edge in the other
+// direction does not move its diagnostic to the other end.
+// TestEndpointFillerMixedRejectionsReportTheSource goes red on either swap.
+func directedPatternParts(directed gen.IEdgeTypePatternDirectedContext) (gen.IEdgeTypeFillerContext, rawEndpoint, rawEndpoint, error) {
 	var (
 		filler gen.IEdgeTypeFillerContext
 		src    rawEndpoint
@@ -413,24 +438,7 @@ func (l *listener) EnterEdgeTypePattern(c *gen.EdgeTypePatternContext) {
 		}
 		filler = lft.ArcTypePointingLeft().EdgeTypeFiller()
 	}
-	if refErr != nil {
-		l.fail(refErr)
-		return
-	}
-	e.source = src
-	e.target = dst
-
-	fc, err := l.edgeContent(filler)
-	if err != nil {
-		l.fail(err)
-		return
-	}
-	e.hasKeyLabelSet = fc.hasKeyLabelSet
-	e.keyLabels = fc.keyLabels
-	e.impliedLabels = fc.impliedLabels
-	e.props = fc.props
-
-	l.raw.edges = append(l.raw.edges, e)
+	return filler, src, dst, refErr
 }
 
 // fillerContent is a node or edge type filler read off the parse tree, split at

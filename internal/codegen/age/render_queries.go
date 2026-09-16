@@ -130,31 +130,45 @@ func renderCypherFile(pkg string, queries []codegen.Query) []byte {
 			b.WriteString("\n")
 		}
 		fmt.Fprintf(&b, "const %s = `%s`\n\n", codegen.QueryTextConst(p), p.SourceText)
-		if len(p.ParamFields) >= 2 {
-			fmt.Fprintf(&b, "type %sParams struct {\n", p.MethodName)
-			for _, f := range p.ParamFields {
-				b.WriteString("\t" + f.Field + " ")
-				if f.Nullable {
-					b.WriteString("*")
-				}
-				b.WriteString(f.GoType + "\n")
-			}
-			b.WriteString("}\n\n")
-		}
-		if len(p.RowFields) >= 2 {
-			fmt.Fprintf(&b, "type %sRow struct {\n", p.MethodName)
-			for _, f := range p.RowFields {
-				b.WriteString("\t" + f.Field + " ")
-				if pointerWrapped(f) {
-					b.WriteString("*")
-				}
-				b.WriteString(f.GoType + "\n")
-			}
-			b.WriteString("}\n\n")
-		}
+		writeParamsStruct(&b, p)
+		writeRowStruct(&b, p)
 		writeMethod(&b, p)
 	}
 	return []byte(b.String())
+}
+
+// writeParamsStruct writes the `<Method>Params` struct, which exists only
+// for a query of two or more parameters.
+func writeParamsStruct(b *strings.Builder, p codegen.Query) {
+	if len(p.ParamFields) < 2 {
+		return
+	}
+	fmt.Fprintf(b, "type %sParams struct {\n", p.MethodName)
+	for _, f := range p.ParamFields {
+		b.WriteString("\t" + f.Field + " ")
+		if f.Nullable {
+			b.WriteString("*")
+		}
+		b.WriteString(f.GoType + "\n")
+	}
+	b.WriteString("}\n\n")
+}
+
+// writeRowStruct writes the `<Method>Row` struct, which exists only for
+// a query of two or more columns.
+func writeRowStruct(b *strings.Builder, p codegen.Query) {
+	if len(p.RowFields) < 2 {
+		return
+	}
+	fmt.Fprintf(b, "type %sRow struct {\n", p.MethodName)
+	for _, f := range p.RowFields {
+		b.WriteString("\t" + f.Field + " ")
+		if pointerWrapped(f) {
+			b.WriteString("*")
+		}
+		b.WriteString(f.GoType + "\n")
+	}
+	b.WriteString("}\n\n")
 }
 
 // writeMethodSignature writes one `MethodName(ctx context.Context, ...)
@@ -615,49 +629,11 @@ var encodedParamText = map[string]string{
 // matches no arm either, so the same silent fall-through to json.Marshal
 // was one nullable element away from returning. It steps no width — the
 // star is carrier text, not a level — which is why the two prefixes have
-// separate arms here rather than one shared step.
+// separate arms in paramLeaf rather than one shared step.
 func fallibleParamEncoder(f codegen.Param, access string) (string, bool) {
-	leaf, leafWidth := f.GoType, f.Width
-	for {
-		if elem, ok := strings.CutPrefix(leaf, "[]"); ok {
-			leaf, leafWidth = elem, elemWidth(leafWidth)
-			continue
-		}
-		elem, ok := strings.CutPrefix(leaf, "*")
-		if !ok {
-			break
-		}
-		leaf = elem
-	}
-	var encoder string
-	switch {
-	case codegen.IsDeclaredRecord(leaf, leafWidth):
-		encoder = "encode" + codegen.RecordHelperSuffix(leafWidth)
-	case codegen.IsDeclaredUnion(leaf, leafWidth):
-		// A closed union is on the fallible list for a reason unlike
-		// every other entry: not a shape change and not a range one, but
-		// that the declared member set is enforced HERE and nowhere else.
-		// Left alone the `any` crosses through json.Marshal as whatever
-		// the caller happened to put in it, and a value of no declared
-		// member reaches the store — which is the one thing declaring the
-		// members was for (spec §4).
-		encoder = "encode" + codegen.UnionHelperSuffix(leafWidth)
-	case leaf == goDate:
-		encoder = "agtypeDateText"
-	case leaf == goLocalTime:
-		encoder = "agtypeLocalTimeMicros"
-	case leaf == goTime:
-		encoder = "agtypeTimeMicros"
-	case leaf == goDuration:
-		encoder = "agtypeDurationMicros"
-	case leaf == "uint64" || leaf == "uint":
-		// Not a shape change like the four above, but a range one: an
-		// agtype integer is signed 64-bit, so these two widths are the
-		// only ones carrying values the wire cannot hold at all. They
-		// reach the same combinators because nullability and nesting ask
-		// nothing about why the leaf can fail (bd gqlc-tzjqu).
-		encoder = "agtypeUnsigned"
-	default:
+	leaf, leafWidth, _, _ := paramLeaf(f)
+	encoder, ok := fallibleLeafEncoder(leaf, leafWidth)
+	if !ok {
 		return "", false
 	}
 	// The whole-value nullability is the Param's own flag rather than a
@@ -671,6 +647,40 @@ func fallibleParamEncoder(f codegen.Param, access string) (string, bool) {
 	default:
 		return fmt.Sprintf("%s(%s)", encoder, access), true
 	}
+}
+
+// fallibleLeafEncoder names the fallible encoder for one leaf carrier,
+// with ok=false for a leaf that encodes through plain json.Marshal.
+func fallibleLeafEncoder(leaf string, leafWidth graph.PropertyType) (string, bool) {
+	switch {
+	case codegen.IsDeclaredRecord(leaf, leafWidth):
+		return "encode" + codegen.RecordHelperSuffix(leafWidth), true
+	case codegen.IsDeclaredUnion(leaf, leafWidth):
+		// A closed union is on the fallible list for a reason unlike
+		// every other entry: not a shape change and not a range one, but
+		// that the declared member set is enforced HERE and nowhere else.
+		// Left alone the `any` crosses through json.Marshal as whatever
+		// the caller happened to put in it, and a value of no declared
+		// member reaches the store — which is the one thing declaring the
+		// members was for (spec §4).
+		return "encode" + codegen.UnionHelperSuffix(leafWidth), true
+	case leaf == goDate:
+		return "agtypeDateText", true
+	case leaf == goLocalTime:
+		return "agtypeLocalTimeMicros", true
+	case leaf == goTime:
+		return "agtypeTimeMicros", true
+	case leaf == goDuration:
+		return "agtypeDurationMicros", true
+	case leaf == "uint64" || leaf == "uint":
+		// Not a shape change like the four above, but a range one: an
+		// agtype integer is signed 64-bit, so these two widths are the
+		// only ones carrying values the wire cannot hold at all. They
+		// reach the same combinators because nullability and nesting ask
+		// nothing about why the leaf can fail (bd gqlc-tzjqu).
+		return "agtypeUnsigned", true
+	}
+	return "", false
 }
 
 // encodedText is the agtype-side Go type one carrier encodes to. A
@@ -1008,9 +1018,18 @@ func decodeFunc(goType string, width graph.PropertyType) string {
 		return "agtypeMap"
 	}
 	carrier := agtypeCarrier(goType)
+	if name, ok := carrierDecodeFunc(goType, carrier); ok {
+		return name
+	}
+	panic(codegenBug(fmt.Sprintf("age codegen bug: Go type %q carries as %q, which decodeFunc has no arm for", goType, carrier)))
+}
+
+// carrierDecodeFunc names the decoder for one scalar carrier, with
+// ok=false for a carrier no arm was taught.
+func carrierDecodeFunc(goType, carrier string) (string, bool) {
 	switch carrier {
 	case "bool":
-		return "agtypeBool"
+		return "agtypeBool", true
 	case "int64":
 		// A width narrower than the carrier decodes through the checked
 		// narrowing, so the declared width is enforced once here rather
@@ -1019,26 +1038,34 @@ func decodeFunc(goType string, width graph.PropertyType) string {
 		// function value, which is what lets every call shape below take
 		// this the same way it takes the others.
 		if goType != "int64" {
-			return "agtypeIntAs[" + goType + "]"
+			return "agtypeIntAs[" + goType + "]", true
 		}
-		return "agtypeInt64"
+		return "agtypeInt64", true
 	case "float64":
 		if goType == "float32" {
-			return "agtypeFloat32"
+			return "agtypeFloat32", true
 		}
-		return "agtypeFloat64"
+		return "agtypeFloat64", true
 	case "string":
-		return "agtypeString"
-	case goInstant:
-		return "agtypeInstant"
-	case goDate:
-		return "agtypeDate"
-	case goLocalTime:
-		return "agtypeLocalTime"
-	case goTime:
-		return "agtypeTime"
-	case goDuration:
-		return "agtypeDuration"
+		return "agtypeString", true
 	}
-	panic(codegenBug(fmt.Sprintf("age codegen bug: Go type %q carries as %q, which decodeFunc has no arm for", goType, carrier)))
+	return temporalDecodeFunc(carrier)
+}
+
+// temporalDecodeFunc names the decoder for one temporal carrier, with
+// ok=false for any other text.
+func temporalDecodeFunc(carrier string) (string, bool) {
+	switch carrier {
+	case goInstant:
+		return "agtypeInstant", true
+	case goDate:
+		return "agtypeDate", true
+	case goLocalTime:
+		return "agtypeLocalTime", true
+	case goTime:
+		return "agtypeTime", true
+	case goDuration:
+		return "agtypeDuration", true
+	}
+	return "", false
 }

@@ -76,99 +76,115 @@ type carrierUse struct {
 // and no carrier inside it is ever named — while the record's emitted
 // helper pair calls those carriers' conversions by name.
 func conversionUses(prepared codegen.Prepared, tm typeMap) (map[string]carrierUse, map[graph.PropertyType]carrierUse, map[graph.PropertyType]carrierUse) {
-	neutral := make(map[string]carrierUse)
-	records := make(map[graph.PropertyType]carrierUse)
-	unions := make(map[graph.PropertyType]carrierUse)
-	markCarrier := func(goType string, set func(*carrierUse)) {
-		name := leafType(goType)
-		if !isNeutralCarrier(name) {
-			return
-		}
-		use := neutral[name]
-		set(&use)
-		neutral[name] = use
+	w := conversionUseWalk{
+		tm:      tm,
+		neutral: make(map[string]carrierUse),
+		records: make(map[graph.PropertyType]carrierUse),
+		unions:  make(map[graph.PropertyType]carrierUse),
 	}
-	markRecord := func(encoding graph.PropertyType, set func(*carrierUse)) {
-		use := records[encoding]
-		set(&use)
-		records[encoding] = use
-	}
-	markUnion := func(encoding graph.PropertyType, set func(*carrierUse)) {
-		use := unions[encoding]
-		set(&use)
-		unions[encoding] = use
-	}
-
-	// Decode needs no nullability, in either kind: to<X> and
-	// decode<Suffix> are the same call either way, because a missing key
-	// is the field's own null rather than a different conversion.
-	setDecode := func(u *carrierUse) { u.decode = true }
-	var markDecode func(goType string, width graph.PropertyType)
-	markDecode = func(goType string, width graph.PropertyType) {
-		if members, ok := unionLeafMembers(goType, width, tm); ok {
-			markUnion(leafWidth(width), setDecode)
-			for _, m := range members {
-				markDecode(m.GoType, m.Width)
-			}
-			return
-		}
-		if fields, ok := recordLeafFields(goType, width, tm); ok {
-			markRecord(leafWidth(width), setDecode)
-			for _, f := range fields {
-				markDecode(f.GoType, f.Width)
-			}
-			return
-		}
-		markCarrier(goType, setDecode)
-	}
-
-	// A record's encode body spells each field by the PARAMETER rules —
-	// it is paramBindExpr that renders them — so the marks a field owes
-	// are the marks the same shape would owe as a parameter. The outer
-	// nullability does not reach the fields: encode<X>Ptr nil-checks and
-	// then calls encode<X>, which builds every field the same way.
-	var markEncode func(goType string, width graph.PropertyType, nullable bool)
-	markEncode = func(goType string, width graph.PropertyType, nullable bool) {
-		set := encodeDirection(goType, width, nullable)
-		if members, ok := unionLeafMembers(goType, width, tm); ok {
-			markUnion(leafWidth(width), set)
-			// A member is marked as a NON-nullable, NON-list parameter
-			// whatever the position above it was: encode<Suffix>'s arms
-			// each hold a value already known to be that member, and the
-			// outer nullability was spent by the Ptr wrapper one call
-			// earlier — exactly the rule the record branch states.
-			for _, m := range members {
-				markEncode(m.GoType, m.Width, false)
-			}
-			return
-		}
-		if fields, ok := recordLeafFields(goType, width, tm); ok {
-			markRecord(leafWidth(width), set)
-			for _, f := range fields {
-				markEncode(f.GoType, f.Width, f.Nullable)
-			}
-			return
-		}
-		markCarrier(goType, set)
-	}
-
 	for _, e := range prepared.Entities {
 		for _, f := range e.Fields {
-			markDecode(f.GoType, f.Width)
+			w.markDecode(f.GoType, f.Width)
 		}
 	}
 	for _, q := range prepared.Queries {
 		for _, f := range q.RowFields {
-			markDecode(f.GoType, f.Width)
+			w.markDecode(f.GoType, f.Width)
 			for elem := f.ListElem; elem != nil; elem = elem.Nested {
-				markDecode(elem.GoType, elem.Width)
+				w.markDecode(elem.GoType, elem.Width)
 			}
 		}
 		for _, f := range q.ParamFields {
-			markEncode(f.GoType, f.Width, f.Nullable)
+			w.markEncode(f.GoType, f.Width, f.Nullable)
 		}
 	}
-	return neutral, records, unions
+	return w.neutral, w.records, w.unions
+}
+
+// conversionUseWalk accumulates conversionUses' three answers as the
+// walk marks each position.
+type conversionUseWalk struct {
+	tm      typeMap
+	neutral map[string]carrierUse
+	records map[graph.PropertyType]carrierUse
+	unions  map[graph.PropertyType]carrierUse
+}
+
+func (w *conversionUseWalk) markCarrier(goType string, set func(*carrierUse)) {
+	name := leafType(goType)
+	if !isNeutralCarrier(name) {
+		return
+	}
+	use := w.neutral[name]
+	set(&use)
+	w.neutral[name] = use
+}
+
+func (w *conversionUseWalk) markRecord(encoding graph.PropertyType, set func(*carrierUse)) {
+	use := w.records[encoding]
+	set(&use)
+	w.records[encoding] = use
+}
+
+func (w *conversionUseWalk) markUnion(encoding graph.PropertyType, set func(*carrierUse)) {
+	use := w.unions[encoding]
+	set(&use)
+	w.unions[encoding] = use
+}
+
+// setDecodeUse is the mark every decode position applies.
+func setDecodeUse(u *carrierUse) { u.decode = true }
+
+// markDecode marks a decode position. Decode needs no nullability, in
+// either kind: to<X> and decode<Suffix> are the same call either way,
+// because a missing key is the field's own null rather than a different
+// conversion.
+func (w *conversionUseWalk) markDecode(goType string, width graph.PropertyType) {
+	if members, ok := unionLeafMembers(goType, width, w.tm); ok {
+		w.markUnion(leafWidth(width), setDecodeUse)
+		for _, m := range members {
+			w.markDecode(m.GoType, m.Width)
+		}
+		return
+	}
+	if fields, ok := recordLeafFields(goType, width, w.tm); ok {
+		w.markRecord(leafWidth(width), setDecodeUse)
+		for _, f := range fields {
+			w.markDecode(f.GoType, f.Width)
+		}
+		return
+	}
+	w.markCarrier(goType, setDecodeUse)
+}
+
+// markEncode marks a parameter position. A record's encode body spells
+// each field by the PARAMETER rules — it is paramBindExpr that renders
+// them — so the marks a field owes are the marks the same shape would
+// owe as a parameter. The outer nullability does not reach the fields:
+// encode<X>Ptr nil-checks and then calls encode<X>, which builds every
+// field the same way.
+func (w *conversionUseWalk) markEncode(goType string, width graph.PropertyType, nullable bool) {
+	set := encodeDirection(goType, width, nullable)
+	if members, ok := unionLeafMembers(goType, width, w.tm); ok {
+		w.markUnion(leafWidth(width), set)
+		// A member is marked as a NON-nullable, NON-list parameter
+		// whatever the position above it was: encode<Suffix>'s arms
+		// each hold a value already known to be that member, and the
+		// outer nullability was spent by the Ptr wrapper one call
+		// earlier — exactly the rule the record branch states.
+		for _, m := range members {
+			w.markEncode(m.GoType, m.Width, false)
+		}
+		return
+	}
+	if fields, ok := recordLeafFields(goType, width, w.tm); ok {
+		w.markRecord(leafWidth(width), set)
+		for _, f := range fields {
+			w.markEncode(f.GoType, f.Width, f.Nullable)
+		}
+		return
+	}
+	w.markCarrier(goType, set)
 }
 
 // encodeDirection answers which encode helper ONE parameter position
@@ -420,51 +436,58 @@ func narrowCall(goType string, width graph.PropertyType, src string) string {
 // fails the emitted package's own lint fence, so an over-broad gate
 // reds the fixture rather than merely emitting a dead line.
 func narrowsANumericWidth(entities []codegen.Entity, prepared []codegen.Query, tm typeMap) (ints, floats bool) {
-	var visit func(goType string, width graph.PropertyType)
-	visit = func(goType string, width graph.PropertyType) {
-		if members, ok := unionLeafMembers(goType, width, tm); ok {
-			// A union's own carrier is `any`, so the leaf test below would
-			// stop here and the narrowing its decode arms call would be
-			// emitted with no declaration. The members ARE the narrowed
-			// widths — that is the whole of what the member list buys
-			// (spec §4) — so the descent is not optional.
-			for _, m := range members {
-				visit(m.GoType, m.Width)
-			}
-			return
-		}
-		leaf := leafType(goType)
-		if leaf == driverCarrier(leaf) || isNeutralCarrier(leaf) {
-			return
-		}
-		if codegen.IsRecordStruct(leaf) {
-			// A record also carries wider than it is declared, so it
-			// reaches this far — but its narrowing is its own emitted
-			// helper, not narrowInt. Without this arm every schema
-			// declaring a record would be handed narrowInt with no
-			// caller, which the emitted package's lint fence fails.
-			return
-		}
-		if leaf == "float32" {
-			floats = true
-			return
-		}
-		ints = true
-	}
+	var n numericNarrowing
 	for _, e := range entities {
 		for _, f := range e.Fields {
-			visit(f.GoType, f.Width)
+			n.markWidth(f.GoType, f.Width, tm)
 		}
 	}
 	for _, p := range prepared {
 		for _, f := range p.RowFields {
-			visit(f.GoType, f.Width)
+			n.markWidth(f.GoType, f.Width, tm)
 			for elem := f.ListElem; elem != nil; elem = elem.Nested {
-				visit(elem.GoType, elem.Width)
+				n.markWidth(elem.GoType, elem.Width, tm)
 			}
 		}
 	}
-	return ints, floats
+	return n.ints, n.floats
+}
+
+// numericNarrowing accumulates narrowsANumericWidth's two answers.
+type numericNarrowing struct {
+	ints, floats bool
+}
+
+// markWidth records which helper one position's declared width calls.
+func (n *numericNarrowing) markWidth(goType string, width graph.PropertyType, tm typeMap) {
+	if members, ok := unionLeafMembers(goType, width, tm); ok {
+		// A union's own carrier is `any`, so the leaf test below would
+		// stop here and the narrowing its decode arms call would be
+		// emitted with no declaration. The members ARE the narrowed
+		// widths — that is the whole of what the member list buys
+		// (spec §4) — so the descent is not optional.
+		for _, m := range members {
+			n.markWidth(m.GoType, m.Width, tm)
+		}
+		return
+	}
+	leaf := leafType(goType)
+	if leaf == driverCarrier(leaf) || isNeutralCarrier(leaf) {
+		return
+	}
+	if codegen.IsRecordStruct(leaf) {
+		// A record also carries wider than it is declared, so it
+		// reaches this far — but its narrowing is its own emitted
+		// helper, not narrowInt. Without this arm every schema
+		// declaring a record would be handed narrowInt with no
+		// caller, which the emitted package's lint fence fails.
+		return
+	}
+	if leaf == "float32" {
+		n.floats = true
+		return
+	}
+	n.ints = true
 }
 
 // writeNarrowHelpers emits whichever checked-narrowing helpers this
@@ -575,16 +598,25 @@ func renderTemporalConversions(pkg string, uses map[string]carrierUse, target dr
 		if !used {
 			continue
 		}
-		if use.decode {
-			b.WriteString("\n")
-			b.WriteString(temporalDecodeBody(name))
-		}
-		if use.encode || use.encodePtr {
-			b.WriteString("\n")
-			b.WriteString(temporalEncodeBody(name))
-		}
-		if use.encodePtr {
-			fmt.Fprintf(&b, `
+		writeTemporalCarrierBridge(&b, name, use)
+	}
+	return []byte(b.String())
+}
+
+// writeTemporalCarrierBridge emits the conversions one temporal carrier
+// is used in, in the fixed order decode, encode, encodePtr, list,
+// listElem.
+func writeTemporalCarrierBridge(b *strings.Builder, name string, use carrierUse) {
+	if use.decode {
+		b.WriteString("\n")
+		b.WriteString(temporalDecodeBody(name))
+	}
+	if use.encode || use.encodePtr {
+		b.WriteString("\n")
+		b.WriteString(temporalEncodeBody(name))
+	}
+	if use.encodePtr {
+		fmt.Fprintf(b, `
 // from%[1]sPtr binds a nullable %[1]s parameter: a nil pointer is the
 // Cypher null the schema's nullability declared, not a zero %[1]s.
 func from%[1]sPtr(v *%[1]s) any {
@@ -594,25 +626,23 @@ func from%[1]sPtr(v *%[1]s) any {
 	return from%[1]s(*v)
 }
 `, name)
-		}
-		if use.list {
+	}
+	if use.list {
+		b.WriteString("\n")
+		b.WriteString(temporalListEncodeBody(name, false))
+		if use.listPtr {
 			b.WriteString("\n")
-			b.WriteString(temporalListEncodeBody(name, false))
-			if use.listPtr {
-				b.WriteString("\n")
-				b.WriteString(temporalListEncodePtrBody(name, false))
-			}
-		}
-		if use.listElem {
-			b.WriteString("\n")
-			b.WriteString(temporalListEncodeBody(name, true))
-			if use.listElemPtr {
-				b.WriteString("\n")
-				b.WriteString(temporalListEncodePtrBody(name, true))
-			}
+			b.WriteString(temporalListEncodePtrBody(name, false))
 		}
 	}
-	return []byte(b.String())
+	if use.listElem {
+		b.WriteString("\n")
+		b.WriteString(temporalListEncodeBody(name, true))
+		if use.listElemPtr {
+			b.WriteString("\n")
+			b.WriteString(temporalListEncodePtrBody(name, true))
+		}
+	}
 }
 
 // temporalListEncodeBody returns the from<X>List helper for one carrier.
