@@ -1273,6 +1273,26 @@ func narrowableEdgeCandidates(e query.EdgeBinding, t nodeTable, s schema.Schema,
 	return cands, srcs, tgts, true
 }
 
+// unlabelledRound is the state every round of Phase B reads: the pattern's
+// edges, the schema, the binding tables the round commits into, and the
+// scope's carried names. Built once by inferUnlabelled; only `pending` and the
+// narrowing change from one round to the next.
+type unlabelledRound struct {
+	edges     []query.EdgeBinding
+	s         schema.Schema
+	t         nodeTable
+	callTypes map[string]callBindingSlot
+	written   map[string]struct{}
+	demoted   map[int]bool
+	carried   map[string]struct{}
+}
+
+// candidateTypes is the package-level candidateTypes over the round's state,
+// under `narrowing`.
+func (r unlabelledRound) candidateTypes(n query.NodeBinding, narrowing map[string]map[graph.LabelSetKey]struct{}) unlabelledInference {
+	return candidateTypes(n, r.edges, r.s, r.t, r.written, narrowing, r.demoted, r.carried)
+}
+
 // inferUnlabelled is Phase B. `written` is the caller's scope.writtenBindings
 // set, which candidateTypes needs to ask witnessesItsEndpoints of each edge it
 // folds in — see there.
@@ -1280,9 +1300,10 @@ func inferUnlabelled(pending []query.NodeBinding, edges []query.EdgeBinding, s s
 	if len(pending) == 0 {
 		return nil
 	}
+	r := unlabelledRound{edges: edges, s: s, t: t, callTypes: callTypes, written: written, demoted: demoted, carried: carried}
 	pending = dropCarriedUnlabelled(pending, t)
 	for len(pending) > 0 {
-		next, committed, err := commitUnlabelledRound(pending, edges, s, t, callTypes, written, nil, demoted, carried)
+		next, committed, err := commitUnlabelledRound(r, pending, nil)
 		if err != nil {
 			return err
 		}
@@ -1307,7 +1328,7 @@ func inferUnlabelled(pending []query.NodeBinding, edges []query.EdgeBinding, s s
 			// changes the binding tables endpointNarrowing reads, so a hoisted
 			// answer would be the one a stale table gave.
 			narrowing := endpointNarrowing(edges, t, s, written, demoted)
-			next, committed, err = commitUnlabelledRound(pending, edges, s, t, callTypes, written, narrowing, demoted, carried)
+			next, committed, err = commitUnlabelledRound(r, pending, narrowing)
 			if err != nil {
 				return err
 			}
@@ -1318,7 +1339,7 @@ func inferUnlabelled(pending []query.NodeBinding, edges []query.EdgeBinding, s s
 				// reported !widened, and that is the return that leaves
 				// `inferred` alone. The call is spelled the way the round
 				// spells it so the message and the decision read one function.
-				cands, _, _ := candidateTypes(n, edges, s, t, written, narrowing, demoted, carried).commit()
+				cands, _, _ := r.candidateTypes(n, narrowing).commit()
 				return fmt.Errorf("%w: cannot uniquely infer type of unlabelled binding %q — candidate types: %s", ErrAmbiguousBinding, n.Variable(), joinCandidates(cands))
 			}
 		}
@@ -1365,17 +1386,17 @@ func dropCarriedUnlabelled(pending []query.NodeBinding, t nodeTable) []query.Nod
 // The two lanes differ in nothing but that argument, so the widened lane cannot
 // drift from master's on any question other than which types a far end can
 // still have.
-func commitUnlabelledRound(pending []query.NodeBinding, edges []query.EdgeBinding, s schema.Schema, t nodeTable, callTypes map[string]callBindingSlot, written map[string]struct{}, narrowing map[string]map[graph.LabelSetKey]struct{}, demoted map[int]bool, carried map[string]struct{}) ([]query.NodeBinding, int, error) {
+func commitUnlabelledRound(r unlabelledRound, pending []query.NodeBinding, narrowing map[string]map[graph.LabelSetKey]struct{}) ([]query.NodeBinding, int, error) {
 	var next []query.NodeBinding
 	committed := 0
 	for _, n := range pending {
-		inf := candidateTypes(n, edges, s, t, written, narrowing, demoted, carried)
+		inf := r.candidateTypes(n, narrowing)
 		cands, covered, widened := inf.commit()
 		switch len(cands) {
 		case 0:
 			return nil, 0, refuseEmptyUnlabelledCandidates(n, inf)
 		case 1:
-			if err := commitSingularUnlabelled(n, cands, covered, t, s, callTypes); err != nil {
+			if err := commitSingularUnlabelled(r, n, cands, covered); err != nil {
 				return nil, 0, err
 			}
 			committed++
@@ -1384,7 +1405,7 @@ func commitUnlabelledRound(pending []query.NodeBinding, edges []query.EdgeBindin
 				next = append(next, n)
 				continue
 			}
-			if err := commitPluralUnlabelled(n, cands, t, s, callTypes); err != nil {
+			if err := commitPluralUnlabelled(r, n, cands); err != nil {
 				return nil, 0, err
 			}
 			committed++
@@ -1406,7 +1427,8 @@ func refuseEmptyUnlabelledCandidates(n query.NodeBinding, inf unlabelledInferenc
 }
 
 // commitSingularUnlabelled writes a singleton candidate set into `resolved`.
-func commitSingularUnlabelled(n query.NodeBinding, cands map[graph.LabelSetKey]struct{}, covered bool, t nodeTable, s schema.Schema, callTypes map[string]callBindingSlot) error {
+func commitSingularUnlabelled(r unlabelledRound, n query.NodeBinding, cands map[graph.LabelSetKey]struct{}, covered bool) error {
+	t, s, callTypes := r.t, r.s, r.callTypes
 	var only graph.LabelSetKey
 	for k := range cands {
 		only = k
@@ -1467,7 +1489,8 @@ func commitSingularUnlabelled(n query.NodeBinding, cands map[graph.LabelSetKey]s
 // Deferring instead would reach ErrAmbiguousBinding, and that is a
 // refusal on `RETURN c.name` as much as on `RETURN c.smallOnly` —
 // see the two fixtures named at commit().
-func commitPluralUnlabelled(n query.NodeBinding, cands map[graph.LabelSetKey]struct{}, t nodeTable, s schema.Schema, callTypes map[string]callBindingSlot) error {
+func commitPluralUnlabelled(r unlabelledRound, n query.NodeBinding, cands map[graph.LabelSetKey]struct{}) error {
+	t, s, callTypes := r.t, r.s, r.callTypes
 	// Same CALL YIELD collision as the singular arm; the shape
 	// posture is about re-binding the name, not about how many types
 	// the re-binding names.
@@ -2625,21 +2648,27 @@ func validateSetEntityEffect(sc *scope, e query.SetEntityEffect) error {
 // label individually appears in at least one declared NodeType's LabelSet.
 // Missing labels surface ErrUnknownLabel per §4.3.3.
 func validateSetLabelsEffect(sc *scope, e query.SetLabelsEffect, s schema.Schema) error {
-	v := e.TargetVariable()
+	return validateLabelsEffectTarget(sc, e.TargetVariable(), e.Labels(), s, clauseSet)
+}
+
+// validateLabelsEffectTarget is the body validateSetLabelsEffect and
+// validateRemoveLabelsEffect share; `clause` is the bare keyword each refusal
+// names.
+func validateLabelsEffectTarget(sc *scope, v string, labels graph.LabelSet, s schema.Schema, clause effectClause) error {
 	if _, ok := sc.nodeTypes[v]; !ok {
 		if _, isCand := sc.nodeCands[v]; !isCand {
 			if _, ok := sc.edgeBindings[v]; ok {
-				return fmt.Errorf("%w: SET labels on edge binding %q", ErrInvalidEffectTarget, v)
+				return fmt.Errorf("%w: %s labels on edge binding %q", ErrInvalidEffectTarget, clause, v)
 			}
 			if _, ok := sc.carriedResolvedTypes[v]; ok {
-				return fmt.Errorf("%w: SET labels on projection alias %q", ErrInvalidEffectTarget, v)
+				return fmt.Errorf("%w: %s labels on projection alias %q", ErrInvalidEffectTarget, clause, v)
 			}
-			return fmt.Errorf("%w: SET %s: %q not in any Part scope", ErrInvalidEffectTarget, v, v)
+			return fmt.Errorf("%w: %s %s: %q not in any Part scope", ErrInvalidEffectTarget, clause, v, v)
 		}
 	}
-	for _, L := range e.Labels() {
+	for _, L := range labels {
 		if !labelDeclared(L, s) {
-			return fmt.Errorf("%w: SET %s:%s: label %q not declared on any node type", ErrUnknownLabel, v, L, L)
+			return fmt.Errorf("%w: %s %s:%s: label %q not declared on any node type", ErrUnknownLabel, clause, v, L, L)
 		}
 	}
 	return nil
@@ -2654,24 +2683,7 @@ func validateRemovePropertyEffect(sc *scope, e query.RemovePropertyEffect, s sch
 // validateRemoveLabelsEffect is the REMOVE analogue of validateSetLabelsEffect:
 // same target discipline, same per-label declaration check.
 func validateRemoveLabelsEffect(sc *scope, e query.RemoveLabelsEffect, s schema.Schema) error {
-	v := e.TargetVariable()
-	if _, ok := sc.nodeTypes[v]; !ok {
-		if _, isCand := sc.nodeCands[v]; !isCand {
-			if _, ok := sc.edgeBindings[v]; ok {
-				return fmt.Errorf("%w: REMOVE labels on edge binding %q", ErrInvalidEffectTarget, v)
-			}
-			if _, ok := sc.carriedResolvedTypes[v]; ok {
-				return fmt.Errorf("%w: REMOVE labels on projection alias %q", ErrInvalidEffectTarget, v)
-			}
-			return fmt.Errorf("%w: REMOVE %s: %q not in any Part scope", ErrInvalidEffectTarget, v, v)
-		}
-	}
-	for _, L := range e.Labels() {
-		if !labelDeclared(L, s) {
-			return fmt.Errorf("%w: REMOVE %s:%s: label %q not declared on any node type", ErrUnknownLabel, v, L, L)
-		}
-	}
-	return nil
+	return validateLabelsEffectTarget(sc, e.TargetVariable(), e.Labels(), s, clauseRemove)
 }
 
 // validateDeleteEffect walks e.Targets() for bare-shape checks (entity DELETE

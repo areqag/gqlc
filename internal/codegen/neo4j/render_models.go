@@ -461,7 +461,14 @@ func writeShapelessFieldDecode(b *strings.Builder, e codegen.Entity, i int, f co
 // there would be a refusal naming the union rather than a nil delivered as
 // a value.
 func writeUnionFieldDecode(b *strings.Builder, e codegen.Entity, f codegen.EntityField, arg string) {
+	// The locals are positional and carry a `u` stem no other lane in this
+	// file emits, so a property whose name collides with one of them
+	// cannot emit a redeclaration.
+	n := 0
+	next := func() string { n++; return fmt.Sprintf("u%d", n) }
 	site := decodeSite{
+		b:    b,
+		next: next,
 		zero: e.Name + "{}",
 		fail: func(depth int, tail string) (format, args string) {
 			// e.Name and f.Field are mangled Go identifiers, so they are
@@ -472,15 +479,10 @@ func writeUnionFieldDecode(b *strings.Builder, e codegen.Entity, f codegen.Entit
 				strconv.Quote(f.PropName)
 		},
 	}
-	// The locals are positional and carry a `u` stem no other lane in this
-	// file emits, so a property whose name collides with one of them
-	// cannot emit a redeclaration.
-	n := 0
-	next := func() string { n++; return fmt.Sprintf("u%d", n) }
 
 	if f.Nullable {
 		fmt.Fprintf(b, "\tif v, ok := %s.Props[%q]; ok && v != nil {\n", arg, f.PropName)
-		got := writeValueDecode(b, site, 0, f.GoType, f.Width, "v", "\t\t", next)
+		got := writeValueDecode(site, 0, f.GoType, f.Width, "v", "\t\t")
 		fmt.Fprintf(b, "\t\tout.%s = &%s\n", f.Field, got)
 		b.WriteString("\t}\n")
 		return
@@ -490,7 +492,7 @@ func writeUnionFieldDecode(b *strings.Builder, e codegen.Entity, f codegen.Entit
 	b.WriteString("\tif !ok {\n")
 	fmt.Fprintf(b, "\t\treturn %s{}, fmt.Errorf(\"decode %s.%s: could not find any property named %%s\", %q)\n", e.Name, e.Name, f.Field, f.PropName)
 	b.WriteString("\t}\n")
-	got := writeValueDecode(b, site, 0, f.GoType, f.Width, raw, "\t", next)
+	got := writeValueDecode(site, 0, f.GoType, f.Width, raw, "\t")
 	fmt.Fprintf(b, "\tout.%s = %s\n", f.Field, got)
 }
 
