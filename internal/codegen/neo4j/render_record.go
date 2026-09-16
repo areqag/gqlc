@@ -321,7 +321,7 @@ func writeRecordDecode(b *strings.Builder, pt graph.PropertyType, suffix, alias 
 		raw := next()
 		if f.Nullable {
 			fmt.Fprintf(b, "\tif %s, ok := v[%q]; ok && %s != nil {\n", raw, f.Key, raw)
-			got := writeRecordValueDecode(b, pt, f.Key, 0, f.GoType, f.Width, raw, "\t\t", next)
+			got := writeRecordValueDecode(b, pt, f, raw, "\t\t", next)
 			fmt.Fprintf(b, "\t\tout.%s = &%s\n", f.Field, got)
 			b.WriteString("\t}\n")
 			continue
@@ -331,7 +331,7 @@ func writeRecordDecode(b *strings.Builder, pt graph.PropertyType, suffix, alias 
 		format, args := recordFail(pt, f.Key, 0, "no such field")
 		fmt.Fprintf(b, "\t\treturn out, fmt.Errorf(%s, %s)\n", format, args)
 		b.WriteString("\t}\n")
-		got := writeRecordValueDecode(b, pt, f.Key, 0, f.GoType, f.Width, raw, "\t", next)
+		got := writeRecordValueDecode(b, pt, f, raw, "\t", next)
 		fmt.Fprintf(b, "\tout.%s = %s\n", f.Field, got)
 	}
 	b.WriteString("\treturn out, nil\n}\n")
@@ -374,25 +374,29 @@ func recordFail(pt graph.PropertyType, key string, depth int, tail string) (form
 // entry in the encoding set with its own emitted helper, which narrowCall
 // names — inlining it would emit the same body once per reference.
 //
-// key and depth are what the emitted failures are worded from — see
-// recordFail — and are carried down the list levels unchanged apart from
-// the depth, so an element that fails still names the declared field it
+// f's key is what the emitted failures are worded from — see recordFail
+// — and is carried down the list levels unchanged while the depth counts
+// them, so an element that fails still names the declared field it
 // belongs to.
-func writeRecordValueDecode(b *strings.Builder, pt graph.PropertyType, key string, depth int, goType string, width graph.PropertyType, src, indent string, next func() string) string {
+func writeRecordValueDecode(b *strings.Builder, pt graph.PropertyType, f codegen.RecordFieldPlan, src, indent string, next func() string) string {
 	site := decodeSite{
+		b:    b,
+		next: next,
 		zero: "out",
 		fail: func(depth int, tail string) (format, args string) {
-			return recordFail(pt, key, depth, tail)
+			return recordFail(pt, f.Key, depth, tail)
 		},
 	}
-	return writeValueDecode(b, site, depth, goType, width, src, indent, next)
+	return writeValueDecode(site, 0, f.GoType, f.Width, src, indent)
 }
 
-// decodeSite is the two things a value-decode walk differs on between its
-// callers: what a failing return hands back BESIDE the error, and how a
-// failure is worded at a given list depth.
+// decodeSite is what every level of one value-decode walk shares: the
+// builder and the allocator of positional locals, which are the caller's
+// and the same at every depth, and the two things the walk differs on
+// between its callers — what a failing return hands back BESIDE the
+// error, and how a failure is worded at a given list depth.
 //
-// Two fields rather than two walks. The record helper returns
+// Two fields for those rather than two walks. The record helper returns
 // (RecordAlias, error) and words its failures around a declared field
 // name; the union helper returns (any, error) and words its failures
 // around a declared union. Everything between those two facts — the
@@ -401,6 +405,8 @@ func writeRecordValueDecode(b *strings.Builder, pt graph.PropertyType, key strin
 // would be a second chance for the two to disagree about, say, whether a
 // nullable list element is asserted before or after its nil check.
 type decodeSite struct {
+	b    *strings.Builder
+	next func() string
 	zero string
 	fail func(depth int, tail string) (format, args string)
 }
@@ -416,34 +422,34 @@ type decodeSite struct {
 // nested DECLARED union are NOT recursed into here: each is its own entry
 // in its own encoding set with its own emitted helper, which this names —
 // inlining either would emit the same body once per reference.
-func writeValueDecode(b *strings.Builder, site decodeSite, depth int, goType string, width graph.PropertyType, src, indent string, next func() string) string {
+func writeValueDecode(site decodeSite, depth int, goType string, width graph.PropertyType, src, indent string) string {
 	if codegen.IsDeclaredUnion(goType, width) {
 		// A closed union carries as `any`, so it would otherwise take the
 		// shapeless arm below and be handed over undispatched. Asked
 		// FIRST, and on the pair rather than on the text, because the
 		// text it shares with ANY VALUE is the one arm that must keep
 		// assigning bare.
-		out := next()
-		fmt.Fprintf(b, "%s%s, err := decode%s(%s)\n", indent, out, codegen.UnionHelperSuffix(width), src)
-		writeValueDecodeFail(b, site, depth, indent)
+		out := site.next()
+		fmt.Fprintf(site.b, "%s%s, err := decode%s(%s)\n", indent, out, codegen.UnionHelperSuffix(width), src)
+		writeValueDecodeFail(site, depth, indent)
 		return out
 	}
 	if !ridesADriverCarrier(goType) {
 		// ANY VALUE has no carrier to assert against: `x.(any)` is false
 		// for exactly the null that width exists to hold. The driver
 		// value already IS the `any` the caller is handed.
-		out := next()
-		fmt.Fprintf(b, "%s%s := %s\n", indent, out, src)
+		out := site.next()
+		fmt.Fprintf(site.b, "%s%s := %s\n", indent, out, src)
 		return out
 	}
 	carrier := driverCarrier(goType)
-	held := next()
-	fmt.Fprintf(b, "%s%s, ok := %s.(%s)\n", indent, held, src, carrier)
-	fmt.Fprintf(b, "%sif !ok {\n", indent)
+	held := site.next()
+	fmt.Fprintf(site.b, "%s%s, ok := %s.(%s)\n", indent, held, src, carrier)
+	fmt.Fprintf(site.b, "%sif !ok {\n", indent)
 	format, args := site.fail(depth, "expected "+carrier+", got %T")
-	fmt.Fprintf(b, "%s\treturn %s, fmt.Errorf(%s, %s, %s)\n", indent, site.zero, format, args, src)
-	fmt.Fprintf(b, "%s}\n", indent)
-	return writeCarrierNarrow(b, site, depth, goType, width, carrier, held, indent, next)
+	fmt.Fprintf(site.b, "%s\treturn %s, fmt.Errorf(%s, %s, %s)\n", indent, site.zero, format, args, src)
+	fmt.Fprintf(site.b, "%s}\n", indent)
+	return writeCarrierNarrow(site, depth, goType, width, carrier, held, indent)
 }
 
 // writeCarrierNarrow emits the narrowing of a value ALREADY held at its
@@ -451,32 +457,32 @@ func writeValueDecode(b *strings.Builder, site decodeSite, depth int, goType str
 // bound. Split from writeValueDecode because the union decode reaches it
 // with the assertion already made: its type switch IS the assertion, and
 // re-asserting inside an arm would emit a check the arm just proved.
-func writeCarrierNarrow(b *strings.Builder, site decodeSite, depth int, goType string, width graph.PropertyType, carrier, held, indent string, next func() string) string {
+func writeCarrierNarrow(site decodeSite, depth int, goType string, width graph.PropertyType, carrier, held, indent string) string {
 	switch {
 	case walksElements(goType, width):
-		acc, idx, elem := next(), next(), next()
-		fmt.Fprintf(b, "%s%s := make(%s, len(%s))\n", indent, acc, goType, held)
-		fmt.Fprintf(b, "%sfor %s, %s := range %s {\n", indent, idx, elem, held)
+		acc, idx, elem := site.next(), site.next(), site.next()
+		fmt.Fprintf(site.b, "%s%s := make(%s, len(%s))\n", indent, acc, goType, held)
+		fmt.Fprintf(site.b, "%sfor %s, %s := range %s {\n", indent, idx, elem, held)
 		if unionElementIsNullable(goType, width) {
 			// The one element shape whose null cannot be left to the
 			// value walk: a union's decode dispatches on the wire shape,
 			// and a nil element belongs to no member. On every other
 			// element type the null is either impossible or already
 			// carried by a star this walk asserts through.
-			fmt.Fprintf(b, "%s\tif %s == nil {\n%s\t\tcontinue\n%s\t}\n", indent, elem, indent, indent)
+			fmt.Fprintf(site.b, "%s\tif %s == nil {\n%s\t\tcontinue\n%s\t}\n", indent, elem, indent, indent)
 		}
-		got := writeValueDecode(b, site, depth+1, strings.TrimPrefix(goType, "[]"), width.Elem(), elem, indent+"\t", next)
-		fmt.Fprintf(b, "%s\t%s[%s] = %s\n", indent, acc, idx, got)
-		fmt.Fprintf(b, "%s}\n", indent)
+		got := writeValueDecode(site, depth+1, strings.TrimPrefix(goType, "[]"), width.Elem(), elem, indent+"\t")
+		fmt.Fprintf(site.b, "%s\t%s[%s] = %s\n", indent, acc, idx, got)
+		fmt.Fprintf(site.b, "%s}\n", indent)
 		return acc
 	case isNeutralCarrier(goType):
-		out := next()
-		fmt.Fprintf(b, "%s%s := %s\n", indent, out, narrowExpr(goType, held))
+		out := site.next()
+		fmt.Fprintf(site.b, "%s%s := %s\n", indent, out, narrowExpr(goType, held))
 		return out
 	case carrier != goType:
-		out := next()
-		fmt.Fprintf(b, "%s%s, err := %s\n", indent, out, narrowCall(goType, width, held))
-		writeValueDecodeFail(b, site, depth, indent)
+		out := site.next()
+		fmt.Fprintf(site.b, "%s%s, err := %s\n", indent, out, narrowCall(goType, width, held))
+		writeValueDecodeFail(site, depth, indent)
 		return out
 	}
 	return held
@@ -487,11 +493,11 @@ func writeCarrierNarrow(b *strings.Builder, site decodeSite, depth int, goType s
 // three fallible arms — the union dispatch, the checked numeric narrow
 // and the nested record decode — all report through %w and differ in
 // nothing else.
-func writeValueDecodeFail(b *strings.Builder, site decodeSite, depth int, indent string) {
-	fmt.Fprintf(b, "%sif err != nil {\n", indent)
+func writeValueDecodeFail(site decodeSite, depth int, indent string) {
+	fmt.Fprintf(site.b, "%sif err != nil {\n", indent)
 	format, args := site.fail(depth, "%w")
-	fmt.Fprintf(b, "%s\treturn %s, fmt.Errorf(%s, %s, err)\n", indent, site.zero, format, args)
-	fmt.Fprintf(b, "%s}\n", indent)
+	fmt.Fprintf(site.b, "%s\treturn %s, fmt.Errorf(%s, %s, err)\n", indent, site.zero, format, args)
+	fmt.Fprintf(site.b, "%s}\n", indent)
 }
 
 // walksElements reports whether a decode has to narrow a driver []any
