@@ -589,9 +589,11 @@ func decodeFuncOf(t *testing.T, goType string, width graph.PropertyType, msgAndA
 }
 
 // typeTableGoTypes is every Go type text the type table names as a
-// returned string literal, keyed by the typeMap method that names it. A
-// method that names none is keyed to an empty entry, so the caller can
-// tell a method that produces no Go type from one the walk did not reach.
+// returned string literal or as a value of propertyCarriers, keyed by the
+// typeMap method that names it — the map's values are Property's, since
+// Property is the one method that indexes it. A method that names none is
+// keyed to an empty entry, so the caller can tell a method that produces
+// no Go type from one the walk did not reach.
 //
 // Read out of the AST rather than listed here: a list would be a copy of
 // the table, and a copy goes stale in the case this sweep exists for.
@@ -685,6 +687,7 @@ func typeTableGoTypes(t *testing.T) map[string][]string {
 		file, err := parser.ParseFile(fset, entry.Name(), nil, parser.SkipObjectResolution)
 		require.NoError(t, err, "%s does not parse", entry.Name())
 		collectTypeMapGoTypes(t, fset, file, byMethod)
+		collectPropertyCarrierValues(t, fset, file, byMethod)
 	}
 	require.NotZero(t, read, "the package directory held no .go file, so the walk ranged over nothing")
 
@@ -742,6 +745,62 @@ func collectTypeMapGoTypes(t *testing.T, fset *token.FileSet, file *ast.File, by
 	}
 }
 
+// collectPropertyCarrierValues adds the string values of the package-level
+// propertyCarriers map literal to byMethod under Property, which is the
+// method that indexes it. Read the way returnedGoType reads a literal
+// return: a value that is not a string literal is refused at its position,
+// since a carrier spelled through a constant or a call is one this census
+// cannot see, and the empty text of a refused row names no Go type.
+//
+// Attributed to Property by name rather than by tracing the index
+// expression back, because the walk parses files and resolves nothing; the
+// admission in returnedGoType is the other half of that same assumption,
+// so a second method that began indexing the table would be admitted there
+// and credited here to a method it is not — which the method-set pin at
+// the call site cannot see. That is the one hole this shape opens, and it
+// is named here rather than closed because closing it needs types.
+func collectPropertyCarrierValues(t *testing.T, fset *token.FileSet, file *ast.File, byMethod map[string][]string) {
+	t.Helper()
+
+	for _, d := range file.Decls {
+		gd, ok := d.(*ast.GenDecl)
+		if !ok || gd.Tok != token.VAR {
+			continue
+		}
+		for _, spec := range gd.Specs {
+			vs, isValue := spec.(*ast.ValueSpec)
+			if !isValue || len(vs.Names) != 1 || vs.Names[0].Name != propertyTable || len(vs.Values) != 1 {
+				continue
+			}
+			lit, isLit := vs.Values[0].(*ast.CompositeLit)
+			require.True(t, isLit, "%s is not initialised with a composite literal at %s, so its rows cannot be read",
+				propertyTable, fset.Position(vs.Pos()))
+			if _, dup := byMethod["Property"]; !dup {
+				byMethod["Property"] = nil
+			}
+			for _, elt := range lit.Elts {
+				kv, isKV := elt.(*ast.KeyValueExpr)
+				require.True(t, isKV, "%s holds an element that is not key: value at %s", propertyTable, fset.Position(elt.Pos()))
+				value, isBasic := kv.Value.(*ast.BasicLit)
+				require.True(t, isBasic && value.Kind == token.STRING,
+					"this walk cannot read the row at %s: %s holds %s, and this reads a string literal and "+
+						"nothing else — a Go type named any other way is invisible here, so the walk refuses "+
+						"rather than skip it", fset.Position(kv.Pos()), propertyTable, types.ExprString(kv.Value))
+				text, err := strconv.Unquote(value.Value)
+				require.NoError(t, err, "%s holds a string literal that does not unquote: %s", propertyTable, value.Value)
+				if text == "" || slices.Contains(byMethod["Property"], text) {
+					continue
+				}
+				byMethod["Property"] = append(byMethod["Property"], text)
+			}
+		}
+	}
+}
+
+// propertyTable is the package-level map literal typeMap.Property indexes
+// for its per-width rows, by the name the walks above read it under.
+const propertyTable = "propertyCarriers"
+
 // returnedGoType is the Go type text one return of a typeMap method
 // names, and whether it names one at all. It fails the test on a return
 // whose shape this walk cannot read: see typeTableGoTypes for why the
@@ -754,9 +813,9 @@ func returnedGoType(t *testing.T, fset *token.FileSet, method string, ret *ast.R
 	t.Helper()
 
 	const cannotRead = "this walk cannot read the return at %s: %s returns %s, and this reads a string " +
-		"literal, the list arm's `\"[]\" + elem`, or the record arm's codegen.RecordStructText call, and " +
-		"nothing else — a Go type named any other way is invisible here, so the walk refuses rather than " +
-		"skip it"
+		"literal, the list arm's `\"[]\" + elem`, the record arm's codegen.RecordStructText call, or an " +
+		"index into propertyCarriers, and nothing else — a Go type named any other way is invisible " +
+		"here, so the walk refuses rather than skip it"
 	where := fset.Position(ret.Pos())
 
 	require.NotEmpty(t, ret.Results, cannotRead, where, method, "no value")
@@ -821,6 +880,17 @@ func returnedGoType(t *testing.T, fset *token.FileSet, method string, ret *ast.R
 		// here rather than a silent hole.
 		require.True(t, isSharedCarrierCall(first, "RecordStructText") || isSharedCarrierCall(first, "UnionCarrier"),
 			cannotRead, where, method, types.ExprString(first))
+		return "", false
+	case *ast.IndexExpr:
+		// The per-width lookup, and the fourth shape. It names no Go type
+		// of its own: what it can return is a value of propertyCarriers,
+		// every one of which collectPropertyCarrierValues has already
+		// swept under this method's key. Admitted by the table's NAME, so
+		// an index into any other value is a return this walk cannot read
+		// and is refused, rather than a lookup silently credited with rows
+		// that were never read.
+		table, isIdent := first.X.(*ast.Ident)
+		require.True(t, isIdent && table.Name == propertyTable, cannotRead, where, method, types.ExprString(first))
 		return "", false
 	default:
 		require.Fail(t, "unreadable return in the type table", cannotRead, where, method, types.ExprString(first))
