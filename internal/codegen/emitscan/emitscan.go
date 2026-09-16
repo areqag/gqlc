@@ -308,18 +308,7 @@ func Scope(files map[string]string) (declared, resolved []string, err error) {
 		if err != nil {
 			return nil, nil, err
 		}
-		for _, decl := range PackageDecls(file) {
-			declaredSet[decl] = true
-		}
-		for _, d := range file.Decls {
-			fn, ok := d.(*ast.FuncDecl)
-			if !ok {
-				continue
-			}
-			for ident := range FreeIdents(fn) {
-				free[ident] = true
-			}
-		}
+		scopeFileNames(file, declaredSet, free)
 	}
 	for _, decl := range sortedSet(declaredSet) {
 		declared = append(declared, decl)
@@ -328,6 +317,24 @@ func Scope(files map[string]string) (declared, resolved []string, err error) {
 		}
 	}
 	return declared, resolved, nil
+}
+
+// scopeFileNames folds one file's package-level declarations into
+// declaredSet and the free identifiers of each of its functions into
+// free.
+func scopeFileNames(file *ast.File, declaredSet, free map[string]bool) {
+	for _, decl := range PackageDecls(file) {
+		declaredSet[decl] = true
+	}
+	for _, d := range file.Decls {
+		fn, ok := d.(*ast.FuncDecl)
+		if !ok {
+			continue
+		}
+		for ident := range FreeIdents(fn) {
+			free[ident] = true
+		}
+	}
 }
 
 // PackageDecls names what an emitted file declares at package level:
@@ -354,19 +361,27 @@ func PackageDecls(file *ast.File) []string {
 			continue
 		}
 		for _, spec := range gen.Specs {
-			switch sp := spec.(type) {
-			case *ast.ValueSpec:
-				for _, n := range sp.Names {
-					if n.Name != "_" {
-						out = append(out, n.Name)
-					}
-				}
-			case *ast.TypeSpec:
-				out = append(out, sp.Name.Name)
-			}
+			out = append(out, packageSpecNames(spec)...)
 		}
 	}
 	return out
+}
+
+// packageSpecNames names what one const, var or type spec declares.
+func packageSpecNames(spec ast.Spec) []string {
+	switch sp := spec.(type) {
+	case *ast.ValueSpec:
+		var out []string
+		for _, n := range sp.Names {
+			if n.Name != "_" {
+				out = append(out, n.Name)
+			}
+		}
+		return out
+	case *ast.TypeSpec:
+		return []string{sp.Name.Name}
+	}
+	return nil
 }
 
 // FreeIdents names the identifiers a function resolves outside itself —

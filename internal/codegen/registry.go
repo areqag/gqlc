@@ -70,27 +70,37 @@ func NewRegistry(entries ...Entry) (Registry, error) {
 			return Registry{}, fmt.Errorf("codegen: duplicate registry entry key %q", e.Key)
 		}
 		byKey[e.Key] = e.New
-		for name, sentinel := range e.Sentinels {
-			if name == "" {
-				return Registry{}, fmt.Errorf("codegen: registry entry %q publishes a sentinel under an empty name", e.Key)
-			}
-			if sentinel == nil {
-				return Registry{}, fmt.Errorf("codegen: registry entry %q publishes %q with no error value", e.Key, name)
-			}
-			// Identity, not errors.Is: the rule is that one name resolves
-			// to one value, and errors.Is would accept an entry publishing
-			// a wrapper of what another entry published, leaving the name
-			// ambiguous — which is the collision this refuses.
-			//nolint:errorlint // identity match on package-level sentinels is intended
-			if held, seen := sentinels[name]; seen && held != sentinel {
-				return Registry{}, fmt.Errorf("codegen: registry entries %q and %q publish different errors under %q",
-					publisher[name], e.Key, name)
-			}
-			sentinels[name] = sentinel
-			publisher[name] = e.Key
+		if err := publishEntrySentinels(e, sentinels, publisher); err != nil {
+			return Registry{}, err
 		}
 	}
 	return Registry{byKey: byKey, sentinels: sentinels}, nil
+}
+
+// publishEntrySentinels merges what one entry publishes into the
+// registry's sentinel map, with publisher recording which entry's key
+// each name was taken from so a collision can name both sides.
+func publishEntrySentinels(e Entry, sentinels map[string]error, publisher map[string]string) error {
+	for name, sentinel := range e.Sentinels {
+		if name == "" {
+			return fmt.Errorf("codegen: registry entry %q publishes a sentinel under an empty name", e.Key)
+		}
+		if sentinel == nil {
+			return fmt.Errorf("codegen: registry entry %q publishes %q with no error value", e.Key, name)
+		}
+		// Identity, not errors.Is: the rule is that one name resolves
+		// to one value, and errors.Is would accept an entry publishing
+		// a wrapper of what another entry published, leaving the name
+		// ambiguous — which is the collision this refuses.
+		//nolint:errorlint // identity match on package-level sentinels is intended
+		if held, seen := sentinels[name]; seen && held != sentinel {
+			return fmt.Errorf("codegen: registry entries %q and %q publish different errors under %q",
+				publisher[name], e.Key, name)
+		}
+		sentinels[name] = sentinel
+		publisher[name] = e.Key
+	}
+	return nil
 }
 
 // Lookup resolves a driver wire key drawn from the config vocabulary.

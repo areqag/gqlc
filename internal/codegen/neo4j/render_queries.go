@@ -69,26 +69,28 @@ func groupImports(queries []codegen.Query) (needDbtype, needTime, needFmt, needI
 		if p.Cardinality == queryfile.CardinalityIter {
 			needIter = true
 		}
-		for _, f := range p.RowFields {
-			nd, nt := columnNeedsImports(f)
-			if nd {
-				needDbtype = true
-			}
-			if nt {
-				needTime = true
-			}
-		}
-		for _, f := range p.ParamFields {
-			nd, nt := goTypeNeedsImports(f.GoType)
-			if nd {
-				needDbtype = true
-			}
-			if nt {
-				needTime = true
-			}
-		}
+		nd, nt := queryFieldsNeedImports(p)
+		needDbtype = needDbtype || nd
+		needTime = needTime || nt
 	}
 	return needDbtype, needTime, needFmt, needIter
+}
+
+// queryFieldsNeedImports reports whether any row or parameter field of
+// one prepared query decodes / encodes through a dbtype or time.Time
+// carrier.
+func queryFieldsNeedImports(p codegen.Query) (needDbtype, needTime bool) {
+	for _, f := range p.RowFields {
+		nd, nt := columnNeedsImports(f)
+		needDbtype = needDbtype || nd
+		needTime = needTime || nt
+	}
+	for _, f := range p.ParamFields {
+		nd, nt := goTypeNeedsImports(f.GoType)
+		needDbtype = needDbtype || nd
+		needTime = needTime || nt
+	}
+	return needDbtype, needTime
 }
 
 // columnNeedsImports reports whether one prepared row needs dbtype /

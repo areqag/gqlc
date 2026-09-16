@@ -722,28 +722,37 @@ func r3EdgeAdmissible(e query.EdgeBinding) error {
 // set is membership-only and never iterated, so the result is
 // deterministic across runs (§4.4).
 func edgeProbes(e query.EdgeBinding, srcs, tgts []graph.LabelSetKey) []schema.EdgeKey {
-	out := make([]schema.EdgeKey, 0, len(e.Labels()))
-	seen := make(map[schema.EdgeKey]struct{}, len(e.Labels()))
+	probes := edgeProbeSet{
+		out:  make([]schema.EdgeKey, 0, len(e.Labels())),
+		seen: make(map[schema.EdgeKey]struct{}, len(e.Labels())),
+	}
 	for _, L := range e.Labels() {
 		labelKey := graph.LabelSet{L}.Key()
 		for _, src := range srcs {
 			for _, tgt := range tgts {
-				orientations := [][2]graph.LabelSetKey{{src, tgt}}
+				probes.add(schema.EdgeKey{Source: src, KeyLabels: labelKey, Target: tgt})
 				if !e.Directed() {
-					orientations = append(orientations, [2]graph.LabelSetKey{tgt, src})
-				}
-				for _, o := range orientations {
-					k := schema.EdgeKey{Source: o[0], KeyLabels: labelKey, Target: o[1]}
-					if _, dup := seen[k]; dup {
-						continue
-					}
-					seen[k] = struct{}{}
-					out = append(out, k)
+					probes.add(schema.EdgeKey{Source: tgt, KeyLabels: labelKey, Target: src})
 				}
 			}
 		}
 	}
-	return out
+	return probes.out
+}
+
+// edgeProbeSet is edgeProbes' first-occurrence set: out is the result in
+// insertion order and seen is membership-only.
+type edgeProbeSet struct {
+	out  []schema.EdgeKey
+	seen map[schema.EdgeKey]struct{}
+}
+
+func (p *edgeProbeSet) add(k schema.EdgeKey) {
+	if _, dup := p.seen[k]; dup {
+		return
+	}
+	p.seen[k] = struct{}{}
+	p.out = append(p.out, k)
 }
 
 // edgeCandidates is the closed candidate set for one edge binding whose
@@ -2798,21 +2807,28 @@ func undeclaredRelationshipTypeWarnings(q query.Query, s schema.Schema) []Warnin
 				if !ok {
 					continue
 				}
-				for _, l := range e.Labels() {
-					if _, ok := declared[graph.LabelSet{l}.Key()]; ok {
-						continue
-					}
-					if _, dup := seen[l]; dup {
-						continue
-					}
-					seen[l] = struct{}{}
-					out = append(out, Warning{
-						Producer: producerUndeclaredRelationshipType,
-						Text:     undeclaredRelationshipTypeMessage(l, e),
-					})
-				}
+				out = appendUndeclaredRelationshipTypeWarnings(out, e, declared, seen)
 			}
 		}
+	}
+	return out
+}
+
+// appendUndeclaredRelationshipTypeWarnings appends one warning per label of e
+// that declared lacks and seen has not yet recorded, marking each in seen.
+func appendUndeclaredRelationshipTypeWarnings(out []Warning, e query.EdgeBinding, declared map[graph.LabelSetKey]struct{}, seen map[string]struct{}) []Warning {
+	for _, l := range e.Labels() {
+		if _, ok := declared[graph.LabelSet{l}.Key()]; ok {
+			continue
+		}
+		if _, dup := seen[l]; dup {
+			continue
+		}
+		seen[l] = struct{}{}
+		out = append(out, Warning{
+			Producer: producerUndeclaredRelationshipType,
+			Text:     undeclaredRelationshipTypeMessage(l, e),
+		})
 	}
 	return out
 }
