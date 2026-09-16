@@ -23,9 +23,9 @@ import (
 // table, so graph.TypeAnyPropertyValue and graph.TypeList sat outside
 // both for as long as the arms answering `any` and `[]any` have existed
 // (bd gqlc-2l8v — 29 of internal/graph's 31 constants were named here).
-// The obligation is now read off typeMap.Property's own case
-// expressions by propertyArmNames, so a constant that gains an arm
-// there arrives owing a row, and one that loses its arm stops owing one.
+// The obligation is now read off propertyCarriers' own keys by
+// propertyRowNames, so a constant that gains a row there arrives owing a
+// row here, and one that loses its row stops owing one.
 func TestTypeMapProperty(t *testing.T) {
 	representable := []struct {
 		pt   graph.PropertyType
@@ -57,19 +57,19 @@ func TestTypeMapProperty(t *testing.T) {
 		// what ridesADriverCarrier turns on and what routes the decode
 		// through the Props map.
 		{graph.TypeAnyPropertyValue, "any"},
-		// The bare LIST / ARRAY. Its arm in the switch is unreachable —
+		// The bare LIST / ARRAY. Its row in propertyCarriers is unreachable —
 		// TypeList is spelled "LIST<ANY>", so Kind() reports KindList and
 		// the recursion at the top of Property takes it, answering
 		// "[]" + Property(TypeAnyPropertyValue). The row is here because
 		// what a caller declaring a bare LIST gets is the table's answer
-		// however it is reached; the arm's own text is pinned by
+		// however it is reached; the row's own text is pinned by
 		// TestTypeMapPropertyListArmIsUnreachable below.
 		{graph.TypeList, "[]any"},
-		// RECORD<ANY>, whose arm is unreachable for the same reason
+		// RECORD<ANY>, whose row is unreachable for the same reason
 		// TypeList's is: Kind() reports KindRecord, so the guard at the
-		// top of Property answers it and the switch is never reached.
+		// top of Property answers it and the table is never consulted.
 		// The row pins what a caller declaring one gets however it is
-		// reached; the arm's own text is pinned by
+		// reached; the table row's own text is pinned by
 		// TestTypeMapPropertyAnyRecordArmIsUnreachable below.
 		{graph.TypeAnyRecord, "map[string]any"},
 	}
@@ -110,12 +110,12 @@ func TestTypeMapProperty(t *testing.T) {
 		})
 	}
 
-	// Every constant the switch has an arm for owes a row above. The two
-	// walks read different files — propertyArmNames the case expressions
-	// in types.go, graphPropertyTypes the const specs in internal/graph —
-	// so a name in an arm that no constant declares fails here too,
-	// rather than quietly widening the obligation by a spelling nothing
-	// upstream holds.
+	// Every constant propertyCarriers has a row for owes a row above. The
+	// two walks read different files — propertyRowNames the map literal's
+	// keys in types.go, graphPropertyTypes the const specs in
+	// internal/graph — so a name in a table row that no constant declares
+	// fails here too, rather than quietly widening the obligation by a
+	// spelling nothing upstream holds.
 	declared := graphPropertyTypes(t)
 	covered := make(map[string]bool)
 	for _, tt := range representable {
@@ -130,18 +130,18 @@ func TestTypeMapProperty(t *testing.T) {
 		require.False(t, covered[name], "graph.%s has two rows in this table", name)
 		covered[name] = true
 	}
-	arms := propertyArmNames(t)
-	require.NotEmpty(t, arms,
-		"the walk read no case expression off %s, so the obligation below is satisfied by any table at all", typeTableSource)
-	for name := range arms {
+	rows := propertyRowNames(t)
+	require.NotEmpty(t, rows,
+		"the walk read no row key off %s, so the obligation below is satisfied by any table at all", typeTableSource)
+	for name := range rows {
 		require.True(t, covered[name],
-			"typeMap.Property has an arm for graph.%s and no row above names it, so what that arm answers is "+
-				"unswept: add it to the representable table with the Go carrier it returns, or to the "+
+			"propertyCarriers has a row for graph.%s and no row above names it, so what that row answers is "+
+				"unswept: add it to the representable table with the Go carrier it holds, or to the "+
 				"unrepresentable one", name)
 	}
 	for name := range covered {
-		require.True(t, arms[name],
-			"a row above names graph.%s and typeMap.Property has no arm for it, so the row is measuring the "+
+		require.True(t, rows[name],
+			"a row above names graph.%s and propertyCarriers has no row for it, so the row is measuring the "+
 				"fallthrough rather than a decision the table makes", name)
 	}
 
@@ -576,9 +576,9 @@ func schemaWithPayload(pt graph.PropertyType) schema.Schema {
 // about its own graph.TypeList arm — "intercepted by the Kind() guard
 // above; unreachable here" — which rests on one fact upstream: TypeList
 // is spelled "LIST<ANY>", so Kind() reports KindList and the recursion
-// takes it before the switch is entered.
+// takes it before the table is consulted.
 //
-// It is worth pinning because the arm and the recursion answer the same
+// It is worth pinning because the row and the recursion answer the same
 // text today, so respelling the constant would move which of the two
 // runs without moving the result, and the comment would be false with
 // nothing red. The row in TestTypeMapProperty's table cannot catch it:
@@ -586,10 +586,10 @@ func schemaWithPayload(pt graph.PropertyType) schema.Schema {
 func TestTypeMapPropertyListArmIsUnreachable(t *testing.T) {
 	require.Equal(t, graph.KindList, graph.TypeList.Kind(),
 		"graph.TypeList no longer reports KindList, so typeMap.Property's recursion no longer intercepts it "+
-			"and the case arm types.go documents as unreachable is now the one that answers")
+			"and the propertyCarriers row types.go documents as unreachable is now the one that answers")
 	require.Equal(t, graph.TypeAnyPropertyValue, graph.TypeList.Elem(),
 		"a bare LIST's element type is no longer the open property-value union, so the recursion answers "+
-			"through some other arm than the one this table's row was written against")
+			"through some other row than the one this table's row was written against")
 }
 
 // TestTypeMapPropertyAnyRecordArmIsUnreachable is the same claim one
@@ -600,14 +600,14 @@ func TestTypeMapPropertyListArmIsUnreachable(t *testing.T) {
 //
 // The row in TestTypeMapProperty's table asks what a caller gets and
 // both paths give "map[string]any", so it cannot see which one ran. What
-// this pins is the upstream fact the arm's comment rests on — that
-// TypeAnyRecord reports KindRecord and so never reaches the switch — and
-// that the arm still agrees with the guard, so the arrangement stays the
+// this pins is the upstream fact the row's comment rests on — that
+// TypeAnyRecord reports KindRecord and so never reaches the table — and
+// that the row still agrees with the guard, so the arrangement stays the
 // one graph.TypeList already has rather than a stale second answer.
 func TestTypeMapPropertyAnyRecordArmIsUnreachable(t *testing.T) {
 	require.Equal(t, graph.KindRecord, graph.TypeAnyRecord.Kind(),
 		"graph.TypeAnyRecord no longer reports KindRecord, so typeMap.Property's guard no longer intercepts "+
-			"it and the case arm types.go documents as unreachable is now the one that answers")
+			"it and the propertyCarriers row types.go documents as unreachable is now the one that answers")
 	require.Nil(t, graph.TypeAnyRecord.Fields(),
 		"RECORD<ANY> now declares fields, so the guard's TypeAnyRecord branch is no longer the reason it "+
 			"answers map[string]any — it would build a struct from those fields instead")

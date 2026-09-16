@@ -14,7 +14,7 @@ import (
 
 // The fixtures under testdata are synthetic sources, not goldens, and they
 // are on disk rather than in string constants because the API takes a path:
-// PropertyTypes and PropertyArms hand it to parser.ParseFile with a nil
+// PropertyTypes and PropertyRows hand it to parser.ParseFile with a nil
 // source, so the only way to drive them is a file that exists.
 //
 // They carry the `.go.txt` suffix this tree's other codegen fixtures carry,
@@ -106,14 +106,14 @@ func TestPropertyTypes(t *testing.T) {
 	})
 }
 
-// TestPropertyArmsNamesTheSourceItCannotRead covers PropertyArms' only
+// TestPropertyRowsNamesTheSourceItCannotRead covers PropertyRows' only
 // return that is not a walk of a well-formed file. Its collecting half is
-// screened through both backends, whose suites redden when the arm collector
+// screened through both backends, whose suites redden when the row collector
 // is blinded (bd gqlc-ozdkx); this is the half that walk cannot reach,
 // because a backend's type table is a file that is there.
-func TestPropertyArmsNamesTheSourceItCannotRead(t *testing.T) {
+func TestPropertyRowsNamesTheSourceItCannotRead(t *testing.T) {
 	source := fixture("no_such_file.go.txt")
-	_, err := typescan.PropertyArms(source, "Property")
+	_, err := typescan.PropertyRows(source, "propertyCarriers")
 	require.ErrorIs(t, err, fs.ErrNotExist)
 	require.ErrorContains(t, err, source+" does not parse",
 		"the failure does not name the file it was read from, so a caller holding two sources cannot tell which moved")

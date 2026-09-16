@@ -94,15 +94,12 @@ linters:
     # where the other sees. gocyclo increments once per `case`, so a flat
     # constant->text dispatch table scores as if it were deeply nested;
     # gocognit charges a `switch` once regardless of arm count and charges for
-    # nesting depth instead. The pair that shows it are the two
-    # `(typeMap).Property` tables, which gocyclo scores 31 and 33 against
-    # gocognit's 10 and 15 — one `switch` with no nesting at all, ranked by
-    # gocyclo alone among the worst functions in the repository. Satisfying a
-    # gocyclo-only gate there means shattering a readable table, which
-    # `exhaustive` then stops holding to the full constant set; both carry a
-    # `//nolint:gocyclo` naming gocognit as the counter still gating them.
-    # Either counter alone points refactoring effort at the wrong functions;
-    # together they do not.
+    # nesting depth instead. The pair that showed it were the two
+    # `(typeMap).Property` tables while they were switches, which gocyclo
+    # scored 34 and 37 against gocognit's 10 and 15 — one `switch` with no
+    # nesting at all, ranked by gocyclo alone among the worst functions in
+    # the repository. Either counter alone points refactoring effort at the
+    # wrong functions; together they do not.
     #
     # A linter fires STRICTLY ABOVE its min-complexity, so these admit 10 and
     # 25 and refuse 11 and 26.
@@ -110,11 +107,10 @@ linters:
     # gocyclo 10 is a chosen ceiling, not a measured one: on 2026-09-16 (bd
     # gqlc-eus0) every one of the 88 non-test functions above it was refactored
     # in one sweep, so no rung above 10 is a ratchet position any more. The
-    # two `(typeMap).Property` tables are the only functions still above it,
-    # under the `//nolint:gocyclo` each carries with gocognit named as the
-    # counter still gating them; the tests that read those tables by shape
-    # (typescan.PropertyArms and render_queries_test.go's type-table walk)
-    # refuse a split, which is why they are exempted rather than shattered.
+    # two `(typeMap).Property` tables, which had carried a `//nolint:gocyclo`
+    # each because the tests that read them by shape refused a split, became
+    # map literals the same day (bd gqlc-ek1w) with those tests re-pointed at
+    # the literal, so NO function in the tree is exempt from either counter.
     #
     # gocognit 25 is the measured ceiling of the tree after that sweep rather
     # than a chosen one. Measured over BOTH modules at `min-complexity: 1`,

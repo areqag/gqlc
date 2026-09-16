@@ -118,31 +118,21 @@ type typeMap struct{}
 // re-derivations of it. A nullable column of LIST<INT64> is therefore
 // `*[]*int64`: one star from each owner.
 //
-// EXEMPT FROM gocyclo, NOT FROM gocognit. gocyclo counts this 33 because it
-// increments once per `case` and the table has one per property width;
-// gocognit counts it 15, charging the `switch` once and the nesting nothing,
-// and gocognit is the one describing what a reader faces here — a flat table
-// with two container guards in front of it.
-//
-// Splitting it to satisfy the count is not available, and that is a fact
-// about this method rather than a preference. Two guards read it by
+// The per-width rows live in propertyCarriers below and this method is the
+// three container guards and the lookup. Two guards read the table by
 // STRUCTURE, and both red LOUDLY rather than quietly:
 //
-//   - typescan.PropertyArms skips any decl whose `fn.Recv == nil` and takes
-//     the method name as an argument, so a table moved to a plain function is
-//     invisible to it. What that does not do is pass vacuously —
-//     types_test.go asserts `require.NotEmpty(t, arms, ...)` before ranging
+//   - typescan.PropertyRows reads the map literal's keys by name, under the
+//     name it is handed, so a row keyed any other way or a table moved into
+//     a function is invisible to it. What that does not do is pass vacuously —
+//     types_test.go asserts `require.NotEmpty(t, rows, ...)` before ranging
 //     over them, precisely so a walk that read nothing cannot hold the table
 //     to nothing.
-//   - render_queries_test.go's typeTableGoTypes reads this method's RETURN
-//     statements out of the package directory, and returnedGoType REFUSES a
-//     return whose shape it cannot read rather than skipping it — so a return
-//     of the form `t.someHelper(pt)` reds it too.
-//
-// Both were measured failing on 2026-09-10 when exactly that split was
-// attempted.
-//
-//nolint:gocyclo // flat per-width dispatch table; gocognit scores it 15 and still gates it
+//   - render_queries_test.go's typeTableGoTypes reads propertyCarriers' VALUES
+//     and this method's RETURN statements out of the package directory, and
+//     returnedGoType REFUSES a return whose shape it cannot read rather than
+//     skipping it — the lookup below is admitted by name because the values
+//     it indexes were read, and a return of the form `t.someHelper(pt)` reds.
 func (t typeMap) Property(pt graph.PropertyType) (string, bool) {
 	if pt.Kind() == graph.KindList {
 		elemTy, ok := t.Property(pt.Elem())
@@ -169,6 +159,7 @@ func (t typeMap) Property(pt graph.PropertyType) (string, bool) {
 		}
 		return "[]" + elemTy, true
 	}
+	member := func(pt graph.PropertyType) (string, bool) { return containerMemberCarrier(t, pt) }
 	if pt.Kind() == graph.KindRecord {
 		if pt == graph.TypeAnyRecord {
 			// Fields undeclared, so there is no struct to build: the
@@ -177,13 +168,7 @@ func (t typeMap) Property(pt graph.PropertyType) (string, bool) {
 			// to any and LIST<ANY> to []any (spec §3).
 			return "map[string]any", true
 		}
-		return codegen.RecordStructText(pt.Fields(), func(fieldTy graph.PropertyType) (string, bool) {
-			text, ok := t.Property(fieldTy)
-			if !ok || carriesZone(text) {
-				return "", false
-			}
-			return text, true
-		})
+		return codegen.RecordStructText(pt.Fields(), member)
 	}
 	if pt.Kind() == graph.KindUnion {
 		// The carrier is `any` and the admission rule decides (spec §4).
@@ -193,96 +178,100 @@ func (t typeMap) Property(pt graph.PropertyType) (string, bool) {
 		// after the property, which a member has no name of its own inside.
 		// So UNION<TIMESTAMP|STRING> is refused here for the reason
 		// LIST<TIMESTAMP> is, before the family question is ever asked.
-		return codegen.UnionCarrier(pt, func(memberTy graph.PropertyType) (string, bool) {
-			text, ok := t.Property(memberTy)
-			if !ok || carriesZone(text) {
-				return "", false
-			}
-			return text, true
-		}, wireFamily)
-	}
-	switch pt {
-	case graph.TypeString:
-		return "string", true
-	case graph.TypeBool:
-		return "bool", true
-	case graph.TypeInt:
-		return "int", true
-	case graph.TypeInt8:
-		return "int8", true
-	case graph.TypeInt16:
-		return "int16", true
-	case graph.TypeInt32:
-		return "int32", true
-	case graph.TypeInt64:
-		return "int64", true
-	case graph.TypeUint:
-		return "uint", true
-	case graph.TypeUint8:
-		return "uint8", true
-	case graph.TypeUint16:
-		return "uint16", true
-	case graph.TypeUint32:
-		return "uint32", true
-	case graph.TypeUint64:
-		return "uint64", true
-	case graph.TypeFloat, graph.TypeFloat64:
-		return "float64", true
-	case graph.TypeFloat32:
-		return "float32", true
-	case graph.TypeAnyPropertyValue:
-		return "any", true
-	case graph.TypeList:
-		// LIST<ANY> spelled out, so the Kind() guard above intercepts it
-		// and this arm is unreachable. Listed so the exhaustive linter
-		// sees the full constant set, and answering "[]any" keeps it
-		// agreeing with the arm that does the work.
-		return "[]any", true
-	case graph.TypeTimestamp:
-		return "time.Time", true
-	case graph.TypeDate:
-		return "Date", true
-	case graph.TypeLocalTime:
-		return "LocalTime", true
-	case graph.TypeTime:
-		return "Time", true
-	case graph.TypeDuration:
-		return "Duration", true
-	case graph.TypeAnyRecord:
-		// RECORD<ANY> spelled out, so the Kind() guard above intercepts
-		// it and this arm is unreachable. Listed so the exhaustive
-		// linter sees the full constant set, and answering
-		// "map[string]any" keeps it agreeing with the arm that does the
-		// work — the arrangement graph.TypeList already has.
-		return "map[string]any", true
-	case graph.TypeUUID:
-		// agtype's value vocabulary is boolean / integer / float /
-		// string / list / map and nothing else, so there is no shape a
-		// 128-bit identifier comes back from the server as itself in. A
-		// string carrier would round-trip the SPELLING and drop the
-		// declared type, which is the silent widening §5.1 exists to
-		// refuse.
-		//
-		// The refusal NAMES this backend, which it did not until
-		// stage 2 of bd gqlc-eg4b: neo4j-go-v6 carries UUID as
-		// dbtype.UUID, so this is AGE's answer rather than the
-		// declaration's obstacle and an author reading it has somewhere
-		// to go. The name follows from UUID's absence from
-		// uncarriedEverywhere rather than from anything written here.
-		return "", false
-	case graph.TypeBytes,
-		graph.TypeInt128, graph.TypeInt256,
-		graph.TypeUint128, graph.TypeUint256,
-		graph.TypeFloat16, graph.TypeFloat128, graph.TypeFloat256,
-		graph.TypeDecimal:
-		return "", false
+		return codegen.UnionCarrier(pt, member, wireFamily)
 	}
 	// PropertyType is an open string type, so a width internal/graph gains
-	// without a row above arrives here rather than failing to compile.
-	// Rejecting it routes the caller to ErrUnrepresentableWidth naming the
-	// width: generation fails loudly instead of emitting a field no
-	// decoder can fill.
-	return "", false
+	// without a row arrives here rather than failing to compile, and reads
+	// the same empty text a refused row holds. Rejecting it routes the
+	// caller to ErrUnrepresentableWidth naming the width: generation fails
+	// loudly instead of emitting a field no decoder can fill.
+	return propertyCarriers[pt], propertyCarriers[pt] != ""
+}
+
+// containerMemberCarrier is this table's own answer wrapped in the zoned
+// refusal every container position applies: a record field and a union
+// member are positions with no property name of their own for an offset
+// sidecar to ride under, so a width whose carrier keeps a zone is refused
+// there for the reason the list arm refuses it as an element. It is the
+// carrier both container arms of Property pass down.
+//
+// A PLAIN FUNCTION and not a typeMap method, deliberately, for the reason
+// wireFamily below is one: render_queries_test.go's census tells a carrier
+// method by its (string, bool) result shape and reads its returns, and the
+// `text` this passes through is a VALUE the census refuses. As a function
+// it is outside the census, and what it passes through is Property's own
+// answer, already swept under Property.
+func containerMemberCarrier(t typeMap, pt graph.PropertyType) (string, bool) {
+	text, ok := t.Property(pt)
+	if !ok || carriesZone(text) {
+		return "", false
+	}
+	return text, true
+}
+
+// propertyCarriers is the per-width half of the type table: the Go type
+// text each scalar and temporal width emits as, or the empty text for a
+// width this backend refuses. Property consults it after the container
+// guards.
+//
+// A MAP LITERAL KEYED BY `graph.X` SELECTORS, under this name, in this
+// file — the shape typescan.PropertyRows reads and typeTableGoTypes sweeps
+// the values of, as the Property comment says. A refused width has a row
+// rather than an absence for the same reason: a row saying "" is a decision
+// the walk can hold to types_test.go's unrepresentable table, and an
+// absence is a fallthrough nothing can tell from a width nobody thought
+// about.
+var propertyCarriers = map[graph.PropertyType]string{
+	graph.TypeString:           "string",
+	graph.TypeBool:             "bool",
+	graph.TypeInt:              "int",
+	graph.TypeInt8:             "int8",
+	graph.TypeInt16:            "int16",
+	graph.TypeInt32:            "int32",
+	graph.TypeInt64:            "int64",
+	graph.TypeUint:             "uint",
+	graph.TypeUint8:            "uint8",
+	graph.TypeUint16:           "uint16",
+	graph.TypeUint32:           "uint32",
+	graph.TypeUint64:           "uint64",
+	graph.TypeFloat:            "float64",
+	graph.TypeFloat64:          "float64",
+	graph.TypeFloat32:          "float32",
+	graph.TypeAnyPropertyValue: "any",
+	// LIST<ANY> and RECORD<ANY> spelled out. Both are intercepted by the
+	// Kind() guards in Property, so these rows are unreachable; they are
+	// here so the rows walk sees the full constant set, and each answers
+	// what the guard that does the work answers.
+	graph.TypeList:      "[]any",
+	graph.TypeAnyRecord: "map[string]any",
+	graph.TypeTimestamp: "time.Time",
+	graph.TypeDate:      "Date",
+	graph.TypeLocalTime: "LocalTime",
+	graph.TypeTime:      "Time",
+	graph.TypeDuration:  "Duration",
+	// agtype's value vocabulary is boolean / integer / float /
+	// string / list / map and nothing else, so there is no shape a
+	// 128-bit identifier comes back from the server as itself in. A
+	// string carrier would round-trip the SPELLING and drop the
+	// declared type, which is the silent widening §5.1 exists to
+	// refuse.
+	//
+	// The refusal NAMES this backend, which it did not until
+	// stage 2 of bd gqlc-eg4b: neo4j-go-v6 carries UUID as
+	// dbtype.UUID, so this is AGE's answer rather than the
+	// declaration's obstacle and an author reading it has somewhere
+	// to go. The name follows from UUID's absence from
+	// uncarriedEverywhere rather than from anything written here.
+	graph.TypeUUID:     "",
+	graph.TypeBytes:    "",
+	graph.TypeInt128:   "",
+	graph.TypeInt256:   "",
+	graph.TypeUint128:  "",
+	graph.TypeUint256:  "",
+	graph.TypeFloat16:  "",
+	graph.TypeFloat128: "",
+	graph.TypeFloat256: "",
+	graph.TypeDecimal:  "",
 }
 
 // wireFamily folds one carrier text onto the equivalence class of declared
