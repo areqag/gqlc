@@ -564,6 +564,18 @@ func formatLabelList(first, second string, rest ...string) string {
 	return strings.Join(all[:len(all)-1], ", ") + " and " + all[len(all)-1]
 }
 
+// unservedScalar names why a scalar expression column has no decode arm,
+// or "" for the four scalar kinds with an agtype scalar.
+func unservedScalar(ct resolver.ResolvedScalar) string {
+	switch ct.Kind {
+	case resolver.ScalarBool, resolver.ScalarInt, resolver.ScalarFloat, resolver.ScalarString:
+		return ""
+	case resolver.ScalarNull, resolver.ScalarMap:
+		return "projects " + ct.String()
+	}
+	return "projects " + ct.String()
+}
+
 // unservedColumn names why a resolved column type has no decode arm, or
 // "" when it has one. Served are a schema property of any width the type
 // table carries — which is every scalar width with an agtype scalar, a
@@ -584,13 +596,7 @@ func unservedColumn(t resolver.ResolvedType) string {
 		}
 		return ""
 	case resolver.ResolvedScalar:
-		switch ct.Kind {
-		case resolver.ScalarBool, resolver.ScalarInt, resolver.ScalarFloat, resolver.ScalarString:
-			return ""
-		case resolver.ScalarNull, resolver.ScalarMap:
-			return "projects " + ct.String()
-		}
-		return "projects " + ct.String()
+		return unservedScalar(ct)
 	case resolver.ResolvedNode, resolver.ResolvedEdge:
 		return ""
 	case resolver.ResolvedEdgeUnion:
