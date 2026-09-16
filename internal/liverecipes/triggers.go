@@ -65,29 +65,16 @@ func ReadTriggers(root string) (map[string][]string, []string, error) {
 	var complaints []string
 	read := 0
 	for _, entry := range entries {
-		if entry.IsDir() || (!strings.HasSuffix(entry.Name(), ".yml") && !strings.HasSuffix(entry.Name(), ".yaml")) {
+		if !isWorkflowFile(entry) {
 			continue
 		}
-		src, err := os.ReadFile(filepath.Join(dir, entry.Name())) //nolint:gosec // a path read out of the caller's own repo root
+		byRecipe, fileComplaints, err := readWorkflowTriggers(dir, entry.Name())
 		if err != nil {
 			return nil, nil, err
 		}
-		byRecipe, fileComplaints, err := WorkflowTriggers(src)
-		if err != nil {
-			return nil, nil, fmt.Errorf("%s: %w", entry.Name(), err)
-		}
 		read++
-		for _, complaint := range fileComplaints {
-			complaints = append(complaints, entry.Name()+": "+complaint)
-		}
-		for recipe, events := range byRecipe {
-			if reached[recipe] == nil {
-				reached[recipe] = make(map[string]bool)
-			}
-			for _, event := range events {
-				reached[recipe][event] = true
-			}
-		}
+		complaints = append(complaints, fileComplaints...)
+		addReachedEvents(reached, byRecipe)
 	}
 	if read == 0 {
 		complaints = append(complaints, fmt.Sprintf(
@@ -98,6 +85,39 @@ func ReadTriggers(root string) (map[string][]string, []string, error) {
 		triggers[recipe] = slices.Sorted(maps.Keys(events))
 	}
 	return triggers, complaints, nil
+}
+
+func isWorkflowFile(entry os.DirEntry) bool {
+	return !entry.IsDir() && (strings.HasSuffix(entry.Name(), ".yml") || strings.HasSuffix(entry.Name(), ".yaml"))
+}
+
+// readWorkflowTriggers is WorkflowTriggers over one file, with the file's name
+// prefixed onto every complaint and onto a parse error.
+func readWorkflowTriggers(dir, name string) (map[string][]string, []string, error) {
+	src, err := os.ReadFile(filepath.Join(dir, name)) //nolint:gosec // a path read out of the caller's own repo root
+	if err != nil {
+		return nil, nil, err
+	}
+	byRecipe, fileComplaints, err := WorkflowTriggers(src)
+	if err != nil {
+		return nil, nil, fmt.Errorf("%s: %w", name, err)
+	}
+	complaints := make([]string, 0, len(fileComplaints))
+	for _, complaint := range fileComplaints {
+		complaints = append(complaints, name+": "+complaint)
+	}
+	return byRecipe, complaints, nil
+}
+
+func addReachedEvents(reached map[string]map[string]bool, byRecipe map[string][]string) {
+	for recipe, events := range byRecipe {
+		if reached[recipe] == nil {
+			reached[recipe] = make(map[string]bool)
+		}
+		for _, event := range events {
+			reached[recipe][event] = true
+		}
+	}
 }
 
 // WorkflowTriggers is every event that reaches each recipe one workflow's jobs
