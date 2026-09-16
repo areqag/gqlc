@@ -313,39 +313,48 @@ func frontEndWalk(queryParser query.Parser, res *resolver.Resolver, queryDir str
 	var batch []codegen.NamedQuery
 	var diags, warns []string
 	for _, name := range names {
-		path := filepath.Join(queryDir, name)
-		src, err := os.ReadFile(path)
+		fileBatch, fileDiags, fileWarns := frontEndWalkFile(queryParser, fileParser, res, queryDir, name)
+		batch = append(batch, fileBatch...)
+		diags = append(diags, fileDiags...)
+		warns = append(warns, fileWarns...)
+	}
+	return batch, diags, warns
+}
+
+// frontEndWalkFile is frontEndWalk over one query file.
+func frontEndWalkFile(queryParser query.Parser, fileParser queryfile.Parser, res *resolver.Resolver, queryDir, name string) ([]codegen.NamedQuery, []string, []string) {
+	path := filepath.Join(queryDir, name)
+	src, err := os.ReadFile(path)
+	if err != nil {
+		return nil, []string{fmt.Sprintf("%s: %s", path, err)}, nil
+	}
+	annotated, err := fileParser.Parse(bytes.NewReader(src))
+	if err != nil {
+		return nil, []string{fmt.Sprintf("%s: %s", path, err)}, nil
+	}
+	var batch []codegen.NamedQuery
+	var diags, warns []string
+	for _, aq := range annotated {
+		parsed, err := queryParser.Parse(strings.NewReader(aq.Text))
 		if err != nil {
-			diags = append(diags, fmt.Sprintf("%s: %s", path, err))
+			diags = append(diags, fmt.Sprintf("%s: query %s: %s", path, aq.Name, err))
 			continue
 		}
-		annotated, err := fileParser.Parse(bytes.NewReader(src))
+		vq, err := res.Resolve(parsed)
 		if err != nil {
-			diags = append(diags, fmt.Sprintf("%s: %s", path, err))
+			diags = append(diags, fmt.Sprintf("%s: query %s: %s", path, aq.Name, err))
 			continue
 		}
-		for _, aq := range annotated {
-			parsed, err := queryParser.Parse(strings.NewReader(aq.Text))
-			if err != nil {
-				diags = append(diags, fmt.Sprintf("%s: query %s: %s", path, aq.Name, err))
-				continue
-			}
-			vq, err := res.Resolve(parsed)
-			if err != nil {
-				diags = append(diags, fmt.Sprintf("%s: query %s: %s", path, aq.Name, err))
-				continue
-			}
-			for _, w := range vq.Warnings {
-				warns = append(warns, fmt.Sprintf("%s: query %s: %s", path, aq.Name, w.Text))
-			}
-			batch = append(batch, codegen.NamedQuery{
-				Name:        aq.Name,
-				Cardinality: aq.Cardinality,
-				SourceFile:  name,
-				SourceText:  aq.Text,
-				Validated:   vq,
-			})
+		for _, w := range vq.Warnings {
+			warns = append(warns, fmt.Sprintf("%s: query %s: %s", path, aq.Name, w.Text))
 		}
+		batch = append(batch, codegen.NamedQuery{
+			Name:        aq.Name,
+			Cardinality: aq.Cardinality,
+			SourceFile:  name,
+			SourceText:  aq.Text,
+			Validated:   vq,
+		})
 	}
 	return batch, diags, warns
 }

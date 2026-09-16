@@ -129,13 +129,8 @@ func addReachedEvents(reached map[string]map[string]bool, byRecipe map[string][]
 // a recipe reached through a composite action is found here by neither.
 func WorkflowTriggers(src []byte) (map[string][]string, []string, error) {
 	var doc struct {
-		On   yaml.Node `yaml:"on"`
-		Jobs map[string]struct {
-			If    string `yaml:"if"`
-			Steps []struct {
-				Run string `yaml:"run"`
-			} `yaml:"steps"`
-		} `yaml:"jobs"`
+		On   yaml.Node               `yaml:"on"`
+		Jobs map[string]triggeredJob `yaml:"jobs"`
 	}
 	if err := yaml.Unmarshal(src, &doc); err != nil {
 		return nil, nil, err
@@ -145,14 +140,7 @@ func WorkflowTriggers(src []byte) (map[string][]string, []string, error) {
 	byRecipe := make(map[string][]string)
 	for _, id := range slices.Sorted(maps.Keys(doc.Jobs)) {
 		job := doc.Jobs[id]
-		var recipes []string
-		for _, step := range job.Steps {
-			for _, recipe := range JustRecipes(step.Run) {
-				if _, live := ArmTriggers[recipe]; live {
-					recipes = append(recipes, recipe)
-				}
-			}
-		}
+		recipes := job.liveRecipes()
 		// Jobs reaching no live arm are skipped entirely rather than read and
 		// discarded: their conditions and trigger filters are legitimate
 		// shapes this guard has no claim on, and complaining about them would
@@ -175,6 +163,28 @@ func WorkflowTriggers(src []byte) (map[string][]string, []string, error) {
 		}
 	}
 	return byRecipe, complaints, nil
+}
+
+// triggeredJob is the part of one workflow job WorkflowTriggers reads.
+type triggeredJob struct {
+	If    string `yaml:"if"`
+	Steps []struct {
+		Run string `yaml:"run"`
+	} `yaml:"steps"`
+}
+
+// liveRecipes is every recipe with a live arm the job's `run:` steps invoke
+// `just` with, in step order, repeated as often as it is invoked.
+func (job triggeredJob) liveRecipes() []string {
+	var recipes []string
+	for _, step := range job.Steps {
+		for _, recipe := range JustRecipes(step.Run) {
+			if _, live := ArmTriggers[recipe]; live {
+				recipes = append(recipes, recipe)
+			}
+		}
+	}
+	return recipes
 }
 
 // jobEvents is the events an `if:` selects out of the workflow's own triggers.
