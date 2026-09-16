@@ -102,33 +102,35 @@ linters:
     # wrong functions; together they do not.
     #
     # A linter fires STRICTLY ABOVE its min-complexity, so these admit 10 and
-    # 25 and refuse 11 and 26.
+    # 15 and refuse 11 and 16.
     #
-    # gocyclo 10 is a chosen ceiling, not a measured one: on 2026-09-16 (bd
-    # gqlc-eus0) every one of the 88 non-test functions above it was refactored
-    # in one sweep, so no rung above 10 is a ratchet position any more. The
-    # two `(typeMap).Property` tables, which had carried a `//nolint:gocyclo`
-    # each because the tests that read them by shape refused a split, became
-    # map literals the same day (bd gqlc-ek1w) with those tests re-pointed at
-    # the literal, so NO function in the tree is exempt from either counter.
+    # Both are chosen ceilings, not measured ones. On 2026-09-16 every non-test
+    # function above gocyclo 10 was refactored in one sweep (bd gqlc-eus0, 88
+    # functions), the two `(typeMap).Property` tables that had carried a
+    # `//nolint:gocyclo` became map literals with their shape-reading tests
+    # re-pointed at the literal (bd gqlc-ek1w), and every function above
+    # gocognit 15 was refactored in a second sweep (bd gqlc-vzly, 11
+    # functions). NO function in the tree is exempt from either counter.
     #
-    # gocognit 25 is the measured ceiling of the tree after that sweep rather
-    # than a chosen one. Measured over BOTH modules at `min-complexity: 1`,
-    # counting the functions each gate would refuse:
+    # 15 is gocognit's externally referenced rung — SonarQube's default for
+    # the metric it implements — and the one below it was priced and declined:
+    # measured after the sweeps, 78 functions sat between 11 and 15, most at
+    # 11 or 12, which on this tree is one loop holding an error check and a
+    # small switch. Refactoring those manufactures helpers for the counter's
+    # sake rather than removing nesting a reader struggles with. gocyclo at
+    # 10 already caps branch count; what gocognit adds is the charge for depth,
+    # and 15 is where the third and fourth levels of nesting are refused.
+    #
+    # Measured over BOTH modules at `min-complexity: 1`, counting the
+    # functions each gate would refuse:
     #
     #   above  cyclo  cognit
-    #     10      0      87
-    #     15      0      12
-    #     20      0       2
-    #     25      0       0
-    #
-    # WHAT BINDS gocognit NOW, which is the next author's headroom:
-    #
-    #   gocognit 25  internal/resolver/resolve.go undeclaredRelationshipTypeWarnings
-    #   gocognit 21  internal/codegen/neo4j/render_queries.go groupImports
+    #     10      0      78
+    #     12      0      29
+    #     15      0       0
     #
     # Raising either number to land a change is the wrong direction: extract
-    # a helper instead.
+    # a helper, or reduce nesting with an early return, instead.
     #
     # ANY DISTRIBUTION NEEDS `uniq-by-line: false` BELOW, which is why it is set
     # repo-wide. Both linters report at the function's DECLARATION line, so by
@@ -140,7 +142,7 @@ linters:
     gocyclo:
       min-complexity: 10
     gocognit:
-      min-complexity: 25
+      min-complexity: 15
     ireturn:
       # return structs, not interfaces — with two deliberate exceptions: the
       # marker-sealed sums of the query model (Binding, Endpoint, Projection,

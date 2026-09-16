@@ -463,26 +463,14 @@ func (l *listener) typeQuantifier(q gen.IOC_QuantifierContext, refs *[]query.Ref
 			// pushes refs onto a local slice and onto curPart.refs; the
 			// second walk is what threads them into the caller's slice.
 			_ = l.typeOr(src.OC_OrExpression(), refs)
-			for _, p := range params {
-				name := parameterName(p)
-				if name == "" {
-					continue
-				}
-				l.addParameterUse(name, p, query.NewExprUse(sourceType, query.ExprInPredicate))
-			}
+			l.addExprUses(params, sourceType, query.ExprInPredicate)
 		}
 	}
 	if w := filter.OC_Where(); w != nil {
 		savedOuter := l.curPart.refs
 		_, _, params := l.typeExpressionMining(w.OC_Expression())
 		l.curPart.refs = savedOuter // discard filter-body refs (iteration-variable scoping)
-		for _, p := range params {
-			name := parameterName(p)
-			if name == "" {
-				continue
-			}
-			l.addParameterUse(name, p, query.NewExprUse(query.TypeBool{}, query.ExprInPredicate))
-		}
+		l.addExprUses(params, query.TypeBool{}, query.ExprInPredicate)
 	}
 	return query.TypeBool{}
 }
