@@ -293,15 +293,7 @@ func splitTopLevel(s string, sep byte) []string {
 	for i := 0; i < len(s); i++ {
 		switch s[i] {
 		case '`':
-			for i++; i < len(s); i++ {
-				if s[i] == '`' {
-					if i+1 < len(s) && s[i+1] == '`' {
-						i++
-						continue
-					}
-					break
-				}
-			}
+			i = closingBacktick(s, i+1)
 		case '<':
 			depth++
 		case '>':
@@ -314,6 +306,23 @@ func splitTopLevel(s string, sep byte) []string {
 		}
 	}
 	return append(parts, s[start:])
+}
+
+// closingBacktick returns the index of the backtick that closes a quoted span
+// whose first content byte is s[i], skipping doubled backticks, or len(s) when
+// the span never closes.
+func closingBacktick(s string, i int) int {
+	for ; i < len(s); i++ {
+		if s[i] != '`' {
+			continue
+		}
+		if i+1 < len(s) && s[i+1] == '`' {
+			i++
+			continue
+		}
+		break
+	}
+	return i
 }
 
 // The normalised property types: scalars first, then the numeric families,

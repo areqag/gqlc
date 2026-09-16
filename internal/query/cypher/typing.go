@@ -327,15 +327,7 @@ func (l *listener) typeAtom(a gen.IOC_AtomContext, refs *[]query.Ref) query.Type
 	case a.OC_Literal() != nil:
 		return literalOrCollectionType(a.OC_Literal(), l, refs)
 	case a.OC_Parameter() != nil:
-		p := a.OC_Parameter()
-		// A parameter already approved by an earlier miner (a WHERE var.prop=$p
-		// pair caught by mineComparisons) keeps that PropertyUse and is not
-		// re-recorded here. Every other occurrence is queued for an ExprUse
-		// against the enclosing rich expression's result type (Stage 6 §4).
-		if !l.approved[p] {
-			l.approved[p] = true
-			l.exprParams = append(l.exprParams, p)
-		}
+		l.approveExprParameter(a.OC_Parameter())
 		return query.TypeUnknown{}
 	case a.COUNT() != nil:
 		// Stage 10: a count(*) star-atom inside a rich expression (e.g.
@@ -344,32 +336,7 @@ func (l *listener) typeAtom(a gen.IOC_AtomContext, refs *[]query.Ref) query.Type
 		// position. The atom is grammatical-only — no refs to mine.
 		return aggregateResultType(query.AggCount, nil)
 	case a.OC_FunctionInvocation() != nil:
-		fi := a.OC_FunctionInvocation()
-		l.mineFunctionArgs(fi, refs)
-		if t, ok := temporalConstructorType(fullFunctionName(fi)); ok {
-			return t
-		}
-		// Stage 10: an aggregate inside a rich expression types via the same
-		// per-aggregate table classifyFunction uses at RETURN/WITH position, so
-		// the two positions cannot disagree on the same call's result type. A
-		// bare count() atom is handled via a.COUNT() (the star-atom
-		// alternative); every other aggregate is a normal function-invocation
-		// atom whose name matches the closed set.
-		if name, ok := functionName(fi); ok {
-			if fn, ok := aggregateFunc(name); ok {
-				var operand query.Type
-				if args := fi.AllOC_Expression(); len(args) > 0 {
-					operand, _ = l.typeExpression(args[0])
-				}
-				return aggregateResultType(fn, operand)
-			}
-			// gqlc-v5t: same table classifyFunction uses at RETURN/WITH
-			// position, so the two positions cannot disagree on one call.
-			if t, ok := builtinScalarFuncType(name, l.builtinArgTypes(fi)); ok {
-				return t
-			}
-		}
-		return query.TypeUnknown{}
+		return l.typeFunctionInvocationAtom(a.OC_FunctionInvocation(), refs)
 	case a.OC_ParenthesizedExpression() != nil:
 		t, inner := l.typeExpression(a.OC_ParenthesizedExpression().OC_Expression())
 		*refs = append(*refs, inner...)
@@ -384,6 +351,15 @@ func (l *listener) typeAtom(a gen.IOC_AtomContext, refs *[]query.Ref) query.Type
 		// sides so a $param anywhere under the quantifier records an
 		// ExprUse against the enclosing rich expression's result type.
 		return l.typeQuantifier(a.OC_Quantifier(), refs)
+	default:
+		return typeBoundaryAtom(a)
+	}
+}
+
+// typeBoundaryAtom types the atoms whose sub-tree is a boundary the outer
+// typer never descends into, so none of them mines refs.
+func typeBoundaryAtom(a gen.IOC_AtomContext) query.Type {
+	switch {
 	case a.OC_ExistentialSubquery() != nil:
 		// Stage 11 §1.2: EXISTS { ... } returns a boolean. Parameters
 		// inside the subquery are mined at EnterOC_ExistentialSubquery
@@ -409,6 +385,51 @@ func (l *listener) typeAtom(a gen.IOC_AtomContext, refs *[]query.Ref) query.Type
 	default:
 		return query.TypeUnknown{}
 	}
+}
+
+// approveExprParameter queues a parameter atom for an ExprUse.
+//
+// A parameter already approved by an earlier miner (a WHERE var.prop=$p
+// pair caught by mineComparisons) keeps that PropertyUse and is not
+// re-recorded here. Every other occurrence is queued for an ExprUse
+// against the enclosing rich expression's result type (Stage 6 §4).
+func (l *listener) approveExprParameter(p gen.IOC_ParameterContext) {
+	if !l.approved[p] {
+		l.approved[p] = true
+		l.exprParams = append(l.exprParams, p)
+	}
+}
+
+// typeFunctionInvocationAtom mines a function invocation's arguments and
+// types the call: its Stage-7 temporal-constructor type, its Stage-10
+// aggregate-result type, or its builtin scalar type when the name matches,
+// else TypeUnknown.
+func (l *listener) typeFunctionInvocationAtom(fi gen.IOC_FunctionInvocationContext, refs *[]query.Ref) query.Type {
+	l.mineFunctionArgs(fi, refs)
+	if t, ok := temporalConstructorType(fullFunctionName(fi)); ok {
+		return t
+	}
+	// Stage 10: an aggregate inside a rich expression types via the same
+	// per-aggregate table classifyFunction uses at RETURN/WITH position, so
+	// the two positions cannot disagree on the same call's result type. A
+	// bare count() atom is handled via a.COUNT() (the star-atom
+	// alternative); every other aggregate is a normal function-invocation
+	// atom whose name matches the closed set.
+	if name, ok := functionName(fi); ok {
+		if fn, ok := aggregateFunc(name); ok {
+			var operand query.Type
+			if args := fi.AllOC_Expression(); len(args) > 0 {
+				operand, _ = l.typeExpression(args[0])
+			}
+			return aggregateResultType(fn, operand)
+		}
+		// gqlc-v5t: same table classifyFunction uses at RETURN/WITH
+		// position, so the two positions cannot disagree on one call.
+		if t, ok := builtinScalarFuncType(name, l.builtinArgTypes(fi)); ok {
+			return t
+		}
+	}
+	return query.TypeUnknown{}
 }
 
 // typeQuantifier types a Stage-11 quantifier atom (ALL / ANY / NONE /
@@ -825,16 +846,7 @@ func promoteMod(a, b query.Type) query.Type {
 // numeric-or-string-or-null-or-unknown, so the operator-specific fallthrough
 // can attempt the temporal rules.
 func promoteBase(a, b query.Type) (query.Type, bool) {
-	if _, ok := a.(query.TypeUnknown); ok {
-		return query.TypeUnknown{}, true
-	}
-	if _, ok := b.(query.TypeUnknown); ok {
-		return query.TypeUnknown{}, true
-	}
-	if _, ok := a.(query.TypeNull); ok {
-		return query.TypeUnknown{}, true
-	}
-	if _, ok := b.(query.TypeNull); ok {
+	if isNullOrUnknown(a) || isNullOrUnknown(b) {
 		return query.TypeUnknown{}, true
 	}
 	if isNumeric(a) && isNumeric(b) {
@@ -857,6 +869,15 @@ func promoteBase(a, b query.Type) (query.Type, bool) {
 func isNumeric(t query.Type) bool {
 	switch t.(type) {
 	case query.TypeInt, query.TypeFloat:
+		return true
+	default:
+		return false
+	}
+}
+
+func isNullOrUnknown(t query.Type) bool {
+	switch t.(type) {
+	case query.TypeUnknown, query.TypeNull:
 		return true
 	default:
 		return false
@@ -961,33 +982,17 @@ func walkForAggregate(node antlr.Tree) bool {
 			return true
 		}
 	case gen.IOC_FunctionInvocationContext:
-		if name, ok := functionName(n); ok {
-			if _, isAgg := aggregateFunc(name); isAgg {
-				// Row 5 — named-aggregate arm hit. Do not descend into
-				// args; a nested aggregate inside an aggregate call
-				// (count(count(*))) is caught by classifyFunction as an
-				// AggregateProjection at the outer position, so this
-				// probe only needs to answer whether the ExprProjection's
-				// subtree has an aggregate anywhere — one hit is enough.
-				return true
-			}
+		if isAggregateInvocation(n) {
+			// Row 5 — named-aggregate arm hit. Do not descend into
+			// args; a nested aggregate inside an aggregate call
+			// (count(count(*))) is caught by classifyFunction as an
+			// AggregateProjection at the outer position, so this
+			// probe only needs to answer whether the ExprProjection's
+			// subtree has an aggregate anywhere — one hit is enough.
+			return true
 		}
 	case gen.IOC_QuantifierContext:
-		// Row 10 partial: descend into the source list, skip the WHERE
-		// filter body (which mirrors the savedOuter save/restore around
-		// the OC_Where walk in func (l *listener) typeQuantifier).
-		filter := n.OC_FilterExpression()
-		if filter == nil {
-			return false
-		}
-		if idInColl := filter.OC_IdInColl(); idInColl != nil {
-			if src := idInColl.OC_Expression(); src != nil {
-				if walkForAggregate(src) {
-					return true
-				}
-			}
-		}
-		return false
+		return quantifierSourceHasAggregate(n)
 	}
 	for i := 0; i < node.GetChildCount(); i++ {
 		if walkForAggregate(node.GetChild(i)) {
@@ -995,4 +1000,33 @@ func walkForAggregate(node antlr.Tree) bool {
 		}
 	}
 	return false
+}
+
+func isAggregateInvocation(fi gen.IOC_FunctionInvocationContext) bool {
+	name, ok := functionName(fi)
+	if !ok {
+		return false
+	}
+	_, isAgg := aggregateFunc(name)
+	return isAgg
+}
+
+// quantifierSourceHasAggregate is walkForAggregate's Row 10 partial:
+// descend into the source list, skip the WHERE filter body (which mirrors
+// the savedOuter save/restore around the OC_Where walk in
+// func (l *listener) typeQuantifier).
+func quantifierSourceHasAggregate(q gen.IOC_QuantifierContext) bool {
+	filter := q.OC_FilterExpression()
+	if filter == nil {
+		return false
+	}
+	idInColl := filter.OC_IdInColl()
+	if idInColl == nil {
+		return false
+	}
+	src := idInColl.OC_Expression()
+	if src == nil {
+		return false
+	}
+	return walkForAggregate(src)
 }

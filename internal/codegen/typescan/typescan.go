@@ -58,39 +58,62 @@ func PropertyTypes(source string) (map[graph.PropertyType]string, error) {
 		if !ok || gd.Tok != token.CONST {
 			continue
 		}
-		read, skipped := 0, []string(nil)
-		for _, spec := range gd.Specs {
-			vs, ok := spec.(*ast.ValueSpec)
-			if !ok {
-				continue
-			}
-			id, isIdent := vs.Type.(*ast.Ident)
-			if !isIdent || id.Name != "PropertyType" || len(vs.Values) != len(vs.Names) {
-				for _, name := range vs.Names {
-					skipped = append(skipped, name.Name)
-				}
-				continue
-			}
-			for i, name := range vs.Names {
-				lit, isLit := vs.Values[i].(*ast.BasicLit)
-				if !isLit {
-					return nil, fmt.Errorf("%s: constant %s is not a literal", source, name.Name)
-				}
-				value, unquoteErr := strconv.Unquote(lit.Value)
-				if unquoteErr != nil {
-					return nil, fmt.Errorf("%s: constant %s: %w", source, name.Name, unquoteErr)
-				}
-				out[graph.PropertyType(value)] = name.Name
-				read++
-			}
-		}
-		if read != 0 && len(skipped) != 0 {
-			return nil, fmt.Errorf(
-				"%s: a const block declaring PropertyType constants also declares %v, which this walk "+
-					"cannot read a PropertyType value off", source, skipped)
+		if err := propertyTypeConsts(source, gd, out); err != nil {
+			return nil, err
 		}
 	}
 	return out, nil
+}
+
+// propertyTypeConsts reads one const block's PropertyType constants into
+// out.
+func propertyTypeConsts(source string, gd *ast.GenDecl, out map[graph.PropertyType]string) error {
+	read, skipped := 0, []string(nil)
+	for _, spec := range gd.Specs {
+		vs, ok := spec.(*ast.ValueSpec)
+		if !ok {
+			continue
+		}
+		if !propertyTypeSpec(vs) {
+			for _, name := range vs.Names {
+				skipped = append(skipped, name.Name)
+			}
+			continue
+		}
+		if err := readPropertyTypeSpec(source, vs, out); err != nil {
+			return err
+		}
+		read += len(vs.Names)
+	}
+	if read != 0 && len(skipped) != 0 {
+		return fmt.Errorf(
+			"%s: a const block declaring PropertyType constants also declares %v, which this walk "+
+				"cannot read a PropertyType value off", source, skipped)
+	}
+	return nil
+}
+
+// propertyTypeSpec reports whether vs is the form PropertyTypes models:
+// spelled PropertyType, with a value per name.
+func propertyTypeSpec(vs *ast.ValueSpec) bool {
+	id, isIdent := vs.Type.(*ast.Ident)
+	return isIdent && id.Name == "PropertyType" && len(vs.Values) == len(vs.Names)
+}
+
+// readPropertyTypeSpec reads one spec's string literals into out.
+func readPropertyTypeSpec(source string, vs *ast.ValueSpec, out map[graph.PropertyType]string) error {
+	for i, name := range vs.Names {
+		lit, isLit := vs.Values[i].(*ast.BasicLit)
+		if !isLit {
+			return fmt.Errorf("%s: constant %s is not a literal", source, name.Name)
+		}
+		value, unquoteErr := strconv.Unquote(lit.Value)
+		if unquoteErr != nil {
+			return fmt.Errorf("%s: constant %s: %w", source, name.Name, unquoteErr)
+		}
+		out[graph.PropertyType(value)] = name.Name
+	}
+	return nil
 }
 
 // PropertyArms names every graph constant the named method switches on in
@@ -114,21 +137,25 @@ func PropertyArms(source, method string) (map[string]bool, error) {
 			continue
 		}
 		ast.Inspect(fn.Body, func(n ast.Node) bool {
-			clause, isClause := n.(*ast.CaseClause)
-			if !isClause {
-				return true
-			}
-			for _, expr := range clause.List {
-				sel, isSel := expr.(*ast.SelectorExpr)
-				if !isSel {
-					continue
-				}
-				if pkg, isIdent := sel.X.(*ast.Ident); isIdent && pkg.Name == "graph" {
-					out[sel.Sel.Name] = true
-				}
+			if clause, isClause := n.(*ast.CaseClause); isClause {
+				graphArmConsts(clause, out)
 			}
 			return true
 		})
 	}
 	return out, nil
+}
+
+// graphArmConsts records into out every graph-qualified selector one
+// case clause names.
+func graphArmConsts(clause *ast.CaseClause, out map[string]bool) {
+	for _, expr := range clause.List {
+		sel, isSel := expr.(*ast.SelectorExpr)
+		if !isSel {
+			continue
+		}
+		if pkg, isIdent := sel.X.(*ast.Ident); isIdent && pkg.Name == "graph" {
+			out[sel.Sel.Name] = true
+		}
+	}
 }

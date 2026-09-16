@@ -174,21 +174,10 @@ func runTarget(baseDir string, tgt config.Target, backends codegen.Registry, gen
 	queryDir := resolvePath(baseDir, tgt.QueryDir)
 	outDir := resolvePath(baseDir, tgt.Go.Out)
 
-	// Stage 3 — load the schema per the SchemaLang axis (spec §3.2). A GQL graph
-	// type may take its element types from another by reference, resolved against
-	// the directory holding the schema file (ADR 0034) — so the unit read here is
-	// that directory as a catalogue rather than the one configured file, and no
-	// config key had to change to say so.
-	var sch schema.Schema
-	switch tgt.SchemaLang {
-	case config.SchemaLangGQL:
-		var err error
-		sch, err = gql.NewLoader(os.DirFS(filepath.Dir(schemaPath))).Load(filepath.Base(schemaPath))
-		if err != nil {
-			return TargetResult{}, nil, nil, fmt.Errorf("schema %s: %w", schemaPath, err)
-		}
-	default:
-		return TargetResult{}, nil, nil, fmt.Errorf("internal: no pipeline mapping for schema_language %q", string(tgt.SchemaLang))
+	// Stage 3.
+	sch, err := loadTargetSchema(tgt.SchemaLang, schemaPath)
+	if err != nil {
+		return TargetResult{}, nil, nil, err
 	}
 
 	// Stage 4 — load procsig. When the key is absent the zero
@@ -197,7 +186,6 @@ func runTarget(baseDir string, tgt config.Target, backends codegen.Registry, gen
 	// the correct diagnosis (spec §3.1).
 	var reg procsig.Registry
 	if tgt.ProcsigPath != "" {
-		var err error
 		reg, err = procsig.Load(resolvePath(baseDir, tgt.ProcsigPath))
 		if err != nil {
 			return TargetResult{}, nil, nil, err
@@ -206,12 +194,9 @@ func runTarget(baseDir string, tgt config.Target, backends codegen.Registry, gen
 
 	// Stage 5 — construct the front end once, outside the query loop.
 	// The same registry feeds both the parser and the resolver.
-	var queryParser query.Parser
-	switch tgt.QueryLang {
-	case config.QueryLangOpenCypher:
-		queryParser = cypher.New(cypher.WithRegistry(reg))
-	default:
-		return TargetResult{}, nil, nil, fmt.Errorf("internal: no pipeline mapping for query_language %q", string(tgt.QueryLang))
+	queryParser, err := newTargetQueryParser(tgt.QueryLang, reg)
+	if err != nil {
+		return TargetResult{}, nil, nil, err
 	}
 	res := resolver.New(sch, resolver.WithRegistry(reg))
 
@@ -246,6 +231,34 @@ func runTarget(baseDir string, tgt config.Target, backends codegen.Registry, gen
 	}
 
 	return TargetResult{Files: files, OutDir: outDir}, nil, warns, nil
+}
+
+// loadTargetSchema is stage 3 — load the schema per the SchemaLang axis (spec
+// §3.2). A GQL graph type may take its element types from another by reference,
+// resolved against the directory holding the schema file (ADR 0034) — so the
+// unit read here is that directory as a catalogue rather than the one
+// configured file, and no config key had to change to say so.
+func loadTargetSchema(lang config.SchemaLang, schemaPath string) (schema.Schema, error) {
+	switch lang {
+	case config.SchemaLangGQL:
+		sch, err := gql.NewLoader(os.DirFS(filepath.Dir(schemaPath))).Load(filepath.Base(schemaPath))
+		if err != nil {
+			return schema.Schema{}, fmt.Errorf("schema %s: %w", schemaPath, err)
+		}
+		return sch, nil
+	default:
+		return schema.Schema{}, fmt.Errorf("internal: no pipeline mapping for schema_language %q", string(lang))
+	}
+}
+
+// newTargetQueryParser constructs the query front end for the QueryLang axis.
+func newTargetQueryParser(lang config.QueryLang, reg procsig.Registry) (query.Parser, error) {
+	switch lang {
+	case config.QueryLangOpenCypher:
+		return cypher.New(cypher.WithRegistry(reg)), nil
+	default:
+		return nil, fmt.Errorf("internal: no pipeline mapping for query_language %q", string(lang))
+	}
 }
 
 // resolvePath joins a config-file-relative path against the config

@@ -60,12 +60,16 @@ import (
 // alone would silently widen the claim to cover a function nobody examined.
 var auditedSurface = []string{
 	"PropertyUseWitness",
+	"boundEdgePropertyType",
+	"boundNodePropertyType",
 	"callProjectionType",
 	"certifiedProjectionType",
+	"edgeRefProjectionType",
 	"projectionType",
 	"refProjectionType",
 	"resolveType",
 	"selectionProjectionType",
+	"unboundRefProjectionType",
 	"unionNodeProperty",
 	"unionProperty",
 }
@@ -88,11 +92,11 @@ var nonConstructingReturns = map[string]string{
 
 	// element is assigned a ResolvedEdge or a ResolvedEdgeUnion composite
 	// literal on both sides of the branch above it, with no third path.
-	"refProjectionType: return element, nil": "element is assigned a composite literal on every path reaching this return",
+	"edgeRefProjectionType: return element, nil": "element is assigned a composite literal on every path reaching this return",
 
 	// The inductive step, and the only arm that returns a value originating
 	// outside this function. Pinned by the carry-writer row below.
-	"refProjectionType: return rt, nil": "rt is a previous Part's Column.Type, propagated through the carry maps; see the carry-writer row",
+	"unboundRefProjectionType: return rt, nil": "rt is a previous Part's Column.Type, propagated through the carry maps; see the carry-writer row",
 
 	// base is resolveType's return, and both arms are reached only after the
 	// err beside it tested nil. resolveType is itself in the audited surface,

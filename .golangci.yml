@@ -104,51 +104,47 @@ linters:
     # Either counter alone points refactoring effort at the wrong functions;
     # together they do not.
     #
-    # A linter fires STRICTLY ABOVE its min-complexity, so these admit 24 and
-    # 34 and refuse 25 and 35. Both are the measured ceiling of the tree rather
-    # than a comfort margin — nothing sits between either number and the worst
-    # function under it. Raising one to land a change is the wrong direction:
-    # extract a helper instead.
+    # A linter fires STRICTLY ABOVE its min-complexity, so these admit 10 and
+    # 25 and refuse 11 and 26.
     #
-    # Measured 2026-09-11 for bd gqlc-5sfv, over BOTH modules at
-    # `min-complexity: 1`, counting the functions each gate would refuse:
+    # gocyclo 10 is a chosen ceiling, not a measured one: on 2026-09-16 (bd
+    # gqlc-eus0) every one of the 88 non-test functions above it was refactored
+    # in one sweep, so no rung above 10 is a ratchet position any more. The
+    # two `(typeMap).Property` tables are the only functions still above it,
+    # under the `//nolint:gocyclo` each carries with gocognit named as the
+    # counter still gating them; the tests that read those tables by shape
+    # (typescan.PropertyArms and render_queries_test.go's type-table walk)
+    # refuse a split, which is why they are exempted rather than shattered.
+    #
+    # gocognit 25 is the measured ceiling of the tree after that sweep rather
+    # than a chosen one. Measured over BOTH modules at `min-complexity: 1`,
+    # counting the functions each gate would refuse:
     #
     #   above  cyclo  cognit
-    #     10      78     140
-    #     15      23      61
-    #     20       8      31
-    #     24       0      17
-    #     30       0      10
-    #     35       0       0
+    #     10      0      87
+    #     15      0      12
+    #     20      0       2
+    #     25      0       0
     #
-    # So gocyclo moved 25 -> 24 for free. gocognit's 35 was held by exactly one
-    # function — `internal/tools/ghorphan/main.go plan`, on the nose — so the
-    # rung below it cost one refactor rather than none: plan now delegates the
-    # per-orphan decision to planOrphan and the corpus index to
-    # indexCreationTimes, and scores 15, which let gocognit take 35 -> 34.
+    # WHAT BINDS gocognit NOW, which is the next author's headroom:
     #
-    # WHAT BINDS EACH NUMBER NOW, which is the next author's headroom:
+    #   gocognit 25  internal/resolver/resolve.go undeclaredRelationshipTypeWarnings
+    #   gocognit 21  internal/codegen/neo4j/render_queries.go groupImports
     #
-    #   gocyclo 24  internal/tools/bdguard/main.go check
-    #               internal/resolver/resolve.go resolvedTypeEqual
-    #   gocognit 34 internal/tools/modscope/main.go run
+    # Raising either number to land a change is the wrong direction: extract
+    # a helper instead.
     #
-    # So neither number has another free notch: gocyclo needs two functions
-    # refactored to reach 23, gocognit one to reach 33. The next rung worth
-    # taking as a lane of its own is 20/30, priced in the table above at 8 + 10
-    # functions.
-    #
-    # THAT TABLE NEEDS `uniq-by-line: false` BELOW, which is why it is set
+    # ANY DISTRIBUTION NEEDS `uniq-by-line: false` BELOW, which is why it is set
     # repo-wide. Both linters report at the function's DECLARATION line, so by
     # construction they collide on every function they both fire on, and the
-    # default keeps one of each pair: the same run read 219 gocyclo findings
-    # with the default on against 774 with it off, and put gocyclo's maximum at
-    # 9 rather than 24. A distribution measured through that default is short
-    # by two thirds and describes a tree three rungs tighter than this one.
+    # default keeps one of each pair: measured 2026-09-11, one run read 219
+    # gocyclo findings with the default on against 774 with it off, and put
+    # gocyclo's maximum at 9 rather than 24. A distribution measured through
+    # that default is short by two thirds.
     gocyclo:
-      min-complexity: 24
+      min-complexity: 10
     gocognit:
-      min-complexity: 34
+      min-complexity: 25
     ireturn:
       # return structs, not interfaces — with two deliberate exceptions: the
       # marker-sealed sums of the query model (Binding, Endpoint, Projection,

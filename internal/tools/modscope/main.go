@@ -53,75 +53,101 @@ const usage = "usage: modscope [-root DIR] modules|dirs MODULE|tags MODULE|decla
 // -root and a flag package misparse would surface as a usage error at the far
 // end of a shell pipeline rather than here.
 func run(ctx context.Context, args []string, out io.Writer) error {
-	root := "."
-	for len(args) > 0 && strings.HasPrefix(args[0], "-") {
-		name, value, inline := strings.Cut(args[0], "=")
-		if name != "-root" && name != "--root" {
-			return fmt.Errorf("unknown flag %q\n%s", args[0], usage)
-		}
-		if !inline {
-			if len(args) < 2 {
-				return fmt.Errorf("-root needs a directory\n%s", usage)
-			}
-			value, args = args[1], args[1:]
-		}
-		root, args = value, args[1:]
+	root, args, err := rootFlag(args)
+	if err != nil {
+		return err
 	}
 	if len(args) == 0 {
 		return errors.New(usage)
 	}
 	switch args[0] {
 	case "modules":
-		if len(args) != 1 {
-			return errors.New(usage)
-		}
-		mods, err := discover(root)
-		if err != nil {
-			return err
-		}
-		return writeLines(out, mods)
+		return modulesCommand(root, args, out)
 	case "dirs":
-		if len(args) != 2 {
-			return errors.New(usage)
-		}
-		dirs, err := moduleGoDirs(ctx, root, args[1])
-		if err != nil {
-			return err
-		}
-		return writeLines(out, dirs)
+		return dirsCommand(ctx, root, args, out)
 	case "tags":
-		if len(args) != 2 {
-			return errors.New(usage)
-		}
-		lines, err := distList(ctx)
-		if err != nil {
-			return err
-		}
-		platforms, err := platformTerms(lines)
-		if err != nil {
-			return err
-		}
-		declared, err := declaredTags(root)
-		if err != nil {
-			return err
-		}
-		tags, err := moduleTags(ctx, root, args[1], platforms, declared)
-		if err != nil {
-			return err
-		}
-		return writeLines(out, tags)
+		return tagsCommand(ctx, root, args, out)
 	case "declared":
-		if len(args) != 1 {
-			return errors.New(usage)
-		}
-		declared, err := declaredTags(root)
-		if err != nil {
-			return err
-		}
-		return writeLines(out, sortedTerms(declared))
+		return declaredCommand(root, args, out)
 	default:
 		return fmt.Errorf("unknown command %q\n%s", args[0], usage)
 	}
+}
+
+// rootFlag consumes every leading `-root DIR` / `-root=DIR` and returns the
+// root alongside the arguments that follow the flags.
+func rootFlag(args []string) (string, []string, error) {
+	root := "."
+	for len(args) > 0 && strings.HasPrefix(args[0], "-") {
+		name, value, inline := strings.Cut(args[0], "=")
+		if name != "-root" && name != "--root" {
+			return "", nil, fmt.Errorf("unknown flag %q\n%s", args[0], usage)
+		}
+		if !inline {
+			if len(args) < 2 {
+				return "", nil, fmt.Errorf("-root needs a directory\n%s", usage)
+			}
+			value, args = args[1], args[1:]
+		}
+		root, args = value, args[1:]
+	}
+	return root, args, nil
+}
+
+func modulesCommand(root string, args []string, out io.Writer) error {
+	if len(args) != 1 {
+		return errors.New(usage)
+	}
+	mods, err := discover(root)
+	if err != nil {
+		return err
+	}
+	return writeLines(out, mods)
+}
+
+func dirsCommand(ctx context.Context, root string, args []string, out io.Writer) error {
+	if len(args) != 2 {
+		return errors.New(usage)
+	}
+	dirs, err := moduleGoDirs(ctx, root, args[1])
+	if err != nil {
+		return err
+	}
+	return writeLines(out, dirs)
+}
+
+func tagsCommand(ctx context.Context, root string, args []string, out io.Writer) error {
+	if len(args) != 2 {
+		return errors.New(usage)
+	}
+	lines, err := distList(ctx)
+	if err != nil {
+		return err
+	}
+	platforms, err := platformTerms(lines)
+	if err != nil {
+		return err
+	}
+	declared, err := declaredTags(root)
+	if err != nil {
+		return err
+	}
+	tags, err := moduleTags(ctx, root, args[1], platforms, declared)
+	if err != nil {
+		return err
+	}
+	return writeLines(out, tags)
+}
+
+func declaredCommand(root string, args []string, out io.Writer) error {
+	if len(args) != 1 {
+		return errors.New(usage)
+	}
+	declared, err := declaredTags(root)
+	if err != nil {
+		return err
+	}
+	return writeLines(out, sortedTerms(declared))
 }
 
 // sortedTerms flattens a term set into a sorted slice, so every printed set and
@@ -335,16 +361,7 @@ func goDirs(module, moduleRoot string, nested []string) ([]string, error) {
 			return err
 		}
 		if d.IsDir() {
-			if path == moduleRoot {
-				return nil
-			}
-			if skipName(d.Name()) {
-				return filepath.SkipDir
-			}
-			if _, ok := prune[filepath.Clean(path)]; ok {
-				return filepath.SkipDir
-			}
-			return nil
+			return goDirsPrune(moduleRoot, path, d.Name(), prune)
 		}
 		if strings.HasSuffix(d.Name(), ".go") && !skipName(d.Name()) {
 			seen[filepath.Dir(path)] = struct{}{}
@@ -369,6 +386,22 @@ func goDirs(module, moduleRoot string, nested []string) ([]string, error) {
 			"is checked in has a directory holding a Go file", module, moduleRoot)
 	}
 	return dirs, nil
+}
+
+// goDirsPrune decides whether the walk descends into one directory: the
+// module root always, a name go list would skip never, and a nested module
+// never.
+func goDirsPrune(moduleRoot, path, name string, prune map[string]struct{}) error {
+	if path == moduleRoot {
+		return nil
+	}
+	if skipName(name) {
+		return filepath.SkipDir
+	}
+	if _, ok := prune[filepath.Clean(path)]; ok {
+		return filepath.SkipDir
+	}
+	return nil
 }
 
 // --- the tag derivation ------------------------------------------------------
@@ -811,31 +844,48 @@ func moduleTags(ctx context.Context, root, module string, platforms, declared ma
 	}
 	seen := make(map[string]struct{})
 	for _, dir := range dirs {
-		entries, err := os.ReadDir(dir)
+		tags, err := dirTags(dir, platforms, declared)
 		if err != nil {
-			return nil, fmt.Errorf("listing %s: %w", dir, err)
+			return nil, err
 		}
-		for _, entry := range entries {
-			name := entry.Name()
-			if entry.IsDir() || !strings.HasSuffix(name, ".go") || skipName(name) {
-				continue
-			}
-			path := filepath.Join(dir, name)
-			line, err := fileConstraint(path)
-			if err != nil {
-				return nil, err
-			}
-			if line == "" {
-				continue
-			}
-			tags, err := constraintTags(line, platforms, declared, path)
-			if err != nil {
-				return nil, err
-			}
-			for _, t := range tags {
-				seen[t] = struct{}{}
-			}
+		for _, t := range tags {
+			seen[t] = struct{}{}
 		}
 	}
 	return sortedTerms(seen), nil
+}
+
+// dirTags is every custom build tag the Go files directly in one directory
+// constrain themselves by, in file order and with repeats.
+func dirTags(dir string, platforms, declared map[string]struct{}) ([]string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, fmt.Errorf("listing %s: %w", dir, err)
+	}
+	var tags []string
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || !strings.HasSuffix(name, ".go") || skipName(name) {
+			continue
+		}
+		fileTags, err := goFileTags(filepath.Join(dir, name), platforms, declared)
+		if err != nil {
+			return nil, err
+		}
+		tags = append(tags, fileTags...)
+	}
+	return tags, nil
+}
+
+// goFileTags is the custom build tags one Go file's constraint line asks for,
+// or nothing for a file that carries no constraint.
+func goFileTags(path string, platforms, declared map[string]struct{}) ([]string, error) {
+	line, err := fileConstraint(path)
+	if err != nil {
+		return nil, err
+	}
+	if line == "" {
+		return nil, nil
+	}
+	return constraintTags(line, platforms, declared, path)
 }

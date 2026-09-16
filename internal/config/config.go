@@ -363,9 +363,14 @@ func decodeV1(body []byte, src string) (Config, error) {
 		return Config{}, fmt.Errorf("config: %s: %w", src, err)
 	}
 
+	return decodeTargets(w.Graph, src)
+}
+
+// decodeTargets runs stages 8 and 9 over the strictly decoded entries.
+func decodeTargets(graph []wireTarget, src string) (Config, error) {
 	// Stage 8.
-	cfg := Config{Targets: make([]Target, 0, len(w.Graph))}
-	for i, wt := range w.Graph {
+	cfg := Config{Targets: make([]Target, 0, len(graph))}
+	for i, wt := range graph {
 		target, err := decodeTarget(wt)
 		if err != nil {
 			return Config{}, fmt.Errorf("config: %s: graph[%d]: %w", src, i, err)
@@ -500,58 +505,15 @@ func checkEntryCount(graphSeq *yaml.Node, decoded int) error {
 // normalises the wire struct into a Target. Errors are unprefixed; the
 // caller adds the graph[i] prefix (§4.1).
 func decodeTarget(w wireTarget) (Target, error) {
-	// A nil pointer means the key was omitted (or explicitly null —
-	// treated the same). Enum messages carry the vocabulary so a missing
-	// axis is fixable without opening the spec.
-	switch {
-	case w.SchemaPath == nil:
-		return Target{}, missingField("schema", "")
-	case w.SchemaLang == nil:
-		return Target{}, missingField("schema_language", joinValues(SchemaLangValues()))
-	case w.QueryDir == nil:
-		return Target{}, missingField("queries", "")
-	case w.QueryLang == nil:
-		return Target{}, missingField("query_language", joinValues(QueryLangValues()))
-	case w.Gen == nil:
-		return Target{}, missingField("gen", "")
-	case w.Gen.Go == nil:
-		return Target{}, missingField("gen.go", "")
+	if err := missingTargetKey(w); err != nil {
+		return Target{}, err
 	}
 	g := w.Gen.Go
-	switch {
-	case g.Package == nil:
-		return Target{}, missingField("gen.go.package", "")
-	case g.Out == nil:
-		return Target{}, missingField("gen.go.out", "")
-	case g.Driver == nil:
-		return Target{}, missingField("gen.go.driver", joinValues(DriverValues()))
+	if err := missingGoGenKey(g); err != nil {
+		return Target{}, err
 	}
-
-	for _, f := range []struct{ key, val string }{
-		{key: "schema", val: *w.SchemaPath},
-		{key: "queries", val: *w.QueryDir},
-	} {
-		if f.val == "" {
-			return Target{}, fmt.Errorf("field %q must not be empty", f.key)
-		}
-	}
-	// procsig is optional, but an explicit empty string is ambiguous
-	// (a placeholder? a deliberate "none"?) — reject, don't guess.
-	if w.ProcsigPath != nil && *w.ProcsigPath == "" {
-		return Target{}, fmt.Errorf("field %q is empty; omit the key when no procsig file is used", "procsig")
-	}
-	for _, f := range []struct{ key, val string }{
-		{key: "gen.go.package", val: *g.Package},
-		{key: "gen.go.out", val: *g.Out},
-	} {
-		if f.val == "" {
-			return Target{}, fmt.Errorf("field %q must not be empty", f.key)
-		}
-	}
-	// token.IsIdentifier also rejects Go keywords, which are valid
-	// identifiers lexically but unusable as package names.
-	if !token.IsIdentifier(*g.Package) {
-		return Target{}, fmt.Errorf("package %q is not a valid Go identifier", *g.Package)
+	if err := checkTargetValues(w, g); err != nil {
+		return Target{}, err
 	}
 
 	t := Target{
@@ -565,6 +527,76 @@ func decodeTarget(w wireTarget) (Target, error) {
 		t.ProcsigPath = *w.ProcsigPath
 	}
 	return t, nil
+}
+
+// missingTargetKey reports the first required entry key, in §2.2 wire
+// order, that the entry omits — down to gen.go, so a nil return means
+// w.Gen.Go is safe to read.
+func missingTargetKey(w wireTarget) error {
+	// A nil pointer means the key was omitted (or explicitly null —
+	// treated the same). Enum messages carry the vocabulary so a missing
+	// axis is fixable without opening the spec.
+	switch {
+	case w.SchemaPath == nil:
+		return missingField("schema", "")
+	case w.SchemaLang == nil:
+		return missingField("schema_language", joinValues(SchemaLangValues()))
+	case w.QueryDir == nil:
+		return missingField("queries", "")
+	case w.QueryLang == nil:
+		return missingField("query_language", joinValues(QueryLangValues()))
+	case w.Gen == nil:
+		return missingField("gen", "")
+	case w.Gen.Go == nil:
+		return missingField("gen.go", "")
+	}
+	return nil
+}
+
+// missingGoGenKey reports the first required gen.go key, in §2.3 wire
+// order, that the entry omits.
+func missingGoGenKey(g *wireGo) error {
+	switch {
+	case g.Package == nil:
+		return missingField("gen.go.package", "")
+	case g.Out == nil:
+		return missingField("gen.go.out", "")
+	case g.Driver == nil:
+		return missingField("gen.go.driver", joinValues(DriverValues()))
+	}
+	return nil
+}
+
+// checkTargetValues runs the value checks in wire order, once every
+// required key is known to be present.
+func checkTargetValues(w wireTarget, g *wireGo) error {
+	for _, f := range []struct{ key, val string }{
+		{key: "schema", val: *w.SchemaPath},
+		{key: "queries", val: *w.QueryDir},
+	} {
+		if f.val == "" {
+			return fmt.Errorf("field %q must not be empty", f.key)
+		}
+	}
+	// procsig is optional, but an explicit empty string is ambiguous
+	// (a placeholder? a deliberate "none"?) — reject, don't guess.
+	if w.ProcsigPath != nil && *w.ProcsigPath == "" {
+		return fmt.Errorf("field %q is empty; omit the key when no procsig file is used", "procsig")
+	}
+	for _, f := range []struct{ key, val string }{
+		{key: "gen.go.package", val: *g.Package},
+		{key: "gen.go.out", val: *g.Out},
+	} {
+		if f.val == "" {
+			return fmt.Errorf("field %q must not be empty", f.key)
+		}
+	}
+	// token.IsIdentifier also rejects Go keywords, which are valid
+	// identifiers lexically but unusable as package names.
+	if !token.IsIdentifier(*g.Package) {
+		return fmt.Errorf("package %q is not a valid Go identifier", *g.Package)
+	}
+	return nil
 }
 
 // missingField renders the §4.5 missing-key message; values is the enum

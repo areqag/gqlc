@@ -22,34 +22,7 @@ import (
 func renderRecordHelpers(pkg string, encodings []graph.PropertyType, uses map[graph.PropertyType]carrierUse, target driverTarget) []byte {
 	var body strings.Builder
 	for _, pt := range encodings {
-		use := uses[pt]
-		alias := codegen.RecordAliasName(pt)
-		suffix := codegen.RecordHelperSuffix(pt)
-		// Every encoding in the set is reached from some position, so
-		// every alias is named by some signature below and none is a
-		// declaration nothing uses.
-		text, ok := codegen.RecordStructText(pt.Fields(), target.types().Property)
-		if !ok {
-			// Unreachable: a record some field of which this backend
-			// cannot carry is refused at preparation, before any
-			// emission walk builds the encoding set. Skipping rather
-			// than panicking, because a helper the batch never calls is
-			// the only thing lost and generation has no channel here to
-			// report a refusal through.
-			continue
-		}
-		fmt.Fprintf(&body, "\n// %s carries %s.\ntype %s = %s\n", alias, pt, alias, text)
-
-		// The plain encode helper stands under all three encode
-		// directions: the Ptr wrapper nil-checks and calls it, and the
-		// List wrapper calls it per element.
-		if use.encode || use.encodePtr || use.list {
-			writeRecordEncode(&body, pt, suffix, alias, target.types())
-		}
-		writeRecordWrappers(&body, pt, suffix, alias, use)
-		if use.decode {
-			writeRecordDecode(&body, pt, suffix, alias, target.types())
-		}
+		writeRecordEncodingHelpers(&body, pt, uses[pt], target)
 	}
 
 	needFmt, needTime, needDbtype := recordFileImports(encodings, uses, target.types())
@@ -60,23 +33,61 @@ func renderRecordHelpers(pkg string, encodings []graph.PropertyType, uses map[gr
 	b.WriteString(pkg)
 	b.WriteString("\n\n")
 	if needFmt || needTime || needDbtype {
-		b.WriteString("import (\n")
-		if needFmt {
-			b.WriteString("\t\"fmt\"\n")
-		}
-		if needTime {
-			b.WriteString("\t\"time\"\n")
-		}
-		if (needFmt || needTime) && needDbtype {
-			b.WriteString("\n")
-		}
-		if needDbtype {
-			b.WriteString("\t\"" + target.dbtypeImport + "\"\n")
-		}
-		b.WriteString(")\n")
+		writeRecordFileImports(&b, needFmt, needTime, needDbtype, target)
 	}
 	b.WriteString(body.String())
 	return []byte(b.String())
+}
+
+// writeRecordEncodingHelpers emits one declared record encoding's
+// carrier alias and whichever of its conversion helpers use calls.
+func writeRecordEncodingHelpers(body *strings.Builder, pt graph.PropertyType, use carrierUse, target driverTarget) {
+	alias := codegen.RecordAliasName(pt)
+	suffix := codegen.RecordHelperSuffix(pt)
+	// Every encoding in the set is reached from some position, so
+	// every alias is named by some signature below and none is a
+	// declaration nothing uses.
+	text, ok := codegen.RecordStructText(pt.Fields(), target.types().Property)
+	if !ok {
+		// Unreachable: a record some field of which this backend
+		// cannot carry is refused at preparation, before any
+		// emission walk builds the encoding set. Skipping rather
+		// than panicking, because a helper the batch never calls is
+		// the only thing lost and generation has no channel here to
+		// report a refusal through.
+		return
+	}
+	fmt.Fprintf(body, "\n// %s carries %s.\ntype %s = %s\n", alias, pt, alias, text)
+
+	// The plain encode helper stands under all three encode
+	// directions: the Ptr wrapper nil-checks and calls it, and the
+	// List wrapper calls it per element.
+	if use.encode || use.encodePtr || use.list {
+		writeRecordEncode(body, pt, suffix, alias, target.types())
+	}
+	writeRecordWrappers(body, pt, suffix, alias, use)
+	if use.decode {
+		writeRecordDecode(body, pt, suffix, alias, target.types())
+	}
+}
+
+// writeRecordFileImports writes record_neo4j.go's import block, for a
+// file that needs at least one import.
+func writeRecordFileImports(b *strings.Builder, needFmt, needTime, needDbtype bool, target driverTarget) {
+	b.WriteString("import (\n")
+	if needFmt {
+		b.WriteString("\t\"fmt\"\n")
+	}
+	if needTime {
+		b.WriteString("\t\"time\"\n")
+	}
+	if (needFmt || needTime) && needDbtype {
+		b.WriteString("\n")
+	}
+	if needDbtype {
+		b.WriteString("\t\"" + target.dbtypeImport + "\"\n")
+	}
+	b.WriteString(")\n")
 }
 
 // writeRecordWrappers emits whichever of the three encode wrappers the

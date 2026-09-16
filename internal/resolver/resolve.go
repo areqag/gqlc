@@ -380,21 +380,7 @@ func fillGroupingKeys(cols []Column, part query.Part) {
 	if part.ReturnsAll {
 		return
 	}
-	hasAggregate := false
-	for _, item := range part.Returns {
-		switch v := item.Value.(type) {
-		case query.AggregateProjection:
-			hasAggregate = true
-		case query.ExprProjection:
-			if v.ContainsAggregate() {
-				hasAggregate = true
-			}
-		}
-		if hasAggregate {
-			break
-		}
-	}
-	if !hasAggregate {
+	if !returnsContainAggregate(part.Returns) {
 		return
 	}
 	// Grouping applies. Non-aggregate items are keys; ExprProjection is a
@@ -410,6 +396,20 @@ func fillGroupingKeys(cols []Column, part query.Part) {
 		}
 		// AggregateProjection stays false (the aggregate itself is not a key).
 	}
+}
+
+func returnsContainAggregate(returns []query.ReturnItem) bool {
+	for _, item := range returns {
+		switch v := item.Value.(type) {
+		case query.AggregateProjection:
+			return true
+		case query.ExprProjection:
+			if v.ContainsAggregate() {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // unionColumnTypeArm is the phrase that separates ErrUnionColumnMismatch's type
@@ -557,41 +557,32 @@ func resolvedTypeEqual(a, b ResolvedType) bool {
 		return a == nil && b == nil
 	}
 	switch aa := a.(type) {
-	case ResolvedNode:
-		bb, ok := b.(ResolvedNode)
-		return ok && aa == bb
-	case ResolvedProperty:
-		bb, ok := b.(ResolvedProperty)
-		return ok && aa == bb
-	case ResolvedEdge:
-		bb, ok := b.(ResolvedEdge)
-		return ok && aa == bb
 	case ResolvedEdgeUnion:
-		bb, ok := b.(ResolvedEdgeUnion)
-		if !ok || aa.Nullable != bb.Nullable || len(aa.EdgeKeys) != len(bb.EdgeKeys) {
-			return false
-		}
-		for i := range aa.EdgeKeys {
-			if aa.EdgeKeys[i] != bb.EdgeKeys[i] {
-				return false
-			}
-		}
-		return true
-	case ResolvedScalar:
-		bb, ok := b.(ResolvedScalar)
-		return ok && aa == bb
-	case ResolvedTemporal:
-		bb, ok := b.(ResolvedTemporal)
-		return ok && aa == bb
+		return resolvedEdgeUnionEqual(aa, b)
 	case ResolvedList:
 		bb, ok := b.(ResolvedList)
 		return ok && aa.Nullable == bb.Nullable && resolvedTypeEqual(aa.Element, bb.Element)
-	case ResolvedUnknown:
-		_, ok := b.(ResolvedUnknown)
-		return ok
+	case ResolvedNode, ResolvedProperty, ResolvedEdge, ResolvedScalar, ResolvedTemporal, ResolvedUnknown:
+		// Every variant in this arm is a comparable struct, so interface
+		// equality is field-wise equality when b has the same dynamic type
+		// and false, not a panic, when it has another.
+		return a == b
 	default:
 		return false
 	}
+}
+
+func resolvedEdgeUnionEqual(aa ResolvedEdgeUnion, b ResolvedType) bool {
+	bb, ok := b.(ResolvedEdgeUnion)
+	if !ok || aa.Nullable != bb.Nullable || len(aa.EdgeKeys) != len(bb.EdgeKeys) {
+		return false
+	}
+	for i := range aa.EdgeKeys {
+		if aa.EdgeKeys[i] != bb.EdgeKeys[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // computeDistinct folds Part.Distinct across every branch × Part with the
@@ -626,43 +617,57 @@ func unifyParameterUsesAcrossBranches(params []query.Parameter, tables [][]partS
 	}
 	out := make([]ResolvedParameter, 0, len(params))
 	for _, p := range params {
-		var unified ResolvedType
-		seen := false
-		for _, u := range p.Uses {
-			b := u.Branch()
-			if b < 0 || b >= len(tables) {
-				// Defensive: the parser attributes to a valid query-level
-				// branch index by construction — same posture as the Part
-				// guard in witnessAcrossScopes.
-				return nil, fmt.Errorf("%w: Use Branch index %d out of range for query with %d branches", ErrOutOfR0Scope, b, len(tables))
-			}
-			sc, err := selectPartScope(u, tables[b])
-			if err != nil {
-				return nil, err
-			}
-			ws, err := sc.WitnessUse(u, s)
-			if err != nil {
-				return nil, err
-			}
-			for _, w := range ws {
-				if !seen {
-					unified = w
-					seen = true
-					continue
-				}
-				merged, ok := unify(unified, w)
-				if !ok {
-					return nil, fmt.Errorf("%w: parameter %q: %s vs %s", ErrParameterTypeConflict, p.Name, describeColumnType(unified), describeColumnType(w))
-				}
-				unified = merged
-			}
+		rp, err := unifyParameterUses(p, tables, s)
+		if err != nil {
+			return nil, err
 		}
-		if !seen {
-			unified = ResolvedUnknown{}
-		}
-		out = append(out, ResolvedParameter{Name: p.Name, Type: unified})
+		out = append(out, rp)
 	}
 	return out, nil
+}
+
+// unifyParameterUses folds one parameter's witnesses through the lattice.
+// ResolvedUnknown is the type of a parameter no Use witnessed.
+func unifyParameterUses(p query.Parameter, tables [][]partScope, s schema.Schema) (ResolvedParameter, error) {
+	var unified ResolvedType
+	seen := false
+	for _, u := range p.Uses {
+		ws, err := parameterUseWitnesses(u, tables, s)
+		if err != nil {
+			return ResolvedParameter{}, err
+		}
+		for _, w := range ws {
+			if !seen {
+				unified = w
+				seen = true
+				continue
+			}
+			merged, ok := unify(unified, w)
+			if !ok {
+				return ResolvedParameter{}, fmt.Errorf("%w: parameter %q: %s vs %s", ErrParameterTypeConflict, p.Name, describeColumnType(unified), describeColumnType(w))
+			}
+			unified = merged
+		}
+	}
+	if !seen {
+		unified = ResolvedUnknown{}
+	}
+	return ResolvedParameter{Name: p.Name, Type: unified}, nil
+}
+
+func parameterUseWitnesses(u query.Use, tables [][]partScope, s schema.Schema) ([]ResolvedType, error) {
+	b := u.Branch()
+	if b < 0 || b >= len(tables) {
+		// Defensive: the parser attributes to a valid query-level
+		// branch index by construction — same posture as the Part
+		// guard in witnessAcrossScopes.
+		return nil, fmt.Errorf("%w: Use Branch index %d out of range for query with %d branches", ErrOutOfR0Scope, b, len(tables))
+	}
+	sc, err := selectPartScope(u, tables[b])
+	if err != nil {
+		return nil, err
+	}
+	return sc.WitnessUse(u, s)
 }
 
 // selectPartScope resolves which partScope the unifier should dispatch to
@@ -1162,75 +1167,7 @@ func describeTriedEdges(e query.EdgeBinding, srcs, tgts []graph.LabelSetKey) str
 func endpointNarrowing(edges []query.EdgeBinding, t nodeTable, s schema.Schema, written map[string]struct{}, demoted map[int]bool) map[string]map[graph.LabelSetKey]struct{} {
 	acc := make(map[string]map[graph.LabelSetKey]struct{}, len(t.cands))
 	for _, e := range edges {
-		if !witnessesItsEndpoints(e, written, demoted) {
-			continue
-		}
-		srcEnd, srcOK := endpointLabels(e.Source(), t, s)
-		tgtEnd, tgtOK := endpointLabels(e.Target(), t, s)
-		if !srcOK || !tgtOK {
-			// Reached from Phase B, whose whole business is bindings not yet
-			// typed: the edge holding the pending binding has an end
-			// endpointLabels cannot read, and every edge deferred by Phase A2
-			// does too until the binding at its far end commits. Contributing
-			// nothing is the widening direction. From NarrowPluralEndpoints this
-			// arm is dead — CloseEdges either resolved both ends or returned
-			// ErrUnknownLabel before calling it.
-			continue
-		}
-		// covering(), because everything below reads `cands` as a complete
-		// statement about this edge's two ends. Either end failing it means
-		// edgeProbes' box could be missing a declaration a matching row really
-		// has, so the contribution would omit a type those rows carry.
-		srcs, srcCovers := srcEnd.covering()
-		tgts, tgtCovers := tgtEnd.covering()
-		if !srcCovers || !tgtCovers {
-			continue
-		}
-		cands := edgeCandidates(e, srcs, tgts, s)
-		if len(cands) == 0 {
-			// The schema declares no edge of this label between these ends. From
-			// NarrowPluralEndpoints closeEdge has already refused that (§4.6 case
-			// A); from Phase B it can be an edge Phase A2 deferred whose ends
-			// have only just become readable, so its close is still ahead of it
-			// and will fail there. Contributing nothing is the widening
-			// direction, and it leaves the refusal to closeEdge, which is the
-			// one that can name the keys it tried.
-			continue
-		}
-		// Per-edge contributions first, so a binding sitting at BOTH ends of
-		// one edge — a self-loop written on a single variable — unions its two
-		// ends rather than intersecting them.
-		//
-		// No input can tell that union from an intersection, and that is a
-		// property of the shape rather than a gap in the corpus: a variable
-		// reaches both ends only by naming both, and endpointLabels then hands
-		// both ends the same key slice, which makes a candidate's two readings
-		// the same predicate and both ends' contributions the same set —
-		// TestEndpointContributionUnionsTheTwoReadings' equal-slices row states
-		// that directly. The union is written because it is the rule, not
-		// because an input needs it.
-		perEdge := make(map[string]map[graph.LabelSetKey]struct{}, 2)
-		for _, side := range [2]struct {
-			ep  query.Endpoint
-			end patternEnd
-		}{{e.Source(), patternLeft}, {e.Target(), patternRight}} {
-			ve, isVar := side.ep.(query.VarEndpoint)
-			if !isVar {
-				continue
-			}
-			v := ve.Variable()
-			if _, plural := t.cands[v]; !plural {
-				continue
-			}
-			contrib := endpointContribution(cands, srcs, tgts, side.end, e.Directed())
-			if prev, seen := perEdge[v]; seen {
-				for k := range prev {
-					contrib[k] = struct{}{}
-				}
-			}
-			perEdge[v] = contrib
-		}
-		for v, contrib := range perEdge {
+		for v, contrib := range narrowingContributions(e, t, s, written, demoted) {
 			if prev, seen := acc[v]; seen {
 				acc[v] = intersect(prev, contrib)
 				continue
@@ -1241,36 +1178,100 @@ func endpointNarrowing(edges []query.EdgeBinding, t nodeTable, s schema.Schema, 
 	return acc
 }
 
+// narrowingContributions is one edge's contribution to endpointNarrowing, keyed
+// by the plural binding at each end it reads; nil when the edge fails a gate.
+//
+// Per-edge contributions first, so a binding sitting at BOTH ends of
+// one edge — a self-loop written on a single variable — unions its two
+// ends rather than intersecting them.
+//
+// No input can tell that union from an intersection, and that is a
+// property of the shape rather than a gap in the corpus: a variable
+// reaches both ends only by naming both, and endpointLabels then hands
+// both ends the same key slice, which makes a candidate's two readings
+// the same predicate and both ends' contributions the same set —
+// TestEndpointContributionUnionsTheTwoReadings' equal-slices row states
+// that directly. The union is written because it is the rule, not
+// because an input needs it.
+func narrowingContributions(e query.EdgeBinding, t nodeTable, s schema.Schema, written map[string]struct{}, demoted map[int]bool) map[string]map[graph.LabelSetKey]struct{} {
+	cands, srcs, tgts, ok := narrowableEdgeCandidates(e, t, s, written, demoted)
+	if !ok {
+		return nil
+	}
+	perEdge := make(map[string]map[graph.LabelSetKey]struct{}, 2)
+	for _, side := range [2]struct {
+		ep  query.Endpoint
+		end patternEnd
+	}{{e.Source(), patternLeft}, {e.Target(), patternRight}} {
+		ve, isVar := side.ep.(query.VarEndpoint)
+		if !isVar {
+			continue
+		}
+		v := ve.Variable()
+		if _, plural := t.cands[v]; !plural {
+			continue
+		}
+		contrib := endpointContribution(cands, srcs, tgts, side.end, e.Directed())
+		if prev, seen := perEdge[v]; seen {
+			for k := range prev {
+				contrib[k] = struct{}{}
+			}
+		}
+		perEdge[v] = contrib
+	}
+	return perEdge
+}
+
+// narrowableEdgeCandidates runs endpointNarrowing's gates on one edge and, when
+// all pass, returns the closed candidate set with the two ends it was read
+// against. ok is false when the edge contributes nothing.
+func narrowableEdgeCandidates(e query.EdgeBinding, t nodeTable, s schema.Schema, written map[string]struct{}, demoted map[int]bool) (cands []schema.EdgeKey, srcs, tgts []graph.LabelSetKey, ok bool) {
+	if !witnessesItsEndpoints(e, written, demoted) {
+		return nil, nil, nil, false
+	}
+	srcEnd, srcOK := endpointLabels(e.Source(), t, s)
+	tgtEnd, tgtOK := endpointLabels(e.Target(), t, s)
+	if !srcOK || !tgtOK {
+		// Reached from Phase B, whose whole business is bindings not yet
+		// typed: the edge holding the pending binding has an end
+		// endpointLabels cannot read, and every edge deferred by Phase A2
+		// does too until the binding at its far end commits. Contributing
+		// nothing is the widening direction. From NarrowPluralEndpoints this
+		// arm is dead — CloseEdges either resolved both ends or returned
+		// ErrUnknownLabel before calling it.
+		return nil, nil, nil, false
+	}
+	// covering(), because everything below reads `cands` as a complete
+	// statement about this edge's two ends. Either end failing it means
+	// edgeProbes' box could be missing a declaration a matching row really
+	// has, so the contribution would omit a type those rows carry.
+	srcs, srcCovers := srcEnd.covering()
+	tgts, tgtCovers := tgtEnd.covering()
+	if !srcCovers || !tgtCovers {
+		return nil, nil, nil, false
+	}
+	cands = edgeCandidates(e, srcs, tgts, s)
+	if len(cands) == 0 {
+		// The schema declares no edge of this label between these ends. From
+		// NarrowPluralEndpoints closeEdge has already refused that (§4.6 case
+		// A); from Phase B it can be an edge Phase A2 deferred whose ends
+		// have only just become readable, so its close is still ahead of it
+		// and will fail there. Contributing nothing is the widening
+		// direction, and it leaves the refusal to closeEdge, which is the
+		// one that can name the keys it tried.
+		return nil, nil, nil, false
+	}
+	return cands, srcs, tgts, true
+}
+
 // inferUnlabelled is Phase B. `written` is the caller's scope.writtenBindings
 // set, which candidateTypes needs to ask witnessesItsEndpoints of each edge it
 // folds in — see there.
 func inferUnlabelled(pending []query.NodeBinding, edges []query.EdgeBinding, s schema.Schema, t nodeTable, callTypes map[string]callBindingSlot, written map[string]struct{}, demoted map[int]bool, carried map[string]struct{}) error {
-	resolved, nodeCands := t.resolved, t.cands
 	if len(pending) == 0 {
 		return nil
 	}
-	// R5 §4.2.3 N1 posture: CARRY WINS. An unlabelled binding whose
-	// variable was already typed by the carry seed at Phase A1 is a JOIN
-	// on the same node identity (openCypher semantics for `WITH a MATCH
-	// (a)-[...]->…`), not a redeclaration; skip Phase B inference for it
-	// entirely so the carry-seeded type stays authoritative. Doing this
-	// here also erases the order-dependence Linus observed in the raw
-	// per-Part inference (before this guard, whether an unlabelled `(a)`
-	// after `WITH a` got reinferred depended on whether the enclosing
-	// edge's other endpoint had already committed).
-	if len(resolved) > 0 || len(nodeCands) > 0 {
-		filtered := pending[:0]
-		for _, n := range pending {
-			if _, carried := resolved[n.Variable()]; carried {
-				continue
-			}
-			if _, carriedCands := nodeCands[n.Variable()]; carriedCands {
-				continue
-			}
-			filtered = append(filtered, n)
-		}
-		pending = filtered
-	}
+	pending = dropCarriedUnlabelled(pending, t)
 	for len(pending) > 0 {
 		next, committed, err := commitUnlabelledRound(pending, edges, s, t, callTypes, written, nil, demoted, carried)
 		if err != nil {
@@ -1317,6 +1318,36 @@ func inferUnlabelled(pending []query.NodeBinding, edges []query.EdgeBinding, s s
 	return nil
 }
 
+// dropCarriedUnlabelled filters `pending` in place, keeping the bindings Phase B
+// still has to infer.
+//
+// R5 §4.2.3 N1 posture: CARRY WINS. An unlabelled binding whose
+// variable was already typed by the carry seed at Phase A1 is a JOIN
+// on the same node identity (openCypher semantics for `WITH a MATCH
+// (a)-[...]->…`), not a redeclaration; skip Phase B inference for it
+// entirely so the carry-seeded type stays authoritative. Doing this
+// here also erases the order-dependence Linus observed in the raw
+// per-Part inference (before this guard, whether an unlabelled `(a)`
+// after `WITH a` got reinferred depended on whether the enclosing
+// edge's other endpoint had already committed).
+func dropCarriedUnlabelled(pending []query.NodeBinding, t nodeTable) []query.NodeBinding {
+	resolved, nodeCands := t.resolved, t.cands
+	if len(resolved) == 0 && len(nodeCands) == 0 {
+		return pending
+	}
+	filtered := pending[:0]
+	for _, n := range pending {
+		if _, carried := resolved[n.Variable()]; carried {
+			continue
+		}
+		if _, carriedCands := nodeCands[n.Variable()]; carriedCands {
+			continue
+		}
+		filtered = append(filtered, n)
+	}
+	return filtered
+}
+
 // commitUnlabelledRound is one pass of Phase B's fixed point: every pending
 // binding whose candidate set is a singleton commits, and the rest come back as
 // `next` for the following round. `narrowing` is endpointNarrowing's answer, or
@@ -1326,7 +1357,6 @@ func inferUnlabelled(pending []query.NodeBinding, edges []query.EdgeBinding, s s
 // drift from master's on any question other than which types a far end can
 // still have.
 func commitUnlabelledRound(pending []query.NodeBinding, edges []query.EdgeBinding, s schema.Schema, t nodeTable, callTypes map[string]callBindingSlot, written map[string]struct{}, narrowing map[string]map[graph.LabelSetKey]struct{}, demoted map[int]bool, carried map[string]struct{}) ([]query.NodeBinding, int, error) {
-	resolved := t.resolved
 	var next []query.NodeBinding
 	committed := 0
 	for _, n := range pending {
@@ -1334,60 +1364,10 @@ func commitUnlabelledRound(pending []query.NodeBinding, edges []query.EdgeBindin
 		cands, covered, widened := inf.commit()
 		switch len(cands) {
 		case 0:
-			// Two ways to reach an empty set, true of different queries, so the
-			// reason is pinned and not only the sentinel. An OPTIONAL hop DOES
-			// reach a compatible node type, and telling its author otherwise
-			// sends them looking for a schema gap that is not there.
-			if inf.folded > 0 && inf.unconstrained() {
-				return nil, 0, fmt.Errorf("%w: cannot infer type of unlabelled binding %q — every edge reaching it is an OPTIONAL match, which drops no row, so its type is unconstrained", ErrUnknownLabel, n.Variable())
-			}
-			return nil, 0, fmt.Errorf("%w: cannot infer type of unlabelled binding %q — no edge in the pattern reaches a compatible schema node type", ErrUnknownLabel, n.Variable())
+			return nil, 0, refuseEmptyUnlabelledCandidates(n, inf)
 		case 1:
-			var only graph.LabelSetKey
-			for k := range cands {
-				only = k
-			}
-			// R7 §4.1.2.1 addendum: an inferred unlabelled node whose
-			// name collides with a carried CALL YIELD scalar fails at
-			// commit — the shape-posture check the labelled arm runs
-			// at Phase A1 fires here for the unlabelled path.
-			if _, seenCall := callTypes[n.Variable()]; seenCall {
-				return nil, 0, fmt.Errorf("%w: variable %q carried as CALL YIELD scalar, re-bound as %s", ErrPartBindingTypeConflict, n.Variable(), only)
-			}
-			resolved[n.Variable()] = s.Nodes[only]
-			// A Phase B commitment covers only when every edge it read from
-			// could enumerate its far end AND was evidence about every
-			// returned row — see candidateTypes for both conjuncts. Marking
-			// it lets a later binding infer through this one and lets the
-			// narrowing learn from it; NOT marking it is what keeps a far end
-			// that could not enumerate itself, or an edge no returned row has,
-			// from laundering a subset into a VarEndpoint the narrowing trusts.
-			//
-			// This is also how the property becomes transitive without a
-			// fixed point: a variable committed uncovered is in `resolved` and
-			// absent from resolvedCovers, so the next binding to read it
-			// through endpointLabels gets covers=false and commits uncovered
-			// in turn.
-			//
-			// That transitivity is the absence, not the delete. The delete keeps
-			// the lane from outliving the entry it qualifies: an unlabelled
-			// pending binding is never already in the lane — the lane's other
-			// writers are BindNode, which never sees an unlabelled binding,
-			// and the narrowing's collapse, which cannot run before Phase B;
-			// newScope does not seed the lane from the carry; and a name leaves
-			// `pending` on the iteration it commits, so there is no second
-			// commit to overwrite.
-			// TestPhaseBsUncoveredSingularCommitClearsAResolvedCoversMark pins
-			// it from a seeded table, which is the only place the state is
-			// constructible. Reaching the else needs an uncovered
-			// commitment, and the shape that gives one is this transitivity
-			// itself: a far end already in `resolved` and absent from the lane,
-			// on a MANDATORY hop — an OPTIONAL-only one leaves the binding
-			// unconstrained and never commits.
-			if covered {
-				t.resolvedCovers[n.Variable()] = struct{}{}
-			} else {
-				delete(t.resolvedCovers, n.Variable())
+			if err := commitSingularUnlabelled(n, cands, covered, t, s, callTypes); err != nil {
+				return nil, 0, err
 			}
 			committed++
 		default:
@@ -1395,45 +1375,115 @@ func commitUnlabelledRound(pending []query.NodeBinding, edges []query.EdgeBindin
 				next = append(next, n)
 				continue
 			}
-			// The attainable set holds two or more types, so there is no one
-			// type to put in `resolved`. It goes into the plural lane, which is
-			// where the resolver already keeps "the types a row can have" — and
-			// the projection path reads that lane through unionNodeProperty,
-			// which resolves a property every candidate declares and names the
-			// candidate that lacks one otherwise.
-			//
-			// Deferring instead would reach ErrAmbiguousBinding, and that is a
-			// refusal on `RETURN c.name` as much as on `RETURN c.smallOnly` —
-			// see the two fixtures named at commit().
-			//
-			// Same CALL YIELD collision as the singular arm above; the shape
-			// posture is about re-binding the name, not about how many types
-			// the re-binding names.
-			if _, seenCall := callTypes[n.Variable()]; seenCall {
-				return nil, 0, fmt.Errorf("%w: variable %q carried as CALL YIELD scalar, re-bound as %s", ErrPartBindingTypeConflict, n.Variable(), joinCandidates(cands))
+			if err := commitPluralUnlabelled(n, cands, t, s, callTypes); err != nil {
+				return nil, 0, err
 			}
-			t.cands[n.Variable()] = nodeTypesForKeys(cands, s)
-			// A name entering the plural lane is BindNodeCands' transition, so it
-			// owes BindNodeCands' delete: resolvedCovers qualifies `resolved`
-			// alone, and this arm writes no `resolved` entry for a mark to
-			// qualify.
-			//
-			// The delete keeps the lane from outliving the entry it qualifies:
-			// every writer of the lane writes `resolved` in the same breath,
-			// and a name already in `resolved` leaves `pending` before the
-			// first round, so no mark can be here.
-			// TestPhaseBsPluralCommitLeavesNoResolvedCoversMark pins it from a
-			// seeded table, which is the only place the state is constructible.
-			delete(t.resolvedCovers, n.Variable())
-			// Unconditionally true, and it is the only value this writer can
-			// write: every `n` in Phase B's pending set is an unlabelled node
-			// binding, since resolveBranch routes a binding here exactly when
-			// len(bb.Labels()) == 0.
-			t.pluralByInference[n.Variable()] = true
 			committed++
 		}
 	}
 	return next, committed, nil
+}
+
+// refuseEmptyUnlabelledCandidates is the refusal for a binding no edge types.
+// Two ways to reach an empty set, true of different queries, so the
+// reason is pinned and not only the sentinel. An OPTIONAL hop DOES
+// reach a compatible node type, and telling its author otherwise
+// sends them looking for a schema gap that is not there.
+func refuseEmptyUnlabelledCandidates(n query.NodeBinding, inf unlabelledInference) error {
+	if inf.folded > 0 && inf.unconstrained() {
+		return fmt.Errorf("%w: cannot infer type of unlabelled binding %q — every edge reaching it is an OPTIONAL match, which drops no row, so its type is unconstrained", ErrUnknownLabel, n.Variable())
+	}
+	return fmt.Errorf("%w: cannot infer type of unlabelled binding %q — no edge in the pattern reaches a compatible schema node type", ErrUnknownLabel, n.Variable())
+}
+
+// commitSingularUnlabelled writes a singleton candidate set into `resolved`.
+func commitSingularUnlabelled(n query.NodeBinding, cands map[graph.LabelSetKey]struct{}, covered bool, t nodeTable, s schema.Schema, callTypes map[string]callBindingSlot) error {
+	var only graph.LabelSetKey
+	for k := range cands {
+		only = k
+	}
+	// R7 §4.1.2.1 addendum: an inferred unlabelled node whose
+	// name collides with a carried CALL YIELD scalar fails at
+	// commit — the shape-posture check the labelled arm runs
+	// at Phase A1 fires here for the unlabelled path.
+	if _, seenCall := callTypes[n.Variable()]; seenCall {
+		return fmt.Errorf("%w: variable %q carried as CALL YIELD scalar, re-bound as %s", ErrPartBindingTypeConflict, n.Variable(), only)
+	}
+	t.resolved[n.Variable()] = s.Nodes[only]
+	// A Phase B commitment covers only when every edge it read from
+	// could enumerate its far end AND was evidence about every
+	// returned row — see candidateTypes for both conjuncts. Marking
+	// it lets a later binding infer through this one and lets the
+	// narrowing learn from it; NOT marking it is what keeps a far end
+	// that could not enumerate itself, or an edge no returned row has,
+	// from laundering a subset into a VarEndpoint the narrowing trusts.
+	//
+	// This is also how the property becomes transitive without a
+	// fixed point: a variable committed uncovered is in `resolved` and
+	// absent from resolvedCovers, so the next binding to read it
+	// through endpointLabels gets covers=false and commits uncovered
+	// in turn.
+	//
+	// That transitivity is the absence, not the delete. The delete keeps
+	// the lane from outliving the entry it qualifies: an unlabelled
+	// pending binding is never already in the lane — the lane's other
+	// writers are BindNode, which never sees an unlabelled binding,
+	// and the narrowing's collapse, which cannot run before Phase B;
+	// newScope does not seed the lane from the carry; and a name leaves
+	// `pending` on the iteration it commits, so there is no second
+	// commit to overwrite.
+	// TestPhaseBsUncoveredSingularCommitClearsAResolvedCoversMark pins
+	// it from a seeded table, which is the only place the state is
+	// constructible. Reaching the else needs an uncovered
+	// commitment, and the shape that gives one is this transitivity
+	// itself: a far end already in `resolved` and absent from the lane,
+	// on a MANDATORY hop — an OPTIONAL-only one leaves the binding
+	// unconstrained and never commits.
+	if covered {
+		t.resolvedCovers[n.Variable()] = struct{}{}
+	} else {
+		delete(t.resolvedCovers, n.Variable())
+	}
+	return nil
+}
+
+// commitPluralUnlabelled writes a widened candidate set into the plural lane.
+// The attainable set holds two or more types, so there is no one
+// type to put in `resolved`. It goes into the plural lane, which is
+// where the resolver already keeps "the types a row can have" — and
+// the projection path reads that lane through unionNodeProperty,
+// which resolves a property every candidate declares and names the
+// candidate that lacks one otherwise.
+//
+// Deferring instead would reach ErrAmbiguousBinding, and that is a
+// refusal on `RETURN c.name` as much as on `RETURN c.smallOnly` —
+// see the two fixtures named at commit().
+func commitPluralUnlabelled(n query.NodeBinding, cands map[graph.LabelSetKey]struct{}, t nodeTable, s schema.Schema, callTypes map[string]callBindingSlot) error {
+	// Same CALL YIELD collision as the singular arm; the shape
+	// posture is about re-binding the name, not about how many types
+	// the re-binding names.
+	if _, seenCall := callTypes[n.Variable()]; seenCall {
+		return fmt.Errorf("%w: variable %q carried as CALL YIELD scalar, re-bound as %s", ErrPartBindingTypeConflict, n.Variable(), joinCandidates(cands))
+	}
+	t.cands[n.Variable()] = nodeTypesForKeys(cands, s)
+	// A name entering the plural lane is BindNodeCands' transition, so it
+	// owes BindNodeCands' delete: resolvedCovers qualifies `resolved`
+	// alone, and this arm writes no `resolved` entry for a mark to
+	// qualify.
+	//
+	// The delete keeps the lane from outliving the entry it qualifies:
+	// every writer of the lane writes `resolved` in the same breath,
+	// and a name already in `resolved` leaves `pending` before the
+	// first round, so no mark can be here.
+	// TestPhaseBsPluralCommitLeavesNoResolvedCoversMark pins it from a
+	// seeded table, which is the only place the state is constructible.
+	delete(t.resolvedCovers, n.Variable())
+	// Unconditionally true, and it is the only value this writer can
+	// write: every `n` in Phase B's pending set is an unlabelled node
+	// binding, since resolveBranch routes a binding here exactly when
+	// len(bb.Labels()) == 0.
+	t.pluralByInference[n.Variable()] = true
+	return nil
 }
 
 // nodeTypesForKeys resolves a key set into the candidate slice nodeCands holds,
@@ -1776,19 +1826,12 @@ func foldEdgeContribution(acc map[graph.LabelSetKey]struct{}, e query.EdgeBindin
 	for _, L := range e.Labels() {
 		labelKey := graph.LabelSet{L}.Key()
 		for _, forward := range orientations {
+			nAtSource := (side == "source") == forward
 			for k := range s.Edges {
 				if k.KeyLabels != labelKey {
 					continue
 				}
-				nAtSource := (side == "source") == forward
-				for _, otherKey := range otherKeys {
-					if nAtSource && k.Target == otherKey {
-						cand[k.Source] = struct{}{}
-					}
-					if !nAtSource && k.Source == otherKey {
-						cand[k.Target] = struct{}{}
-					}
-				}
+				contributeEdgeDeclarationEnd(cand, k, nAtSource, otherKeys)
 			}
 		}
 	}
@@ -1796,6 +1839,19 @@ func foldEdgeContribution(acc map[graph.LabelSetKey]struct{}, e query.EdgeBindin
 		return cand
 	}
 	return intersect(acc, cand)
+}
+
+// contributeEdgeDeclarationEnd adds declaration k's end at this binding's side
+// to cand when its far end is one of otherKeys.
+func contributeEdgeDeclarationEnd(cand map[graph.LabelSetKey]struct{}, k schema.EdgeKey, nAtSource bool, otherKeys []graph.LabelSetKey) {
+	for _, otherKey := range otherKeys {
+		if nAtSource && k.Target == otherKey {
+			cand[k.Source] = struct{}{}
+		}
+		if !nAtSource && k.Source == otherKey {
+			cand[k.Target] = struct{}{}
+		}
+	}
 }
 
 func touchingSide(e query.EdgeBinding, v string) (string, bool) {
@@ -1941,37 +1997,16 @@ func formatNodeTypeKeys(nts []schema.NodeType) string {
 // (TypeNode, TypeEdge, TypePath) already take that reading. Pinned by
 // TestResolveTypeDefaultPanicsOnAForeignType.
 func resolveType(t query.Type) (ResolvedType, error) {
+	if k, ok := scalarKindOfType(t); ok {
+		return ResolvedScalar{Kind: k}, nil
+	}
+	if k, ok := temporalKindOfType(t); ok {
+		return ResolvedTemporal{Kind: k}, nil
+	}
 	switch tt := t.(type) {
-	case query.TypeBool:
-		return ResolvedScalar{Kind: ScalarBool}, nil
-	case query.TypeInt:
-		return ResolvedScalar{Kind: ScalarInt}, nil
-	case query.TypeFloat:
-		return ResolvedScalar{Kind: ScalarFloat}, nil
-	case query.TypeString:
-		return ResolvedScalar{Kind: ScalarString}, nil
-	case query.TypeNull:
-		return ResolvedScalar{Kind: ScalarNull}, nil
-	case query.TypeMap:
-		return ResolvedScalar{Kind: ScalarMap}, nil
-	case query.TypeDate:
-		return ResolvedTemporal{Kind: TemporalDate}, nil
-	case query.TypeTime:
-		return ResolvedTemporal{Kind: TemporalTime}, nil
-	case query.TypeLocalTime:
-		return ResolvedTemporal{Kind: TemporalLocalTime}, nil
-	case query.TypeDateTime:
-		return ResolvedTemporal{Kind: TemporalDateTime}, nil
-	case query.TypeLocalDateTime:
-		return ResolvedTemporal{Kind: TemporalLocalDateTime}, nil
-	case query.TypeDuration:
-		return ResolvedTemporal{Kind: TemporalDuration}, nil
 	case query.TypeList:
-		switch tt.Element().(type) {
-		case query.TypeNode:
-			return nil, fmt.Errorf("%w: list-of-nodes projection", ErrOutOfR0Scope)
-		case query.TypeEdge:
-			return nil, fmt.Errorf("%w: list-of-edges projection", ErrOutOfR0Scope)
+		if err := refuseEntityListElement(tt); err != nil {
+			return nil, err
 		}
 		el, err := resolveType(tt.Element())
 		if err != nil {
@@ -1988,6 +2023,55 @@ func resolveType(t query.Type) (ResolvedType, error) {
 		panic("resolver bug: resolveType reached TypePath (R5 does not admit path bindings)")
 	default:
 		panic(fmt.Sprintf("resolver bug: resolveType reached unhandled query.Type %T", t))
+	}
+}
+
+func scalarKindOfType(t query.Type) (Scalar, bool) {
+	switch t.(type) {
+	case query.TypeBool:
+		return ScalarBool, true
+	case query.TypeInt:
+		return ScalarInt, true
+	case query.TypeFloat:
+		return ScalarFloat, true
+	case query.TypeString:
+		return ScalarString, true
+	case query.TypeNull:
+		return ScalarNull, true
+	case query.TypeMap:
+		return ScalarMap, true
+	default:
+		return 0, false
+	}
+}
+
+func temporalKindOfType(t query.Type) (Temporal, bool) {
+	switch t.(type) {
+	case query.TypeDate:
+		return TemporalDate, true
+	case query.TypeTime:
+		return TemporalTime, true
+	case query.TypeLocalTime:
+		return TemporalLocalTime, true
+	case query.TypeDateTime:
+		return TemporalDateTime, true
+	case query.TypeLocalDateTime:
+		return TemporalLocalDateTime, true
+	case query.TypeDuration:
+		return TemporalDuration, true
+	default:
+		return 0, false
+	}
+}
+
+func refuseEntityListElement(tt query.TypeList) error {
+	switch tt.Element().(type) {
+	case query.TypeNode:
+		return fmt.Errorf("%w: list-of-nodes projection", ErrOutOfR0Scope)
+	case query.TypeEdge:
+		return fmt.Errorf("%w: list-of-edges projection", ErrOutOfR0Scope)
+	default:
+		return nil
 	}
 }
 
@@ -2232,48 +2316,63 @@ func unify(a, b ResolvedType) (ResolvedType, bool) {
 	}
 	switch aa := a.(type) {
 	case ResolvedProperty:
-		bb, ok := b.(ResolvedProperty)
-		if !ok || bb.Type != aa.Type || bb.Nullable != aa.Nullable {
-			return nil, false
-		}
-		return aa, true
+		return unifyIdentical(aa, b)
 	case ResolvedScalar:
-		bb, ok := b.(ResolvedScalar)
-		if !ok || bb.Kind != aa.Kind {
-			return nil, false
-		}
-		return aa, true
+		return unifyIdentical(aa, b)
 	case ResolvedTemporal:
-		bb, ok := b.(ResolvedTemporal)
-		if !ok || bb.Kind != aa.Kind {
-			return nil, false
-		}
-		return aa, true
+		return unifyIdentical(aa, b)
 	case ResolvedList:
-		bb, ok := b.(ResolvedList)
-		if !ok {
-			return nil, false
-		}
-		el, ok := unify(aa.Element, bb.Element)
-		if !ok {
-			return nil, false
-		}
-		return ResolvedList{Element: el, Nullable: aa.Nullable}, true
+		return unifyList(aa, b)
 	case ResolvedNode:
-		bb, ok := b.(ResolvedNode)
-		if !ok || bb.Labels != aa.Labels {
-			return nil, false
-		}
-		return aa, true
+		return unifyNode(aa, b)
 	case ResolvedEdge:
-		bb, ok := b.(ResolvedEdge)
-		if !ok || bb.EdgeKey != aa.EdgeKey {
-			return nil, false
-		}
-		return aa, true
+		return unifyEdge(aa, b)
 	default:
 		return nil, false
 	}
+}
+
+// unifyIdentical agrees two values of one comparable variant iff every field
+// matches — the variants whose whole value is their type identity.
+func unifyIdentical[T interface {
+	comparable
+	ResolvedType
+}](aa T, b ResolvedType) (ResolvedType, bool) {
+	bb, ok := b.(T)
+	if !ok || bb != aa {
+		return nil, false
+	}
+	return aa, true
+}
+
+func unifyList(aa ResolvedList, b ResolvedType) (ResolvedType, bool) {
+	bb, ok := b.(ResolvedList)
+	if !ok {
+		return nil, false
+	}
+	el, ok := unify(aa.Element, bb.Element)
+	if !ok {
+		return nil, false
+	}
+	return ResolvedList{Element: el, Nullable: aa.Nullable}, true
+}
+
+// unifyNode agrees on Labels alone; Nullable is a's.
+func unifyNode(aa ResolvedNode, b ResolvedType) (ResolvedType, bool) {
+	bb, ok := b.(ResolvedNode)
+	if !ok || bb.Labels != aa.Labels {
+		return nil, false
+	}
+	return aa, true
+}
+
+// unifyEdge agrees on EdgeKey alone; Nullable is a's.
+func unifyEdge(aa ResolvedEdge, b ResolvedType) (ResolvedType, bool) {
+	bb, ok := b.(ResolvedEdge)
+	if !ok || bb.EdgeKey != aa.EdgeKey {
+		return nil, false
+	}
+	return aa, true
 }
 
 // effectClause names the mutating clause an ErrUnknownProperty refusal was
@@ -2417,48 +2516,69 @@ func validateMergeEffect(sc *scope, e query.MergeEffect, s schema.Schema) error 
 	return nil
 }
 
-// validateSetPropertyEffect resolves the target Ref against the binding tables
-// and looks up the property on the resolved schema entity. Rejects var-length
-// edge targets (a var-length binding is a list of edges, not one edge).
-// Rejects projection-alias targets and out-of-scope names (defensive tripwire)
-// with ErrInvalidEffectTarget.
+// validateSetPropertyEffect is validatePropertyEffectTarget under SET, or under
+// the MERGE sub-clause `clause` names.
 func validateSetPropertyEffect(sc *scope, e query.SetPropertyEffect, s schema.Schema, clause effectClause) error {
-	v := e.Target().Variable
-	p := e.Target().Property
+	return validatePropertyEffectTarget(sc, e.Target(), s, clause, "SET")
+}
+
+// validatePropertyEffectTarget resolves ref against the binding tables and
+// looks the property up on the resolved schema entity. Rejects var-length edge
+// targets (a var-length binding is a list of edges, not one edge). Rejects
+// projection-alias targets and out-of-scope names (defensive tripwire) with
+// ErrInvalidEffectTarget. Those name `verb`, the bare clause keyword, which for
+// the MERGE sub-clauses is SET where clause.prefix() spells them out.
+func validatePropertyEffectTarget(sc *scope, ref query.Ref, s schema.Schema, clause effectClause, verb string) error {
+	v := ref.Variable
+	p := ref.Property
+	if ok, err := validateNodeLanePropertyTarget(sc, v, p, clause); ok {
+		return err
+	}
+	if ok, err := validateEdgeLanePropertyTarget(sc, v, p, s, clause, verb); ok {
+		return err
+	}
+	if _, ok := sc.carriedResolvedTypes[v]; ok {
+		return fmt.Errorf("%w: %s %s.%s: %q resolves to a projection alias, not an entity binding", ErrInvalidEffectTarget, verb, v, p, v)
+	}
+	return fmt.Errorf("%w: %s %s.%s: %q not in any Part scope", ErrInvalidEffectTarget, verb, v, p, v)
+}
+
+// validateNodeLanePropertyTarget is the node half of validatePropertyEffectTarget;
+// ok is false when v is in neither node lane.
+func validateNodeLanePropertyTarget(sc *scope, v, p string, clause effectClause) (bool, error) {
 	if nt, ok := sc.nodeTypes[v]; ok {
 		if _, ok := nt.Properties[p]; !ok {
-			return fmt.Errorf("%w: %s%s.%s", ErrUnknownProperty, clause.prefix(), v, p)
+			return true, fmt.Errorf("%w: %s%s.%s", ErrUnknownProperty, clause.prefix(), v, p)
 		}
-		return nil
+		return true, nil
 	}
 	if nts, ok := sc.nodeCands[v]; ok {
-		if _, err := unionNodeProperty(nts, v, p, false, clause); err != nil {
-			return err
-		}
-		return nil
+		_, err := unionNodeProperty(nts, v, p, false, clause)
+		return true, err
 	}
+	return false, nil
+}
+
+// validateEdgeLanePropertyTarget is the edge half of validatePropertyEffectTarget;
+// ok is false when v is in neither edge lane.
+func validateEdgeLanePropertyTarget(sc *scope, v, p string, s schema.Schema, clause effectClause, verb string) (bool, error) {
 	if et, ok := sc.edgeTypes[v]; ok {
 		if sc.edgeBindings[v].Hops() != nil {
-			return fmt.Errorf("%w: SET on variable-length edge %q", ErrInvalidEffectTarget, v)
+			return true, fmt.Errorf("%w: %s on variable-length edge %q", ErrInvalidEffectTarget, verb, v)
 		}
 		if _, ok := et.Properties[p]; !ok {
-			return fmt.Errorf("%w: %s%s.%s", ErrUnknownProperty, clause.prefix(), v, p)
+			return true, fmt.Errorf("%w: %s%s.%s", ErrUnknownProperty, clause.prefix(), v, p)
 		}
-		return nil
+		return true, nil
 	}
 	if cands, ok := sc.edgeCands[v]; ok {
 		if sc.edgeBindings[v].Hops() != nil {
-			return fmt.Errorf("%w: SET on variable-length edge %q", ErrInvalidEffectTarget, v)
+			return true, fmt.Errorf("%w: %s on variable-length edge %q", ErrInvalidEffectTarget, verb, v)
 		}
-		if _, err := unionProperty(cands, s, v, p, false, clause); err != nil {
-			return err
-		}
-		return nil
+		_, err := unionProperty(cands, s, v, p, false, clause)
+		return true, err
 	}
-	if _, ok := sc.carriedResolvedTypes[v]; ok {
-		return fmt.Errorf("%w: SET %s.%s: %q resolves to a projection alias, not an entity binding", ErrInvalidEffectTarget, v, p, v)
-	}
-	return fmt.Errorf("%w: SET %s.%s: %q not in any Part scope", ErrInvalidEffectTarget, v, p, v)
+	return false, nil
 }
 
 // validateSetEntityEffect resolves the target variable against the entity
@@ -2519,42 +2639,7 @@ func validateSetLabelsEffect(sc *scope, e query.SetLabelsEffect, s schema.Schema
 // validateRemovePropertyEffect mirrors validateSetPropertyEffect: same target
 // resolution, same property-existence check. No value side to check.
 func validateRemovePropertyEffect(sc *scope, e query.RemovePropertyEffect, s schema.Schema) error {
-	v := e.Target().Variable
-	p := e.Target().Property
-	if nt, ok := sc.nodeTypes[v]; ok {
-		if _, ok := nt.Properties[p]; !ok {
-			return fmt.Errorf("%w: %s%s.%s", ErrUnknownProperty, clauseRemove.prefix(), v, p)
-		}
-		return nil
-	}
-	if nts, ok := sc.nodeCands[v]; ok {
-		if _, err := unionNodeProperty(nts, v, p, false, clauseRemove); err != nil {
-			return err
-		}
-		return nil
-	}
-	if et, ok := sc.edgeTypes[v]; ok {
-		if sc.edgeBindings[v].Hops() != nil {
-			return fmt.Errorf("%w: REMOVE on variable-length edge %q", ErrInvalidEffectTarget, v)
-		}
-		if _, ok := et.Properties[p]; !ok {
-			return fmt.Errorf("%w: %s%s.%s", ErrUnknownProperty, clauseRemove.prefix(), v, p)
-		}
-		return nil
-	}
-	if cands, ok := sc.edgeCands[v]; ok {
-		if sc.edgeBindings[v].Hops() != nil {
-			return fmt.Errorf("%w: REMOVE on variable-length edge %q", ErrInvalidEffectTarget, v)
-		}
-		if _, err := unionProperty(cands, s, v, p, false, clauseRemove); err != nil {
-			return err
-		}
-		return nil
-	}
-	if _, ok := sc.carriedResolvedTypes[v]; ok {
-		return fmt.Errorf("%w: REMOVE %s.%s: %q resolves to a projection alias, not an entity binding", ErrInvalidEffectTarget, v, p, v)
-	}
-	return fmt.Errorf("%w: REMOVE %s.%s: %q not in any Part scope", ErrInvalidEffectTarget, v, p, v)
+	return validatePropertyEffectTarget(sc, e.Target(), s, clauseRemove, "REMOVE")
 }
 
 // validateRemoveLabelsEffect is the REMOVE analogue of validateSetLabelsEffect:
@@ -2597,41 +2682,10 @@ func validateDeleteEffect(sc *scope, e query.DeleteEffect, s schema.Schema) erro
 // validateDeleteTarget checks one DELETE target. An empty Property is the
 // entity shape; anything else is the bare-property shape.
 func validateDeleteTarget(sc *scope, t query.Ref, s schema.Schema) error {
-	v := t.Variable
-	p := t.Property
-	if p == "" {
-		return validateDeleteEntityTarget(sc, v)
+	if t.Property == "" {
+		return validateDeleteEntityTarget(sc, t.Variable)
 	}
-	if nt, ok := sc.nodeTypes[v]; ok {
-		if _, ok := nt.Properties[p]; !ok {
-			return fmt.Errorf("%w: %s%s.%s", ErrUnknownProperty, clauseDelete.prefix(), v, p)
-		}
-		return nil
-	}
-	if nts, ok := sc.nodeCands[v]; ok {
-		_, err := unionNodeProperty(nts, v, p, false, clauseDelete)
-		return err
-	}
-	if et, ok := sc.edgeTypes[v]; ok {
-		if sc.edgeBindings[v].Hops() != nil {
-			return fmt.Errorf("%w: DELETE on variable-length edge %q", ErrInvalidEffectTarget, v)
-		}
-		if _, ok := et.Properties[p]; !ok {
-			return fmt.Errorf("%w: %s%s.%s", ErrUnknownProperty, clauseDelete.prefix(), v, p)
-		}
-		return nil
-	}
-	if cands, ok := sc.edgeCands[v]; ok {
-		if sc.edgeBindings[v].Hops() != nil {
-			return fmt.Errorf("%w: DELETE on variable-length edge %q", ErrInvalidEffectTarget, v)
-		}
-		_, err := unionProperty(cands, s, v, p, false, clauseDelete)
-		return err
-	}
-	if _, ok := sc.carriedResolvedTypes[v]; ok {
-		return fmt.Errorf("%w: DELETE %s.%s: %q resolves to a projection alias, not an entity binding", ErrInvalidEffectTarget, v, p, v)
-	}
-	return fmt.Errorf("%w: DELETE %s.%s: %q not in any Part scope", ErrInvalidEffectTarget, v, p, v)
+	return validatePropertyEffectTarget(sc, t, s, clauseDelete, "DELETE")
 }
 
 // validateDeleteEntityTarget checks a whole-entity DELETE target. Every

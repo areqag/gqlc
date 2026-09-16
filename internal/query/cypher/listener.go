@@ -504,40 +504,40 @@ func (l *listener) EnterOC_With(c *gen.OC_WithContext) {
 // downstream (Stage 4 §4). Explicit items export each return item's Name
 // against its Value.Type().
 func exportedTypes(closed *rawPart) map[string]query.Type {
-	out := map[string]query.Type{}
 	if closed.returnsAll {
-		for name, t := range closed.imported {
-			out[name] = t
-		}
-		for _, rb := range closed.bindings {
-			if rb.variable == "" {
-				continue
-			}
-			switch rb.kind {
-			case graph.Node:
-				out[rb.variable] = query.TypeNode{}
-			case graph.Edge:
-				if rb.hops != nil {
-					out[rb.variable] = query.NewTypeList(query.TypeEdge{})
-				} else {
-					out[rb.variable] = query.TypeEdge{}
-				}
-			}
-		}
-		for _, pb := range closed.pathBindings {
-			out[pb.Variable()] = query.TypePath{}
-		}
-		for _, ub := range closed.unwindBindings {
-			out[ub.Variable()] = ub.ElementType()
-		}
-		return out
+		return exportAllTypes(closed)
 	}
+	out := map[string]query.Type{}
 	for _, r := range closed.returns {
 		t := r.Value.Type()
 		if t == nil {
 			t = query.TypeUnknown{}
 		}
 		out[r.Name] = t
+	}
+	return out
+}
+
+// exportAllTypes is exportedTypes' WITH * arm: every in-scope name of the
+// closed part against its type.
+func exportAllTypes(closed *rawPart) map[string]query.Type {
+	out := map[string]query.Type{}
+	for name, t := range closed.imported {
+		out[name] = t
+	}
+	for _, rb := range closed.bindings {
+		if rb.variable == "" {
+			continue
+		}
+		if t, ok := entityBindingType(rb); ok {
+			out[rb.variable] = t
+		}
+	}
+	for _, pb := range closed.pathBindings {
+		out[pb.Variable()] = query.TypePath{}
+	}
+	for _, ub := range closed.unwindBindings {
+		out[ub.Variable()] = ub.ElementType()
 	}
 	return out
 }

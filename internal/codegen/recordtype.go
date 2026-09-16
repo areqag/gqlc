@@ -57,32 +57,7 @@ import (
 func recordFieldLegality(pt graph.PropertyType) (graph.PropertyType, string, bool) {
 	switch pt.Kind() {
 	case graph.KindRecord:
-		fields := pt.Fields()
-		// The whole level is checked before any descent, so that where
-		// two levels are both illegal the author is told about the
-		// declaration they can see. Checking and descending in one loop
-		// would answer with whichever offender sorted earlier, over
-		// field names that have nothing to do with depth.
-		seen := make(map[string]string, len(fields))
-		for _, f := range fields {
-			mangled := paramFieldName(f.Name)
-			if mangled == "" {
-				return pt, "field " + strconv.Quote(f.Name) + " mangles to no Go field name", true
-			}
-			if !goFieldName(mangled) {
-				return pt, "field " + strconv.Quote(f.Name) + " mangles to " + strconv.Quote(mangled) + ", which is not a Go field name", true
-			}
-			if first, dup := seen[mangled]; dup {
-				return pt, "fields " + strconv.Quote(first) + " and " + strconv.Quote(f.Name) + " both mangle to " + strconv.Quote(mangled), true
-			}
-			seen[mangled] = f.Name
-		}
-		for _, f := range fields {
-			if offender, reason, illegal := recordFieldLegality(f.Type); illegal {
-				return offender, reason, true
-			}
-		}
-		return "", "", false
+		return recordLevelLegality(pt)
 	case graph.KindList:
 		return recordFieldLegality(pt.Elem())
 	case graph.KindUnion:
@@ -96,6 +71,37 @@ func recordFieldLegality(pt graph.PropertyType) (graph.PropertyType, string, boo
 		// A scalar declares no fields and has no contents. Named rather
 		// than left to the default so a fifth kind cannot be added
 		// silently.
+	}
+	return "", "", false
+}
+
+// recordLevelLegality is recordFieldLegality's record arm: pt's own
+// fields, then whatever they hold.
+func recordLevelLegality(pt graph.PropertyType) (graph.PropertyType, string, bool) {
+	fields := pt.Fields()
+	// The whole level is checked before any descent, so that where
+	// two levels are both illegal the author is told about the
+	// declaration they can see. Checking and descending in one loop
+	// would answer with whichever offender sorted earlier, over
+	// field names that have nothing to do with depth.
+	seen := make(map[string]string, len(fields))
+	for _, f := range fields {
+		mangled := paramFieldName(f.Name)
+		if mangled == "" {
+			return pt, "field " + strconv.Quote(f.Name) + " mangles to no Go field name", true
+		}
+		if !goFieldName(mangled) {
+			return pt, "field " + strconv.Quote(f.Name) + " mangles to " + strconv.Quote(mangled) + ", which is not a Go field name", true
+		}
+		if first, dup := seen[mangled]; dup {
+			return pt, "fields " + strconv.Quote(first) + " and " + strconv.Quote(f.Name) + " both mangle to " + strconv.Quote(mangled), true
+		}
+		seen[mangled] = f.Name
+	}
+	for _, f := range fields {
+		if offender, reason, illegal := recordFieldLegality(f.Type); illegal {
+			return offender, reason, true
+		}
 	}
 	return "", "", false
 }
@@ -405,59 +411,73 @@ func RecordEncodings(entities []Entity, prepared []Query) []graph.PropertyType {
 // "union whose members are undeclared" spelling is TypeAnyPropertyValue,
 // which is a scalar and never reaches the union arm.
 func reachableEncodings(entities []Entity, prepared []Query, want graph.PropertyTypeKind) []graph.PropertyType {
-	seen := make(map[graph.PropertyType]bool)
-	found := make(map[graph.PropertyType]bool)
-	var walk func(graph.PropertyType)
-	walk = func(pt graph.PropertyType) {
-		if seen[pt] {
-			return
-		}
-		seen[pt] = true
-		switch pt.Kind() {
-		case graph.KindRecord:
-			if want == graph.KindRecord && pt != graph.TypeAnyRecord {
-				found[pt] = true
-			}
-			for _, f := range pt.Fields() {
-				walk(f.Type)
-			}
-		case graph.KindUnion:
-			if want == graph.KindUnion {
-				found[pt] = true
-			}
-			for _, m := range pt.Members() {
-				walk(m.Type)
-			}
-		case graph.KindList:
-			walk(pt.Elem())
-		case graph.KindScalar:
-			// A scalar has no contents, so nothing hides inside one.
-			// Named rather than defaulted so a fifth kind cannot be added
-			// silently.
-		}
+	w := &reachableEncodingWalk{
+		want:  want,
+		seen:  make(map[graph.PropertyType]bool),
+		found: make(map[graph.PropertyType]bool),
 	}
 	for _, e := range entities {
 		for _, f := range e.Fields {
-			walk(f.Width)
+			w.enter(f.Width)
 		}
 	}
 	for _, p := range prepared {
 		for _, f := range p.ParamFields {
-			walk(f.Width)
+			w.enter(f.Width)
 		}
 		for _, f := range p.RowFields {
-			walk(f.Width)
+			w.enter(f.Width)
 			for elem := f.ListElem; elem != nil; elem = elem.Nested {
-				walk(elem.Width)
+				w.enter(elem.Width)
 			}
 		}
 	}
-	out := make([]graph.PropertyType, 0, len(found))
-	for pt := range found {
+	out := make([]graph.PropertyType, 0, len(w.found))
+	for pt := range w.found {
 		out = append(out, pt)
 	}
 	slices.Sort(out)
 	return out
+}
+
+// reachableEncodingWalk is reachableEncodings' state: the kind it
+// collects, every width entered, and the answers.
+type reachableEncodingWalk struct {
+	want        graph.PropertyTypeKind
+	seen, found map[graph.PropertyType]bool
+}
+
+func (w *reachableEncodingWalk) enter(pt graph.PropertyType) {
+	if w.seen[pt] {
+		return
+	}
+	w.seen[pt] = true
+	w.descend(pt)
+}
+
+func (w *reachableEncodingWalk) descend(pt graph.PropertyType) {
+	switch pt.Kind() {
+	case graph.KindRecord:
+		if w.want == graph.KindRecord && pt != graph.TypeAnyRecord {
+			w.found[pt] = true
+		}
+		for _, f := range pt.Fields() {
+			w.enter(f.Type)
+		}
+	case graph.KindUnion:
+		if w.want == graph.KindUnion {
+			w.found[pt] = true
+		}
+		for _, m := range pt.Members() {
+			w.enter(m.Type)
+		}
+	case graph.KindList:
+		w.enter(pt.Elem())
+	case graph.KindScalar:
+		// A scalar has no contents, so nothing hides inside one.
+		// Named rather than defaulted so a fifth kind cannot be added
+		// silently.
+	}
 }
 
 // RecordSiteAlias is one site-named record alias: the exported name, the

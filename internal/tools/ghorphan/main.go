@@ -277,12 +277,7 @@ func run(ctx context.Context, out io.Writer, cfg config, src source) error {
 	rep := &reporter{w: out}
 	rep.printf("%s", render(findings))
 
-	closes := 0
-	for _, f := range findings {
-		if f.Verdict == verdictClose {
-			closes++
-		}
-	}
+	closes := plannedCloses(findings)
 	refusals := len(findings) - closes
 
 	if !cfg.act {
@@ -299,6 +294,29 @@ func run(ctx context.Context, out io.Writer, cfg config, src source) error {
 		return rep.err
 	}
 
+	freshBound, err := writeBoundaryBindings(ctx, src, cfg.repo, findings, beads)
+	if err != nil {
+		return err
+	}
+
+	closed, applyErr := apply(ctx, rep, findings, freshBound.any, src.closeIssue, cfg.repo)
+	rep.printf("ghorphan: closed %d of %d planned issue(s), refused %d.\n", closed, closes, refusals)
+	return errors.Join(applyErr, rep.err)
+}
+
+func plannedCloses(findings []finding) int {
+	closes := 0
+	for _, f := range findings {
+		if f.Verdict == verdictClose {
+			closes++
+		}
+	}
+	return closes
+}
+
+// writeBoundaryBindings re-reads the ledger and returns its bindings, or the
+// error that stops the run before its first write.
+func writeBoundaryBindings(ctx context.Context, src source, repo string, findings []finding, beads []bead) (bindings, error) {
 	// THE WRITE BOUNDARY. Everything above was decided on one ledger snapshot,
 	// read before the report was even rendered. Between that read and the first
 	// `gh issue close` a concurrent `bd github push` can move a bead's
@@ -323,19 +341,16 @@ func run(ctx context.Context, out io.Writer, cfg config, src source) error {
 	// One `bd list` per run, not per close.
 	fresh, err := src.beads(ctx)
 	if err != nil {
-		return fmt.Errorf("ghorphan: re-read the bead ledger at the write boundary: %w", err)
+		return bindings{}, fmt.Errorf("ghorphan: re-read the bead ledger at the write boundary: %w", err)
 	}
 	if len(fresh) == 0 {
-		return errors.New("ghorphan: the bead ledger re-read at the write boundary came back empty, while the read the plan was built on did not; refusing, because with no bead pointing anywhere nothing is protected")
+		return bindings{}, errors.New("ghorphan: the bead ledger re-read at the write boundary came back empty, while the read the plan was built on did not; refusing, because with no bead pointing anywhere nothing is protected")
 	}
-	freshBound := boundIssues(fresh, cfg.repo)
-	if err := checkLedgerDrift(findings, boundIssues(beads, cfg.repo), freshBound); err != nil {
-		return err
+	freshBound := boundIssues(fresh, repo)
+	if err := checkLedgerDrift(findings, boundIssues(beads, repo), freshBound); err != nil {
+		return bindings{}, err
 	}
-
-	closed, applyErr := apply(ctx, rep, findings, freshBound.any, src.closeIssue, cfg.repo)
-	rep.printf("ghorphan: closed %d of %d planned issue(s), refused %d.\n", closed, closes, refusals)
-	return errors.Join(applyErr, rep.err)
+	return freshBound, nil
 }
 
 // checkLedgerDrift compares the two ledger reads over exactly the numbers the
@@ -387,34 +402,8 @@ func checkLedgerDrift(findings []finding, planned, fresh bindings) error {
 // a measurement; an empty bead ledger is worse, because every issue then looks
 // unbound and the protection this tool leans on is the ledger.
 func plan(issues []issue, beads []bead, window time.Duration, repo string) ([]finding, error) {
-	if window < 0 {
-		return nil, fmt.Errorf("ghorphan: -window is %s; a negative window makes every pair non-adjacent, which is a silent no-op rather than a stricter rule", window)
-	}
-	// The ceiling. Adjacency is one of the two clauses a REFUSE rests on, so a
-	// window above the default rewrites refusals into closes: 814 and 816 sit
-	// 61s apart and go REFUSE at 60s, CLOSE at 120s. Refused rather than warned
-	// about, because the operator reading the warning would be reading it in
-	// the report of the run that had already decided.
-	//
-	// That last sentence applied to the narrow direction too, which is allowed,
-	// so the reason cannot be the one that reads best. It is the blast radius:
-	// widening can close an issue that is not a race artefact at all — equal
-	// title and body, minted far apart, so nothing ties the two together —
-	// while narrowing only ever closed one that is byte-identical to a bound
-	// mirror inside the default window, which is certainly a duplicate. What
-	// narrowing decided was which canonical the closing comment names, not
-	// whether a duplicate is being closed. The narrow direction is no longer
-	// left reachable either: see the ambiguity guard in planOrphan's verdict
-	// switch below, which refuses when narrowing collapses a match set of two
-	// or more to one (bd gqlc-fzb2).
-	if window > defaultWindow {
-		return nil, fmt.Errorf("ghorphan: -window is %s, above the %s ceiling; a wider window loosens the adjacency clause and can turn a refusal into a close, which is an irreversible write. Every candidate's Δt is already in the report, so read that instead", window, defaultWindow)
-	}
-	if len(issues) == 0 {
-		return nil, errors.New("ghorphan: the GitHub issue listing came back empty; refusing, because that is indistinguishable from a repository with nothing to reconcile")
-	}
-	if len(beads) == 0 {
-		return nil, errors.New("ghorphan: the bead ledger came back empty; refusing, because with no bead pointing anywhere every issue reads as unbound and nothing is protected")
+	if err := refusePlanInputs(issues, beads, window); err != nil {
+		return nil, err
 	}
 
 	createdAt, err := indexCreationTimes(issues)
@@ -442,6 +431,49 @@ func plan(issues []issue, beads []bead, window time.Duration, repo string) ([]fi
 		}
 	}
 
+	findings := planOrphans(issues, byTitle, createdAt, window, bound)
+	slices.SortFunc(findings, func(a, b finding) int { return a.Orphan - b.Orphan })
+	return findings, nil
+}
+
+// refusePlanInputs is the four refusals plan makes before it looks at a
+// single pair.
+func refusePlanInputs(issues []issue, beads []bead, window time.Duration) error {
+	if window < 0 {
+		return fmt.Errorf("ghorphan: -window is %s; a negative window makes every pair non-adjacent, which is a silent no-op rather than a stricter rule", window)
+	}
+	// The ceiling. Adjacency is one of the two clauses a REFUSE rests on, so a
+	// window above the default rewrites refusals into closes: 814 and 816 sit
+	// 61s apart and go REFUSE at 60s, CLOSE at 120s. Refused rather than warned
+	// about, because the operator reading the warning would be reading it in
+	// the report of the run that had already decided.
+	//
+	// That last sentence applied to the narrow direction too, which is allowed,
+	// so the reason cannot be the one that reads best. It is the blast radius:
+	// widening can close an issue that is not a race artefact at all — equal
+	// title and body, minted far apart, so nothing ties the two together —
+	// while narrowing only ever closed one that is byte-identical to a bound
+	// mirror inside the default window, which is certainly a duplicate. What
+	// narrowing decided was which canonical the closing comment names, not
+	// whether a duplicate is being closed. The narrow direction is no longer
+	// left reachable either: see the ambiguity guard in planOrphan's verdict
+	// switch below, which refuses when narrowing collapses a match set of two
+	// or more to one (bd gqlc-fzb2).
+	if window > defaultWindow {
+		return fmt.Errorf("ghorphan: -window is %s, above the %s ceiling; a wider window loosens the adjacency clause and can turn a refusal into a close, which is an irreversible write. Every candidate's Δt is already in the report, so read that instead", window, defaultWindow)
+	}
+	if len(issues) == 0 {
+		return errors.New("ghorphan: the GitHub issue listing came back empty; refusing, because that is indistinguishable from a repository with nothing to reconcile")
+	}
+	if len(beads) == 0 {
+		return errors.New("ghorphan: the bead ledger came back empty; refusing, because with no bead pointing anywhere every issue reads as unbound and nothing is protected")
+	}
+	return nil
+}
+
+// planOrphans is one finding per open unbound issue that has a title twin
+// among the candidate canonicals, in listing order.
+func planOrphans(issues []issue, byTitle map[string][]issue, createdAt map[int]time.Time, window time.Duration, bound bindings) []finding {
 	var findings []finding
 	for _, o := range issues {
 		if !strings.EqualFold(o.State, "open") {
@@ -463,8 +495,7 @@ func plan(issues []issue, beads []bead, window time.Duration, repo string) ([]fi
 
 		findings = append(findings, planOrphan(o, cands, createdAt, window, bound))
 	}
-	slices.SortFunc(findings, func(a, b finding) int { return a.Orphan - b.Orphan })
-	return findings, nil
+	return findings
 }
 
 // indexCreationTimes keys the listing by issue number, which is the key every

@@ -315,25 +315,41 @@ func isAlnum(c byte) bool {
 // until someone pruned the file. exemptions.reopens goes stale the same way,
 // and additionally goes inert when a later close cites a different SHA.
 func check(headBytes, baseBytes []byte, baseLabel string, ex exemptions) error {
-	head, headLines, err := parse(headBytes)
+	head, err := parseGradedExport(headBytes, "head "+exportPath)
 	if err != nil {
-		return fmt.Errorf("parse head %s: %w", exportPath, err)
+		return err
 	}
-	if headLines > 0 && len(head) == 0 {
-		return fmt.Errorf("bdguard: head %s has %d non-blank lines but zero issue records — suspected bd format drift (rename of _type or of the \"issue\" tag). Refusing to run: a silent pass here would be indistinguishable from a clean export", exportPath, headLines)
-	}
-	baseIssues, baseLines, err := parse(baseBytes)
+	baseIssues, err := parseGradedExport(baseBytes, "base "+exportPath+"@"+baseLabel)
 	if err != nil {
-		return fmt.Errorf("parse base %s@%s: %w", exportPath, baseLabel, err)
-	}
-	if baseLines > 0 && len(baseIssues) == 0 {
-		return fmt.Errorf("bdguard: base %s@%s has %d non-blank lines but zero issue records — suspected bd format drift (rename of _type or of the \"issue\" tag). Refusing to run: a silent pass here would be indistinguishable from a clean export", exportPath, baseLabel, baseLines)
+		return err
 	}
 	if len(ex.reopens) > 0 && ex.refContaining == nil {
 		return fmt.Errorf("bdguard: %s declares %d reopen(s) but no ref probe was wired; refusing to grant an exemption whose veto is missing", allowedReopensPath, len(ex.reopens))
 	}
 
-	var dropped, reopened []string
+	dropped, reopened := regressions(head, baseIssues, ex)
+	if len(dropped) == 0 && len(reopened) == 0 {
+		return nil
+	}
+	return regressionError(dropped, reopened, baseLabel)
+}
+
+// parseGradedExport parses one side of the comparison and refuses an export
+// that has lines but no issue record, which is the shape bd format drift takes.
+func parseGradedExport(data []byte, side string) (map[string]record, error) {
+	issues, lines, err := parse(data)
+	if err != nil {
+		return nil, fmt.Errorf("parse %s: %w", side, err)
+	}
+	if lines > 0 && len(issues) == 0 {
+		return nil, fmt.Errorf("bdguard: %s has %d non-blank lines but zero issue records — suspected bd format drift (rename of _type or of the \"issue\" tag). Refusing to run: a silent pass here would be indistinguishable from a clean export", side, lines)
+	}
+	return issues, nil
+}
+
+// regressions is every base id absent at head and not declared dropped, and
+// every base close undone at head whose reopen is undeclared or refused.
+func regressions(head, baseIssues map[string]record, ex exemptions) (dropped, reopened []string) {
 	for id, baseRec := range baseIssues {
 		headRec, ok := head[id]
 		if !ok {
@@ -355,10 +371,12 @@ func check(headBytes, baseBytes []byte, baseLabel string, ex exemptions) error {
 			reopened = append(reopened, line+"\n      declaration `"+id+" "+decl.token()+"` refused: "+refusal)
 		}
 	}
-	if len(dropped) == 0 && len(reopened) == 0 {
-		return nil
-	}
+	return dropped, reopened
+}
 
+// regressionError renders the failure: the sorted lists, then one hint per
+// arm that fired, naming the file that declares an exemption for it.
+func regressionError(dropped, reopened []string, baseLabel string) error {
 	sort.Strings(dropped)
 	sort.Strings(reopened)
 	var buf bytes.Buffer

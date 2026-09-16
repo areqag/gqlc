@@ -47,18 +47,10 @@ func resolveValueType(vt gen.IValueTypeContext, ts *antlr.CommonTokenStream) (gr
 	switch lt := vt.(type) {
 	case *gen.ListValueTypeAlt1Context:
 		// LIST<elemType> (notNull?)
-		elemType, elemNotNull, err := resolveValueType(lt.ValueType(), ts)
-		if err != nil {
-			return "", false, err
-		}
-		return graph.ListOf(elemType, elemNotNull), lt.NotNull() != nil, nil
+		return resolveListType(lt.ValueType(), lt.NotNull() != nil, ts)
 	case *gen.ListValueTypeAlt2Context:
 		// elemType LIST (notNull?)  /  elemType ARRAY (notNull?)
-		elemType, elemNotNull, err := resolveValueType(lt.ValueType(), ts)
-		if err != nil {
-			return "", false, err
-		}
-		return graph.ListOf(elemType, elemNotNull), lt.NotNull() != nil, nil
+		return resolveListType(lt.ValueType(), lt.NotNull() != nil, ts)
 	case *gen.ListValueTypeAlt3Context:
 		// LIST (notNull?)  /  ARRAY (notNull?)  — bare, no element type
 		return graph.TypeList, lt.NotNull() != nil, nil
@@ -81,6 +73,17 @@ func resolveValueType(vt gen.IValueTypeContext, ts *antlr.CommonTokenStream) (gr
 		return "", false, ErrUnsupportedType
 	}
 	return pt, hasNotNull(vt), nil
+}
+
+// resolveListType lowers a parameterised list's element type and pairs it with
+// the list's own NOT NULL, which the caller read from the list node's direct
+// accessor rather than from the element's.
+func resolveListType(elem gen.IValueTypeContext, notNull bool, ts *antlr.CommonTokenStream) (graph.PropertyType, bool, error) {
+	elemType, elemNotNull, err := resolveValueType(elem, ts)
+	if err != nil {
+		return "", false, err
+	}
+	return graph.ListOf(elemType, elemNotNull), notNull, nil
 }
 
 // resolveRecordType lowers a recordType (GQL.g4:1977-1980) to its encoded

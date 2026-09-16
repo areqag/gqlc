@@ -2,6 +2,7 @@ package resolver
 
 import (
 	"fmt"
+	"maps"
 
 	"github.com/areqag/gqlc/internal/graph"
 	"github.com/areqag/gqlc/internal/procsig"
@@ -133,39 +134,22 @@ func newScope(carry branchState) *scope {
 	// not learn from a carried singular endpoint, which lands on the
 	// pre-narrowing answer. The cost is precision on
 	// `MATCH (a:Only) WITH a MATCH (p:Plural)-[r]->(a)`.
-	for name, nt := range carry.exportedNodeTypes {
-		s.nodeTypes[name] = nt
-	}
-	for name, nts := range carry.exportedNodeCands {
-		s.nodeCands[name] = nts
-	}
-	for name, byInference := range carry.exportedPluralByInference {
-		s.pluralByInference[name] = byInference
-	}
-	for name, et := range carry.exportedEdgeTypes {
-		s.edgeTypes[name] = et
-	}
-	for name, k := range carry.exportedEdgeKeys {
-		s.edgeKeys[name] = k
-	}
-	for name, cands := range carry.exportedEdgeCands {
-		s.edgeCands[name] = cands
-	}
-	for name, b := range carry.exportedEdgeBindings {
-		s.edgeBindings[name] = b
-	}
-	for name, nb := range carry.exportedNullableBinding {
-		s.nullableBinding[name] = nb
-	}
-	for name, slot := range carry.exportedCallTypes {
-		s.callTypes[name] = slot
-	}
+	maps.Copy(s.nodeTypes, carry.exportedNodeTypes)
+	maps.Copy(s.nodeCands, carry.exportedNodeCands)
+	maps.Copy(s.pluralByInference, carry.exportedPluralByInference)
+	maps.Copy(s.edgeTypes, carry.exportedEdgeTypes)
+	maps.Copy(s.edgeKeys, carry.exportedEdgeKeys)
+	maps.Copy(s.edgeCands, carry.exportedEdgeCands)
+	maps.Copy(s.edgeBindings, carry.exportedEdgeBindings)
+	maps.Copy(s.nullableBinding, carry.exportedNullableBinding)
+	maps.Copy(s.callTypes, carry.exportedCallTypes)
+	// An explicit assignment, not maps.Copy: nilorigination_test's carry-writer
+	// row finds writers into carriedResolvedTypes by walking indexed
+	// assignments, and a maps.Copy here would be invisible to it.
 	for name, rt := range carry.exportedResolvedTypes {
 		s.carriedResolvedTypes[name] = rt
 	}
-	for name, g := range carry.exportedOptionalGroup {
-		s.carriedGroups[name] = g
-	}
+	maps.Copy(s.carriedGroups, carry.exportedOptionalGroup)
 	s.carriedOrder = carry.exportedOrder
 	return s
 }
@@ -510,6 +494,17 @@ func (s *scope) CloseEdges(sch schema.Schema) error {
 	if err := s.InferUnlabelled(sch); err != nil {
 		return err
 	}
+	if err := s.closeDeferredEdges(deferred, sch); err != nil {
+		return err
+	}
+	s.NarrowPluralEndpoints(sch)
+	return nil
+}
+
+// closeDeferredEdges is Phase C's retry: every edge Phase A2 deferred is
+// probed again against the post-B node table, and an endpoint still
+// missing is ErrUnknownLabel.
+func (s *scope) closeDeferredEdges(deferred []query.EdgeBinding, sch schema.Schema) error {
 	for _, eb := range deferred {
 		src, srcOK := endpointLabels(eb.Source(), s.nodeTable(), sch)
 		tgt, tgtOK := endpointLabels(eb.Target(), s.nodeTable(), sch)
@@ -524,7 +519,6 @@ func (s *scope) CloseEdges(sch schema.Schema) error {
 		}
 		s.orientation.recordEdge(eb, src, tgt, sch)
 	}
-	s.NarrowPluralEndpoints(sch)
 	return nil
 }
 
@@ -1047,25 +1041,11 @@ func (s *scope) buildScopeOrder() []string {
 		// Unresolved names are impossible at this point — Phase C either
 		// resolved or short-circuited — but the guard keeps the invariant
 		// tight.
-		if _, isNode := s.nodeTypes[v]; isNode {
-			seen[v] = true
-			out = append(out, v)
+		if !s.scopeOrderResolved(v) {
 			continue
 		}
-		if _, isCand := s.nodeCands[v]; isCand {
-			seen[v] = true
-			out = append(out, v)
-			continue
-		}
-		if _, isEdge := s.edgeBindings[v]; isEdge {
-			seen[v] = true
-			out = append(out, v)
-			continue
-		}
-		if _, isCall := s.callTypes[v]; isCall {
-			seen[v] = true
-			out = append(out, v)
-		}
+		seen[v] = true
+		out = append(out, v)
 	}
 	for _, v := range s.carriedOrder {
 		if seen[v] {
@@ -1075,6 +1055,17 @@ func (s *scope) buildScopeOrder() []string {
 		out = append(out, v)
 	}
 	return out
+}
+
+// scopeOrderResolved reports whether v landed in one of the four lanes
+// buildScopeOrder expands: node type, node candidates, edge binding, or
+// CALL YIELD slot.
+func (s *scope) scopeOrderResolved(v string) bool {
+	_, isNode := s.nodeTypes[v]
+	_, isCand := s.nodeCands[v]
+	_, isEdge := s.edgeBindings[v]
+	_, isCall := s.callTypes[v]
+	return isNode || isCand || isEdge || isCall
 }
 
 // materialiseReturns handles the RETURN * / WITH * expansion (§4.4).
@@ -1380,51 +1371,65 @@ func (s *scope) refProjectionType(ref query.Ref, sch schema.Schema) (ResolvedTyp
 		if ref.Property == "" {
 			return ResolvedNode{Labels: nt.KeyLabels, Nullable: s.nullableBinding[ref.Variable]}, nil
 		}
-		prop, ok := nt.Properties[ref.Property]
-		if !ok {
-			return nil, fmt.Errorf("%w: %s.%s", ErrUnknownProperty, ref.Variable, ref.Property)
-		}
-		return ResolvedProperty{Type: prop.Type, Nullable: prop.Nullable || s.nullableBinding[ref.Variable]}, nil
+		return boundNodePropertyType(nt, ref, s.nullableBinding[ref.Variable])
 	}
 	if nts, ok := s.nodeCands[ref.Variable]; ok {
 		if ref.Property == "" {
-			// Which sentinel is the binding's provenance, not this arm's:
-			// errors.go documents ErrAmbiguousLabel as a LABEL SET whose
-			// proper-superset satisfying set has more than one element, and
-			// ErrAmbiguousBinding as an unlabelled binding whose candidate set
-			// has more than one node type. An unlabelled binding reaching here
-			// has no label set to be ambiguous about; it got here because
-			// commit() bound the widened plural set instead of deferring, and
-			// the same query without the widening refuses with
-			// ErrAmbiguousBinding at Phase B's terminal deferral. The message
-			// text is one string for both because the fault is one fault —
-			// only its category-grained name differs (r1 §5, sentinels are
-			// category-grained).
-			sentinel := ErrAmbiguousLabel
-			if s.pluralByInference[ref.Variable] {
-				sentinel = ErrAmbiguousBinding
-			}
-			return nil, fmt.Errorf("%w: %s is satisfied by more than one declared node type: %s", sentinel, ref.Variable, formatNodeTypeKeys(nts))
+			return nil, s.ambiguousNodeCandsError(nts, ref.Variable)
 		}
 		return unionNodeProperty(nts, ref.Variable, ref.Property, s.nullableBinding[ref.Variable], clauseRead)
 	}
 	_, singleCand := s.edgeTypes[ref.Variable]
 	cands, multiCand := s.edgeCands[ref.Variable]
 	if !singleCand && !multiCand {
-		// R7 §4.2 — CALL YIELD lane, fired BEFORE the carried-alias bypass.
-		if slot, ok := s.callTypes[ref.Variable]; ok {
-			return callProjectionType(slot, ref, s.nullableBinding)
-		}
-		// §4.5.4 — carried-alias bypass. A RefProjection whose Variable lives
-		// only in carriedResolvedTypes yields the carried type verbatim
-		// (property lookups on a carried alias are unreachable — parser scope
-		// check rejects Ref{"c", "p"} unless c is a binding-name in scope).
-		if rt, ok := s.carriedResolvedTypes[ref.Variable]; ok && ref.Property == "" {
-			return rt, nil
-		}
-		return nil, fmt.Errorf("%w: %s", ErrOutOfR0Scope, ref.Variable)
+		return s.unboundRefProjectionType(ref)
 	}
+	return s.edgeRefProjectionType(ref, sch, singleCand, cands)
+}
 
+// ambiguousNodeCandsError is the refusal for a bare Ref to a Variable whose
+// plural label set left several candidate node types.
+func (s *scope) ambiguousNodeCandsError(nts []schema.NodeType, variable string) error {
+	// Which sentinel is the binding's provenance, not this arm's:
+	// errors.go documents ErrAmbiguousLabel as a LABEL SET whose
+	// proper-superset satisfying set has more than one element, and
+	// ErrAmbiguousBinding as an unlabelled binding whose candidate set
+	// has more than one node type. An unlabelled binding reaching here
+	// has no label set to be ambiguous about; it got here because
+	// commit() bound the widened plural set instead of deferring, and
+	// the same query without the widening refuses with
+	// ErrAmbiguousBinding at Phase B's terminal deferral. The message
+	// text is one string for both because the fault is one fault —
+	// only its category-grained name differs (r1 §5, sentinels are
+	// category-grained).
+	sentinel := ErrAmbiguousLabel
+	if s.pluralByInference[variable] {
+		sentinel = ErrAmbiguousBinding
+	}
+	return fmt.Errorf("%w: %s is satisfied by more than one declared node type: %s", sentinel, variable, formatNodeTypeKeys(nts))
+}
+
+// unboundRefProjectionType is refProjectionType's arm for a Variable in
+// neither node nor edge lane: CALL YIELD, then carried alias, else out
+// of scope.
+func (s *scope) unboundRefProjectionType(ref query.Ref) (ResolvedType, error) {
+	// R7 §4.2 — CALL YIELD lane, fired BEFORE the carried-alias bypass.
+	if slot, ok := s.callTypes[ref.Variable]; ok {
+		return callProjectionType(slot, ref, s.nullableBinding)
+	}
+	// §4.5.4 — carried-alias bypass. A RefProjection whose Variable lives
+	// only in carriedResolvedTypes yields the carried type verbatim
+	// (property lookups on a carried alias are unreachable — parser scope
+	// check rejects Ref{"c", "p"} unless c is a binding-name in scope).
+	if rt, ok := s.carriedResolvedTypes[ref.Variable]; ok && ref.Property == "" {
+		return rt, nil
+	}
+	return nil, fmt.Errorf("%w: %s", ErrOutOfR0Scope, ref.Variable)
+}
+
+// edgeRefProjectionType is refProjectionType's arm for a closed edge
+// binding, single-candidate (singleCand) or union (cands).
+func (s *scope) edgeRefProjectionType(ref query.Ref, sch schema.Schema, singleCand bool, cands []schema.EdgeKey) (ResolvedType, error) {
 	binding := s.edgeBindings[ref.Variable]
 	varLength := binding.Hops() != nil
 	edgeNullable := s.nullableBinding[ref.Variable]
@@ -1453,15 +1458,31 @@ func (s *scope) refProjectionType(ref query.Ref, sch schema.Schema) (ResolvedTyp
 	if varLength {
 		return nil, fmt.Errorf("%w: property projection on variable-length edge binding: reach list elements via list-element access (UNWIND in R5 or later)", ErrOutOfR0Scope)
 	}
-	if singleCand {
-		et := s.edgeTypes[ref.Variable]
-		prop, ok := et.Properties[ref.Property]
-		if !ok {
-			return nil, fmt.Errorf("%w: %s.%s", ErrUnknownProperty, ref.Variable, ref.Property)
-		}
-		return ResolvedProperty{Type: prop.Type, Nullable: prop.Nullable || edgeNullable}, nil
+	return boundEdgePropertyType(s.edgeTypes[ref.Variable], singleCand, cands, sch, ref, edgeNullable)
+}
+
+// boundNodePropertyType types ref against the one node type its Variable
+// is bound to; a property the type does not declare is ErrUnknownProperty.
+func boundNodePropertyType(nt schema.NodeType, ref query.Ref, nodeNullable bool) (ResolvedType, error) {
+	prop, ok := nt.Properties[ref.Property]
+	if !ok {
+		return nil, fmt.Errorf("%w: %s.%s", ErrUnknownProperty, ref.Variable, ref.Property)
 	}
-	return unionProperty(cands, sch, ref.Variable, ref.Property, edgeNullable, clauseRead)
+	return ResolvedProperty{Type: prop.Type, Nullable: prop.Nullable || nodeNullable}, nil
+}
+
+// boundEdgePropertyType types ref against a closed edge binding: the
+// declared property of the single candidate et, or unionProperty over
+// cands. et is only meaningful when singleCand is true.
+func boundEdgePropertyType(et schema.EdgeType, singleCand bool, cands []schema.EdgeKey, sch schema.Schema, ref query.Ref, edgeNullable bool) (ResolvedType, error) {
+	if !singleCand {
+		return unionProperty(cands, sch, ref.Variable, ref.Property, edgeNullable, clauseRead)
+	}
+	prop, ok := et.Properties[ref.Property]
+	if !ok {
+		return nil, fmt.Errorf("%w: %s.%s", ErrUnknownProperty, ref.Variable, ref.Property)
+	}
+	return ResolvedProperty{Type: prop.Type, Nullable: prop.Nullable || edgeNullable}, nil
 }
 
 // Export builds the branchState Part K passes to Part K+1 (§4.2.2).
@@ -1573,30 +1594,8 @@ func (s *scope) exportBindingLanes(out *branchState, item query.ReturnItem, loca
 		return
 	}
 	v := ref.Variable
-	if nt, ok := s.nodeTypes[v]; ok {
-		out.exportedNodeTypes[v] = nt
-	}
-	if cands, ok := s.nodeCands[v]; ok {
-		out.exportedNodeCands[v] = cands
-		// Only alongside a nodeCands entry: the lane is meaningless for a
-		// name with no candidate set, and seeding it for one would put a
-		// true into a downstream scope that nothing ever clears.
-		if s.pluralByInference[v] {
-			out.exportedPluralByInference[v] = true
-		}
-	}
-	if et, ok := s.edgeTypes[v]; ok {
-		out.exportedEdgeTypes[v] = et
-		if k, ok := s.edgeKeys[v]; ok {
-			out.exportedEdgeKeys[v] = k
-		}
-	}
-	if cands, ok := s.edgeCands[v]; ok {
-		out.exportedEdgeCands[v] = cands
-	}
-	if b, ok := s.edgeBindings[v]; ok {
-		out.exportedEdgeBindings[v] = b
-	}
+	s.exportNodeBindingLanes(out, v)
+	s.exportEdgeBindingLanes(out, v)
 	if nb, ok := s.nullableBinding[v]; ok {
 		out.exportedNullableBinding[v] = nb
 	}
@@ -1615,6 +1614,42 @@ func (s *scope) exportBindingLanes(out *branchState, item query.ReturnItem, loca
 		}
 	} else if g, ok := s.carriedGroups[v]; ok && g > 0 {
 		out.exportedOptionalGroup[v] = g
+	}
+}
+
+// exportNodeBindingLanes copies v's node lanes (type, candidates,
+// plural-by-inference) into out.
+func (s *scope) exportNodeBindingLanes(out *branchState, v string) {
+	if nt, ok := s.nodeTypes[v]; ok {
+		out.exportedNodeTypes[v] = nt
+	}
+	cands, ok := s.nodeCands[v]
+	if !ok {
+		return
+	}
+	out.exportedNodeCands[v] = cands
+	// Only alongside a nodeCands entry: the lane is meaningless for a
+	// name with no candidate set, and seeding it for one would put a
+	// true into a downstream scope that nothing ever clears.
+	if s.pluralByInference[v] {
+		out.exportedPluralByInference[v] = true
+	}
+}
+
+// exportEdgeBindingLanes copies v's edge lanes (type, key, candidates,
+// binding) into out.
+func (s *scope) exportEdgeBindingLanes(out *branchState, v string) {
+	if et, ok := s.edgeTypes[v]; ok {
+		out.exportedEdgeTypes[v] = et
+		if k, ok := s.edgeKeys[v]; ok {
+			out.exportedEdgeKeys[v] = k
+		}
+	}
+	if cands, ok := s.edgeCands[v]; ok {
+		out.exportedEdgeCands[v] = cands
+	}
+	if b, ok := s.edgeBindings[v]; ok {
+		out.exportedEdgeBindings[v] = b
 	}
 }
 
@@ -1699,11 +1734,7 @@ func (sc partScope) Contains(v string) bool {
 // witnessing rather than projection).
 func (sc partScope) PropertyUseWitness(ref query.Ref, s schema.Schema) (ResolvedType, error) {
 	if nt, ok := sc.nodeTypes[ref.Variable]; ok {
-		prop, ok := nt.Properties[ref.Property]
-		if !ok {
-			return nil, fmt.Errorf("%w: %s.%s", ErrUnknownProperty, ref.Variable, ref.Property)
-		}
-		return ResolvedProperty{Type: prop.Type, Nullable: prop.Nullable || sc.nullableBinding[ref.Variable]}, nil
+		return boundNodePropertyType(nt, ref, sc.nullableBinding[ref.Variable])
 	}
 	if nts, ok := sc.nodeCands[ref.Variable]; ok {
 		return unionNodeProperty(nts, ref.Variable, ref.Property, sc.nullableBinding[ref.Variable], clauseRead)
@@ -1721,16 +1752,7 @@ func (sc partScope) PropertyUseWitness(ref query.Ref, s schema.Schema) (Resolved
 	if binding := sc.edgeBindings[ref.Variable]; binding.Hops() != nil {
 		return nil, fmt.Errorf("%w: property projection on variable-length edge binding: reach list elements via list-element access (UNWIND in R5 or later)", ErrOutOfR0Scope)
 	}
-	edgeNullable := sc.nullableBinding[ref.Variable]
-	if singleCand {
-		et := sc.edgeTypes[ref.Variable]
-		prop, ok := et.Properties[ref.Property]
-		if !ok {
-			return nil, fmt.Errorf("%w: %s.%s", ErrUnknownProperty, ref.Variable, ref.Property)
-		}
-		return ResolvedProperty{Type: prop.Type, Nullable: prop.Nullable || edgeNullable}, nil
-	}
-	return unionProperty(cands, s, ref.Variable, ref.Property, edgeNullable, clauseRead)
+	return boundEdgePropertyType(sc.edgeTypes[ref.Variable], singleCand, cands, s, ref, sc.nullableBinding[ref.Variable])
 }
 
 // WitnessUse produces exactly one witness (or zero) for a Use. The

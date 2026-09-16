@@ -101,21 +101,30 @@ func referencesCarrier(p Prepared, set map[string]struct{}) bool {
 		}
 	}
 	for _, q := range p.Queries {
-		for _, param := range q.ParamFields {
-			if typeTextNamesCarrier(param.GoType, set) {
-				return true
-			}
+		if queryNamesCarrier(q, set) {
+			return true
 		}
-		for _, row := range q.RowFields {
-			if typeTextNamesCarrier(row.GoType, set) {
-				return true
-			}
+	}
+	return false
+}
+
+// queryNamesCarrier is referencesCarrier's walk over one query's
+// positions: parameters, row fields and every nested list element.
+func queryNamesCarrier(q Query, set map[string]struct{}) bool {
+	for _, param := range q.ParamFields {
+		if typeTextNamesCarrier(param.GoType, set) {
+			return true
 		}
-		for _, row := range q.RowFields {
-			for elem := row.ListElem; elem != nil; elem = elem.Nested {
-				if typeTextNamesCarrier(elem.GoType, set) {
-					return true
-				}
+	}
+	for _, row := range q.RowFields {
+		if typeTextNamesCarrier(row.GoType, set) {
+			return true
+		}
+	}
+	for _, row := range q.RowFields {
+		for elem := row.ListElem; elem != nil; elem = elem.Nested {
+			if typeTextNamesCarrier(elem.GoType, set) {
+				return true
 			}
 		}
 	}

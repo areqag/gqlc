@@ -381,25 +381,9 @@ func aggregateResultType(fn query.AggregateFunc, operand query.Type) query.Type 
 		}
 		return query.NewTypeList(operand)
 	case query.AggSum:
-		switch operand.(type) {
-		case query.TypeInt:
-			return query.TypeInt{}
-		case query.TypeFloat:
-			return query.TypeFloat{}
-		case query.TypeDuration:
-			return query.TypeDuration{}
-		default:
-			return query.TypeUnknown{}
-		}
+		return sumResultType(operand)
 	case query.AggMin, query.AggMax:
-		switch operand.(type) {
-		case query.TypeInt, query.TypeFloat, query.TypeString, query.TypeBool,
-			query.TypeDate, query.TypeTime, query.TypeLocalTime,
-			query.TypeDateTime, query.TypeLocalDateTime, query.TypeDuration:
-			return operand
-		default:
-			return query.TypeUnknown{}
-		}
+		return minMaxResultType(operand)
 	case query.AggAvg:
 		// avg(duration) is the only spec-committed numeric case; every other
 		// operand (int/float, mixed, property) is engine-dependent (int vs
@@ -418,6 +402,30 @@ func aggregateResultType(fn query.AggregateFunc, operand query.Type) query.Type 
 	// inner type-switches keep their defaults: query.Type is an open
 	// interface, not a closed sum.
 	return query.TypeUnknown{}
+}
+
+func sumResultType(operand query.Type) query.Type {
+	switch operand.(type) {
+	case query.TypeInt:
+		return query.TypeInt{}
+	case query.TypeFloat:
+		return query.TypeFloat{}
+	case query.TypeDuration:
+		return query.TypeDuration{}
+	default:
+		return query.TypeUnknown{}
+	}
+}
+
+func minMaxResultType(operand query.Type) query.Type {
+	switch operand.(type) {
+	case query.TypeInt, query.TypeFloat, query.TypeString, query.TypeBool,
+		query.TypeDate, query.TypeTime, query.TypeLocalTime,
+		query.TypeDateTime, query.TypeLocalDateTime, query.TypeDuration:
+		return operand
+	default:
+		return query.TypeUnknown{}
+	}
 }
 
 // functionArgRefs mines the bindings a function/aggregate call references: each

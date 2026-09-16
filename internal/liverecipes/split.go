@@ -141,7 +141,16 @@ func (s Split) Complaints() []string {
 		complaints = append(complaints,
 			"no workflow reaches a live `go test`, so no live test is required to run anywhere")
 	}
+	complaints = append(complaints, s.selectedByNoDeclaredTest()...)
+	complaints = append(complaints, s.declaredButRunByNoCIJob()...)
+	complaints = append(complaints, s.declaredButNarrowedLocally()...)
+	return complaints
+}
 
+// selectedByNoDeclaredTest is one complaint per -run alternative, over CI and
+// Local alike, that names no declared test.
+func (s Split) selectedByNoDeclaredTest() []string {
+	var complaints []string
 	for _, inv := range append(slices.Clone(s.CI), s.Local...) {
 		for _, pattern := range FlagValues(inv.Fields, "run") {
 			for _, alt := range strings.Split(pattern, "|") {
@@ -154,7 +163,13 @@ func (s Split) Complaints() []string {
 			}
 		}
 	}
+	return complaints
+}
 
+// declaredButRunByNoCIJob is one complaint per declared test no CI invocation
+// claims.
+func (s Split) declaredButRunByNoCIJob() []string {
+	var complaints []string
 	for _, name := range s.Declared {
 		if !slices.ContainsFunc(s.CI, func(inv Invocation) bool { return inv.Claims(name) }) {
 			complaints = append(complaints, fmt.Sprintf(
@@ -162,7 +177,13 @@ func (s Split) Complaints() []string {
 					"was meant to gate it goes green without it", name))
 		}
 	}
+	return complaints
+}
 
+// declaredButNarrowedLocally is one complaint per declared test some Local
+// invocation does not claim.
+func (s Split) declaredButNarrowedLocally() []string {
+	var complaints []string
 	for _, inv := range s.Local {
 		for _, name := range s.Declared {
 			if !inv.Claims(name) {
@@ -252,12 +273,8 @@ func liveInvocations(src string) ([]Invocation, []string) {
 		recipe     string
 	)
 	for _, line := range strings.Split(src, "\n") {
-		if line != "" && !strings.HasPrefix(line, " ") && !strings.HasPrefix(line, "\t") {
-			name, _, isHeader := strings.Cut(line, ":")
-			recipe = ""
-			if isHeader && !strings.ContainsAny(name, " \t#") {
-				recipe = name
-			}
+		if name, unindented := recipeHeader(line); unindented {
+			recipe = name
 		}
 		stripped := StripComment(line)
 		commands, unterminated := Commands(stripped)
@@ -278,6 +295,20 @@ func liveInvocations(src string) ([]Invocation, []string) {
 		}
 	}
 	return found, complaints
+}
+
+// recipeHeader reports whether line is unindented and non-empty, which ends
+// the recipe before it, and the name of the recipe it opens, or "" when it
+// opens none.
+func recipeHeader(line string) (string, bool) {
+	if line == "" || strings.HasPrefix(line, " ") || strings.HasPrefix(line, "\t") {
+		return "", false
+	}
+	name, _, isHeader := strings.Cut(line, ":")
+	if isHeader && !strings.ContainsAny(name, " \t#") {
+		return name, true
+	}
+	return "", true
 }
 
 // buildsLiveTag reports whether a command line compiles the live battery. Every

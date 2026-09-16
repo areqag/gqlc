@@ -391,6 +391,21 @@ func (h *helpers) markLeafEncoder(leaf string) bool {
 	return true
 }
 
+// forQueries marks the helpers a batch's queries decode and bind through:
+// the args map for any query with a parameter, each parameter's encoder,
+// and each row column's decoder.
+func (h *helpers) forQueries(queries []codegen.Query) {
+	for _, p := range queries {
+		if len(p.ParamFields) > 0 {
+			h.args = true
+		}
+		h.forParams(p.ParamFields)
+		for _, f := range p.RowFields {
+			h.need(f.GoType, f.Width)
+		}
+	}
+}
+
 // paramLeaf walks one bound parameter's carrier text down to its leaf,
 // reporting the leaf's text and width and whether a list level or a
 // nullable element was crossed on the way.
@@ -487,7 +502,14 @@ func (h *helpers) need(goType string, width graph.PropertyType) {
 		h.needValue()
 		return
 	}
-	switch agtypeCarrier(goType) {
+	h.needCarrier(goType)
+}
+
+// needCarrier marks the helper one scalar carrier decodes through, plus
+// the checked narrowing where the declared width is narrower than the
+// carrier.
+func (h *helpers) needCarrier(goType string) {
+	switch carrier := agtypeCarrier(goType); carrier {
 	case "bool":
 		h.boolean = true
 	case "int64":
@@ -500,6 +522,15 @@ func (h *helpers) need(goType string, width graph.PropertyType) {
 		if goType != "float64" {
 			h.narrowFloat = true
 		}
+	default:
+		h.needTemporalCarrier(carrier)
+	}
+}
+
+// needTemporalCarrier marks the temporal decoder a carrier rides, and the
+// scalar helper that decoder is built on.
+func (h *helpers) needTemporalCarrier(carrier string) {
+	switch carrier {
 	case goInstant:
 		// The instant rides the integer scalar, so its helper is built
 		// on the integer one.
@@ -1273,6 +1304,12 @@ func agtypeTimeZone(props map[string][]byte, key string, t Time) (Time, error) {
 }
 `)
 	}
+	writeDurationAndSidecarDecoders(b, h)
+}
+
+// writeDurationAndSidecarDecoders emits agtypeDuration and the two
+// sidecar readers, agtypeOffset and agtypeZone.
+func writeDurationAndSidecarDecoders(b *strings.Builder, h helpers) {
 	if h.duration {
 		b.WriteString(`
 // agtypeDuration decodes a stored DURATION: the integer scalar, counting

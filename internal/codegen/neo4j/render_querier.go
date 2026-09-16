@@ -21,51 +21,53 @@ func renderQuerier(pkg string, prepared []codegen.Query, target driverTarget) []
 	b.WriteString("package ")
 	b.WriteString(pkg)
 	b.WriteString("\n\n")
-	// Import set: context always (for method signatures); dbtype iff a
-	// method signature names a dbtype.<Kind>; time iff a signature names
-	// time.Time. The signature-search runs over Params and Row types.
-	needDbtype, needTime, needIter := querierImports(prepared)
 	if len(prepared) > 0 {
-		if needDbtype || needTime || needIter {
-			b.WriteString("import (\n\t\"context\"\n")
-			if needIter {
-				b.WriteString("\t\"iter\"\n")
-			}
-			if needTime {
-				b.WriteString("\t\"time\"\n")
-			}
-			if needDbtype {
-				b.WriteString("\n\t\"" + target.dbtypeImport + "\"\n")
-			}
-			b.WriteString(")\n\n")
-		} else {
-			b.WriteString("import \"context\"\n\n")
-		}
+		writeQuerierImports(&b, prepared, target)
 	}
-	b.WriteString("type ReadQuerier interface {\n")
-	for _, p := range prepared {
-		if p.IsWrite {
-			continue
-		}
-		b.WriteString("\t")
-		writeMethodSignature(&b, p)
-		b.WriteString("\n")
-	}
-	b.WriteString("}\n\n")
-	b.WriteString("type WriteQuerier interface {\n")
-	for _, p := range prepared {
-		if !p.IsWrite {
-			continue
-		}
-		b.WriteString("\t")
-		writeMethodSignature(&b, p)
-		b.WriteString("\n")
-	}
-	b.WriteString("}\n\n")
+	writeQuerierInterface(&b, "ReadQuerier", prepared, false)
+	writeQuerierInterface(&b, "WriteQuerier", prepared, true)
 	b.WriteString("type Querier interface {\n\tReadQuerier\n\tWriteQuerier\n}\n\n")
 	b.WriteString("var _ Querier = (*Queries)(nil)\n")
 	b.WriteString("var _ Querier = (*Tx)(nil)\n")
 	return []byte(b.String())
+}
+
+// writeQuerierImports writes querier.go's import block.
+func writeQuerierImports(b *strings.Builder, prepared []codegen.Query, target driverTarget) {
+	// Import set: context always (for method signatures); dbtype iff a
+	// method signature names a dbtype.<Kind>; time iff a signature names
+	// time.Time. The signature-search runs over Params and Row types.
+	needDbtype, needTime, needIter := querierImports(prepared)
+	if !needDbtype && !needTime && !needIter {
+		b.WriteString("import \"context\"\n\n")
+		return
+	}
+	b.WriteString("import (\n\t\"context\"\n")
+	if needIter {
+		b.WriteString("\t\"iter\"\n")
+	}
+	if needTime {
+		b.WriteString("\t\"time\"\n")
+	}
+	if needDbtype {
+		b.WriteString("\n\t\"" + target.dbtypeImport + "\"\n")
+	}
+	b.WriteString(")\n\n")
+}
+
+// writeQuerierInterface writes one of the two partition interfaces,
+// listing the methods whose IsWrite equals isWrite in prepared order.
+func writeQuerierInterface(b *strings.Builder, name string, prepared []codegen.Query, isWrite bool) {
+	b.WriteString("type " + name + " interface {\n")
+	for _, p := range prepared {
+		if p.IsWrite != isWrite {
+			continue
+		}
+		b.WriteString("\t")
+		writeMethodSignature(b, p)
+		b.WriteString("\n")
+	}
+	b.WriteString("}\n\n")
 }
 
 // querierImports scans every prepared query's method signature (params
