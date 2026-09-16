@@ -203,7 +203,7 @@ func (l *listener) collectNode(n gen.IOC_NodePatternContext, group int, bare boo
 	}
 	l.mineInlineMap(variable, n.OC_Properties())
 	if variable != "" && !l.nameBoundAsUnwind(variable) {
-		l.mergeBinding(variable, graph.Node, nodeLabels(n.OC_NodeLabels()), nil, nil, group, false, nil, bare)
+		l.mergeBinding(variable, graph.Node, mergeOccurrence{labels: nodeLabels(n.OC_NodeLabels()), group: group}, bare)
 	}
 	l.recordPathNode(variable)
 }
@@ -286,6 +286,7 @@ func (l *listener) collectEdge(r gen.IOC_RelationshipPatternContext, prev, next 
 	}
 
 	l.recordEndpointRefs(source, target)
+	occ := mergeOccurrence{labels: labels, source: source, target: target, group: group, undirected: !directed, hops: hops}
 	if variable == "" {
 		// An anonymous edge is its own binding (C1): append the raw binding and let
 		// build() construct it once, exactly as the named path does — no early
@@ -293,14 +294,12 @@ func (l *listener) collectEdge(r gen.IOC_RelationshipPatternContext, prev, next 
 		// introduced inside OPTIONAL MATCH carry the group id (and thus the
 		// nullable flag) uniformly (ADR 0006; ay9) even though no Ref will ever
 		// observe it.
-		rb := &rawBinding{variable: "", kind: graph.Edge, source: source, target: target, optionalGroup: group, undirected: !directed, hops: hops}
-		rb.mergeLabels(labels)
-		l.appendBinding(rb)
+		l.appendBinding(occ.introduce("", graph.Edge))
 		l.recordPathEdge("")
 		return
 	}
 	if !l.nameBoundAsUnwind(variable) {
-		l.mergeNamedEdge(variable, labels, source, target, group, directed, hops)
+		l.mergeNamedEdge(variable, occ)
 	}
 	l.recordPathEdge(variable)
 }
@@ -336,15 +335,15 @@ func (l *listener) collectEdgeDetail(d gen.IOC_RelationshipDetailContext) (varia
 // was previously introduced as OPTIONAL (optionalGroup > 0) witnesses that
 // the edge is non-null on all surviving rows. Set the flag monotonically on
 // the raw binding after mergeBinding updates it.
-func (l *listener) mergeNamedEdge(variable string, labels graph.LabelSet, source, target query.Endpoint, group int, directed bool, hops *query.EdgeHops) {
+func (l *listener) mergeNamedEdge(variable string, occ mergeOccurrence) {
 	part := l.curPart
 	priorIdx, alreadyBound := part.byVar[variable]
 	isOptionalIntroduced := alreadyBound && part.bindings[priorIdx].optionalGroup > 0
 	// 5xg: an edge is grammatically never bare — it always sits inside
 	// -[...]- between two node positions — so the parameter is a
 	// compile-time constant false at this site.
-	l.mergeBinding(variable, graph.Edge, labels, source, target, group, !directed, hops, false)
-	if isOptionalIntroduced && group == 0 {
+	l.mergeBinding(variable, graph.Edge, occ, false)
+	if isOptionalIntroduced && occ.group == 0 {
 		// The variable was OPTIONAL-introduced and this occurrence is in a
 		// required (non-OPTIONAL) clause — mark the binding as chain-witnessed.
 		if idx, ok := part.byVar[variable]; ok {
@@ -417,6 +416,26 @@ func (l *listener) recordEndpointRefs(eps ...query.Endpoint) {
 	}
 }
 
+// mergeOccurrence is one pattern occurrence of a variable as mergeBinding sees
+// it: the labels it names and, for an edge, its endpoints, direction and hop
+// range (a node occurrence leaves those zero), plus the OPTIONAL group of the
+// clause the occurrence sits in.
+type mergeOccurrence struct {
+	labels     graph.LabelSet
+	source     query.Endpoint
+	target     query.Endpoint
+	group      int
+	undirected bool
+	hops       *query.EdgeHops
+}
+
+// introduce is the binding a first occurrence of variable introduces.
+func (occ mergeOccurrence) introduce(variable string, kind graph.EntityKind) *rawBinding {
+	rb := &rawBinding{variable: variable, kind: kind, seen: map[string]bool{}, source: occ.source, target: occ.target, optionalGroup: occ.group, undirected: occ.undirected, hops: occ.hops}
+	rb.mergeLabels(occ.labels)
+	return rb
+}
+
 // mergeBinding records a binding for variable in the current part, deduping the
 // part's named bindings by variable in first-appearance order and combining their
 // labels (ordered, first appearance, C2). Dedup is per-part: a name re-MATCHed in
@@ -440,17 +459,15 @@ func (l *listener) recordEndpointRefs(eps ...query.Endpoint) {
 // clears them — that demotion is the resolver's job (gqlc-lqm). Stage 8: hops
 // carries the var-length hop range (nil for single-hop); it is honoured only
 // on first introduction, matching the group/directed discipline.
-func (l *listener) mergeBinding(variable string, kind graph.EntityKind, labels graph.LabelSet, source, target query.Endpoint, group int, undirected bool, hops *query.EdgeHops, bare bool) {
+func (l *listener) mergeBinding(variable string, kind graph.EntityKind, occ mergeOccurrence, bare bool) {
 	if l.suppressed() {
 		return
 	}
 	part := l.curPart
 	idx, ok := part.byVar[variable]
 	if !ok {
-		rb := &rawBinding{variable: variable, kind: kind, seen: map[string]bool{}, source: source, target: target, optionalGroup: group, undirected: undirected, hops: hops}
-		rb.mergeLabels(labels)
 		part.byVar[variable] = len(part.bindings)
-		part.bindings = append(part.bindings, rb)
+		part.bindings = append(part.bindings, occ.introduce(variable, kind))
 		return
 	}
 	rb := part.bindings[idx]
@@ -460,15 +477,15 @@ func (l *listener) mergeBinding(variable string, kind graph.EntityKind, labels g
 	}
 	if kind == graph.Edge {
 		prior := rb.labels
-		if !rb.intersectLabels(labels) {
+		if !rb.intersectLabels(occ.labels) {
 			l.fail(fmt.Errorf("%w: relationship variable %q is constrained to %s by an earlier occurrence and to %s here, and a relationship has exactly one type, so no relationship satisfies both",
-				ErrUnsatisfiableRelationshipType, variable, strings.Join(prior, "|"), strings.Join(labels, "|")))
+				ErrUnsatisfiableRelationshipType, variable, strings.Join(prior, "|"), strings.Join(occ.labels, "|")))
 			return
 		}
 	} else {
-		rb.mergeLabels(labels)
+		rb.mergeLabels(occ.labels)
 	}
-	if group == 0 && bare {
+	if occ.group == 0 && bare {
 		// 5xg: the current occurrence is a required (non-OPTIONAL) bare
 		// pattern re-reference of a binding that was previously introduced.
 		// The flag is monotone (once set, stays true), so repeated bare
