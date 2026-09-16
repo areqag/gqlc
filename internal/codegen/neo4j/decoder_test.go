@@ -203,7 +203,7 @@ const typeTableSource = "types.go"
 // declares.
 func TestDecoderProbeCoversTheTypeTable(t *testing.T) {
 	declared := graphPropertyTypes(t)
-	arms := propertyArmNames(t)
+	rows := propertyRowNames(t)
 
 	// The scalar table is held to naming real constants first, before its
 	// entries are relied on below. A mistyped entry would otherwise widen
@@ -219,8 +219,8 @@ func TestDecoderProbeCoversTheTypeTable(t *testing.T) {
 		require.True(t, known, "decoderProbeLeaves names %s, which %s declares no constant for", w.pt, graphPropertyTypeSource)
 		require.NotEqual(t, graph.KindList, w.pt.Kind(),
 			"decoderProbeLeaves names graph.%s, which is a list type: the list arms are derived, not listed", name)
-		require.Contains(t, arms, name,
-			"decoderProbeLeaves names graph.%s, which Property has no arm for", name)
+		require.Contains(t, rows, name,
+			"decoderProbeLeaves names graph.%s, which propertyCarriers has no row for", name)
 		require.True(t, neo4j.TypeMap{}.StorableProperty(w.pt),
 			"decoderProbeLeaves names graph.%s, which this backend refuses as a stored property: every "+
 				"entry here is declared as one, so this makes the probe schema unbuildable rather than "+
@@ -236,9 +236,9 @@ func TestDecoderProbeCoversTheTypeTable(t *testing.T) {
 	for _, name := range declared {
 		names[name] = true
 	}
-	for name := range arms {
+	for name := range rows {
 		require.True(t, names[name],
-			"%s has an arm for graph.%s and %s yielded no constant of that name, so the coverage "+
+			"%s has a row for graph.%s and %s yielded no constant of that name, so the coverage "+
 				"obligation below cannot see it", typeTableSource, name, graphPropertyTypeSource)
 	}
 
@@ -305,12 +305,12 @@ func TestDecoderProbeCoversTheTypeTable(t *testing.T) {
 	}
 }
 
-// graphPropertyTypes and propertyArmNames read internal/graph's declared
-// property types and this backend's arms for them. Both walks live in
+// graphPropertyTypes and propertyRowNames read internal/graph's declared
+// property types and this backend's rows for them. Both walks live in
 // internal/codegen/typescan, which is where AGE reads its own from: the
 // obligation they support is a backend's, but the shape of a const block
-// and of a switch arm is not, and a second copy of either walk would
-// drift out of step in silence.
+// and of a map literal's keys is not, and a second copy of either walk
+// would drift out of step in silence.
 func graphPropertyTypes(t *testing.T) map[graph.PropertyType]string {
 	t.Helper()
 	out, err := typescan.PropertyTypes(graphPropertyTypeSource)
@@ -318,9 +318,9 @@ func graphPropertyTypes(t *testing.T) map[graph.PropertyType]string {
 	return out
 }
 
-func propertyArmNames(t *testing.T) map[string]bool {
+func propertyRowNames(t *testing.T) map[string]bool {
 	t.Helper()
-	out, err := typescan.PropertyArms(typeTableSource, "Property")
+	out, err := typescan.PropertyRows(typeTableSource, "propertyCarriers")
 	require.NoError(t, err)
 	return out
 }

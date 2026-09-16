@@ -1,6 +1,6 @@
 // Package typescan reads two declarations as syntax trees: the property
 // types internal/graph declares, and the ones a backend's type table has
-// a switch arm for.
+// a row for.
 //
 // Neither can be read off the compiled program. internal/graph's
 // constants are values of an open string type, so nothing enumerates
@@ -9,17 +9,22 @@
 // all. Both answers live in the source or nowhere.
 //
 // What the pair buys is a bidirectional obligation a backend's test can
-// state: every arm owes a row in a table that says what it answers, and
-// every row owes an arm, so a row cannot quietly measure the fallthrough
-// instead of a decision. It fired on gqlc-h9n.33 the moment an arm was
-// added, and named the repair.
+// state: every table row owes a row in a test table that says what it
+// answers, and every test row owes a table row, so a test row cannot
+// quietly measure the fallthrough instead of a decision. It fired on
+// gqlc-h9n.33 the moment an arm was added, and named the repair.
 //
 // It is a package rather than a helper in one backend's test files
 // because it was one, in internal/codegen/neo4j, and internal/codegen/age
 // had the same two tables and no walk at all — so an AGE arm could answer
 // anything and no test named it (bd gqlc-ozdkx). What a Go const block is
-// and what a switch arm is do not vary by backend, which is the same
-// reason internal/codegen/emitscan exists.
+// and what a map literal's keys are do not vary by backend, which is the
+// same reason internal/codegen/emitscan exists.
+//
+// The table was a switch until bd gqlc-ek1w, when it became a map literal
+// keyed by the graph constants so that Property could pass the gocyclo
+// gate at 10; PropertyRows reads the keys the way PropertyArms read the
+// case expressions, and the obligation is the same one.
 //
 // Every error names the file it was read from. The caller passes that
 // path, so the message stays true when a backend's table moves and there
@@ -116,15 +121,18 @@ func readPropertyTypeSpec(source string, vs *ast.ValueSpec, out map[graph.Proper
 	return nil
 }
 
-// PropertyArms names every graph constant the named method switches on in
-// the given source, whether or not its arm answers with a carrier: an arm
-// returning ("", false) is as much a decision as one returning a carrier,
-// and is exactly the kind that goes unexamined.
+// PropertyRows names every graph constant the named package-level map
+// literal has a row for in the given source, whether or not its row answers
+// with a carrier: a row holding "" is as much a decision as one holding a
+// carrier, and is exactly the kind that goes unexamined.
 //
 // An empty result is returned without complaint. Whether a backend owing
-// arms has none is the caller's question, and only the caller knows
-// whether the obligation it is about to state would be vacuous.
-func PropertyArms(source, method string) (map[string]bool, error) {
+// rows has none is the caller's question, and only the caller knows
+// whether the obligation it is about to state would be vacuous. A var of
+// that name whose value is not a composite literal reads the same as no
+// var at all, for the same reason: it is the caller's NotEmpty that says
+// the walk read nothing.
+func PropertyRows(source, table string) (map[string]bool, error) {
 	file, err := parser.ParseFile(token.NewFileSet(), source, nil, parser.SkipObjectResolution)
 	if err != nil {
 		return nil, fmt.Errorf("%s does not parse: %w", source, err)
@@ -132,30 +140,44 @@ func PropertyArms(source, method string) (map[string]bool, error) {
 
 	out := make(map[string]bool)
 	for _, decl := range file.Decls {
-		fn, ok := decl.(*ast.FuncDecl)
-		if !ok || fn.Name.Name != method || fn.Recv == nil {
+		gd, ok := decl.(*ast.GenDecl)
+		if !ok || gd.Tok != token.VAR {
 			continue
 		}
-		ast.Inspect(fn.Body, func(n ast.Node) bool {
-			if clause, isClause := n.(*ast.CaseClause); isClause {
-				graphArmConsts(clause, out)
-			}
-			return true
-		})
+		for _, spec := range gd.Specs {
+			tableRowConsts(spec, table, out)
+		}
 	}
 	return out, nil
 }
 
-// graphArmConsts records into out every graph-qualified selector one
-// case clause names.
-func graphArmConsts(clause *ast.CaseClause, out map[string]bool) {
-	for _, expr := range clause.List {
-		sel, isSel := expr.(*ast.SelectorExpr)
-		if !isSel {
-			continue
+// tableRowConsts records into out every graph-qualified selector used as a
+// key of the composite literal a var spec of the given name is initialised
+// with.
+func tableRowConsts(spec ast.Spec, table string, out map[string]bool) {
+	vs, ok := spec.(*ast.ValueSpec)
+	if !ok || len(vs.Names) != 1 || vs.Names[0].Name != table || len(vs.Values) != 1 {
+		return
+	}
+	lit, ok := vs.Values[0].(*ast.CompositeLit)
+	if !ok {
+		return
+	}
+	for _, elt := range lit.Elts {
+		if kv, isKV := elt.(*ast.KeyValueExpr); isKV {
+			recordGraphConst(kv.Key, out)
 		}
-		if pkg, isIdent := sel.X.(*ast.Ident); isIdent && pkg.Name == "graph" {
-			out[sel.Sel.Name] = true
-		}
+	}
+}
+
+// recordGraphConst records into out the name a graph-qualified selector
+// expression names, and nothing for any other expression.
+func recordGraphConst(expr ast.Expr, out map[string]bool) {
+	sel, isSel := expr.(*ast.SelectorExpr)
+	if !isSel {
+		return
+	}
+	if pkg, isIdent := sel.X.(*ast.Ident); isIdent && pkg.Name == "graph" {
+		out[sel.Sel.Name] = true
 	}
 }

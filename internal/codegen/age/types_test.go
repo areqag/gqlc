@@ -25,9 +25,9 @@ import (
 // has a list and a map of its own, so a list of a carried element width,
 // Go's any (ADR 0020) and an undeclared record all have something to
 // decode from. The rows
-// pin each width's mapping; the constant set they range over is held by
-// Property's switch, which has no default arm and so fails the
-// exhaustive linter when internal/graph grows one.
+// pin each width's mapping; the constant set they range over is held
+// below, where the table's rows and internal/graph's constants are read
+// off their sources and held to each other.
 func TestTypeMapProperty(t *testing.T) {
 	representable := []struct {
 		pt   graph.PropertyType
@@ -53,7 +53,7 @@ func TestTypeMapProperty(t *testing.T) {
 		{graph.TypeAnyPropertyValue, "any"},
 		{graph.TypeList, "[]any"},
 		// RECORD<ANY>, the third structured width, admitted since stage 1
-		// of gqlc-x9tg7. Its arm is unreachable for the same reason
+		// of gqlc-x9tg7. Its row is unreachable for the same reason
 		// TypeList's is — Kind() reports KindRecord, so the guard at the
 		// top of Property answers it — and the row pins what a caller
 		// declaring one gets however it is reached.
@@ -98,20 +98,20 @@ func TestTypeMapProperty(t *testing.T) {
 		})
 	}
 
-	// Every constant the switch has an arm for owes a row above, and every
-	// row owes an arm. The two walks read different files — PropertyArms
-	// the case expressions in this backend's type table, PropertyTypes the
-	// const specs in internal/graph — so a name in an arm that no constant
-	// declares fails here too, rather than quietly widening the obligation
-	// by a spelling nothing upstream holds.
+	// Every constant propertyCarriers has a row for owes a row above, and
+	// every row above owes a table row. The two walks read different files
+	// — PropertyRows the map literal's keys in this backend's type table,
+	// PropertyTypes the const specs in internal/graph — so a name in a
+	// table row that no constant declares fails here too, rather than
+	// quietly widening the obligation by a spelling nothing upstream holds.
 	//
-	// The doc comment above says the constant SET is held by Property's
-	// switch having no default arm. That is a claim about the SET and not
-	// this obligation: it concerns a constant internal/graph gains, and
-	// says nothing about what an arm that already exists answers. Measured
-	// 2026-09-02 (bd gqlc-ozdkx): deleting the TypeUint16 row with its arm
-	// left in place, and separately adding an arm no row names, both left
-	// this suite green while the identical mutations reddened neo4j's.
+	// This is also what holds the constant SET, now that the table is a map
+	// literal rather than a switch the exhaustive linter could read: a
+	// constant internal/graph gains with no table row fails the last loop
+	// below. Measured 2026-09-02 (bd gqlc-ozdkx), when the table was still a
+	// switch: deleting the TypeUint16 row with its arm left in place, and
+	// separately adding an arm no row names, both left this suite green
+	// while the identical mutations reddened neo4j's.
 	declared := agePropertyTypes(t)
 	covered := make(map[string]bool)
 	for _, tt := range representable {
@@ -126,18 +126,18 @@ func TestTypeMapProperty(t *testing.T) {
 		require.False(t, covered[name], "graph.%s has two rows in this table", name)
 		covered[name] = true
 	}
-	arms := agePropertyArms(t)
-	require.NotEmpty(t, arms,
-		"the walk read no case expression off %s, so the obligation below is satisfied by any table at all", typeTableSource)
-	for name := range arms {
+	rows := agePropertyRows(t)
+	require.NotEmpty(t, rows,
+		"the walk read no row key off %s, so the obligation below is satisfied by any table at all", typeTableSource)
+	for name := range rows {
 		require.True(t, covered[name],
-			"typeMap.Property has an arm for graph.%s and no row above names it, so what that arm answers is "+
-				"unswept: add it to the representable table with the Go carrier it returns, or to the "+
+			"propertyCarriers has a row for graph.%s and no row above names it, so what that row answers is "+
+				"unswept: add it to the representable table with the Go carrier it holds, or to the "+
 				"unrepresentable one", name)
 	}
 	for name := range covered {
-		require.True(t, arms[name],
-			"a row above names graph.%s and typeMap.Property has no arm for it, so the row is measuring the "+
+		require.True(t, rows[name],
+			"a row above names graph.%s and propertyCarriers has no row for it, so the row is measuring the "+
 				"fallthrough rather than a decision the table makes", name)
 	}
 
@@ -343,7 +343,7 @@ func TestAUniversallyUncarriedWidthIsRefusedWithoutTheBackendName(t *testing.T) 
 		} {
 			t.Run(string(pt), func(t *testing.T) {
 				// The list belongs to internal/codegen/age/errors.go and the
-				// reject arm to types.go, and nothing but this row holds them
+				// refused rows to types.go, and nothing but this row holds them
 				// in step: a width named in the list that the table went on to
 				// CARRY would have its suffix withheld from a refusal it never
 				// raises, which is invisible until the table changes again.
@@ -596,10 +596,10 @@ const (
 	typeTableSource         = "types.go"
 )
 
-// agePropertyTypes and agePropertyArms are the walks internal/codegen/neo4j
+// agePropertyTypes and agePropertyRows are the walks internal/codegen/neo4j
 // reads its own obligation with. Shared rather than copied: what a const
-// block is and what a switch arm is do not vary by backend, and this
-// backend having no walk at all is what bd gqlc-ozdkx was filed for.
+// block is and what a map literal's keys are do not vary by backend, and
+// this backend having no walk at all is what bd gqlc-ozdkx was filed for.
 func agePropertyTypes(t *testing.T) map[graph.PropertyType]string {
 	t.Helper()
 	out, err := typescan.PropertyTypes(graphPropertyTypeSource)
@@ -607,9 +607,9 @@ func agePropertyTypes(t *testing.T) map[graph.PropertyType]string {
 	return out
 }
 
-func agePropertyArms(t *testing.T) map[string]bool {
+func agePropertyRows(t *testing.T) map[string]bool {
 	t.Helper()
-	out, err := typescan.PropertyArms(typeTableSource, "Property")
+	out, err := typescan.PropertyRows(typeTableSource, "propertyCarriers")
 	require.NoError(t, err)
 	return out
 }

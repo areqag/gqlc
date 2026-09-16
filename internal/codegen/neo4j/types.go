@@ -48,34 +48,25 @@ type typeMap struct{ uuidCarrier string }
 // (YEAR TO MONTH) vs (DAY TO SECOND) qualifier onto a single Duration
 // carrying Months / Days / Seconds / Nanos (see ADR 0002 Consequences).
 //
-// EXEMPT FROM gocyclo, NOT FROM gocognit. gocyclo counts this 31 because it
-// increments once per `case` and the table has one per property width;
-// gocognit counts it 10, charging the `switch` once and the nesting nothing.
-// A 3x disagreement, and gocognit is the one describing what a reader faces:
-// gocyclo alone ranked this the 6th-most-complex function in the repository
-// when it is one flat table behind two container guards.
-//
-// Splitting it to satisfy the count is not available, and that is a fact
-// about this method rather than a preference. ONE guard reads it by
-// STRUCTURE: typescan.PropertyArms skips any decl whose `fn.Recv == nil` and
-// takes the method name as an argument, so a table moved to a plain function
-// is invisible to it — the walk is propertyArmNames in decoder_test.go, and
-// it feeds TWO obligations: TestTypeMapProperty in types_test.go and
-// TestDecoderProbeCoversTheTypeTable in decoder_test.go. That
-// does not pass vacuously at either. types_test.go asserts
-// `require.NotEmpty(t, arms, ...)` before ranging over them, precisely so a
-// walk that read nothing cannot hold the table to nothing, and
-// decoder_test.go's `require.Contains(t, arms, ...)` reds on an empty map
-// too. It reds LOUDLY, and was measured doing so on 2026-09-10 when exactly
-// that split was attempted.
+// The per-width rows live in propertyCarriers below and this method is the
+// three container guards, the one width whose answer is the major's, and the
+// lookup. What holds the rows to internal/graph's constant set is
+// typescan.PropertyRows, which reads the map literal's keys by name; the
+// walk is propertyRowNames in decoder_test.go and feeds TWO obligations,
+// TestTypeMapProperty in types_test.go and TestDecoderProbeCoversTheTypeTable
+// in decoder_test.go. Neither passes vacuously: types_test.go asserts
+// `require.NotEmpty(t, rows, ...)` before ranging, and decoder_test.go's
+// `require.Contains(t, rows, ...)` reds on an empty map too. So the rows
+// have to stay a map literal keyed by `graph.X` selectors in this file,
+// under the name the walk is handed — a row keyed any other way, or a
+// table moved into a function, is one the walk cannot see.
 //
 // The age copy of this table is held by a SECOND structural guard that this
 // package has no equivalent of: age's render_queries_test.go reads its
-// typeMap's RETURN statements and refuses a return whose shape it cannot
-// read. Nothing here walks returns, so the neo4j table rests on the arms
-// walk alone — do not read the age comment as also describing this one.
-//
-//nolint:gocyclo // flat per-width dispatch table; gocognit scores it 10 and still gates it
+// table's values and its methods' RETURN statements, and refuses a return
+// whose shape it cannot read. Nothing here walks returns, so the neo4j
+// table rests on the rows walk alone — do not read the age comment as also
+// describing this one.
 func (t typeMap) Property(pt graph.PropertyType) (string, bool) {
 	if pt.Kind() == graph.KindList {
 		elemTy, ok := t.Property(pt.Elem())
@@ -122,61 +113,7 @@ func (t typeMap) Property(pt graph.PropertyType) (string, bool) {
 		// here, both widths arriving as int64.
 		return codegen.UnionCarrier(pt, t.Property, wireFamily)
 	}
-	switch pt {
-	case graph.TypeString:
-		return "string", true
-	case graph.TypeBytes:
-		return "[]byte", true
-	case graph.TypeBool:
-		return "bool", true
-	case graph.TypeInt:
-		return "int", true
-	case graph.TypeInt8:
-		return "int8", true
-	case graph.TypeInt16:
-		return "int16", true
-	case graph.TypeInt32:
-		return "int32", true
-	case graph.TypeInt64:
-		return "int64", true
-	case graph.TypeUint:
-		return "uint", true
-	case graph.TypeUint8:
-		return "uint8", true
-	case graph.TypeUint16:
-		return "uint16", true
-	case graph.TypeUint32:
-		return "uint32", true
-	case graph.TypeUint64:
-		return "uint64", true
-	case graph.TypeFloat, graph.TypeFloat64:
-		return "float64", true
-	case graph.TypeFloat32:
-		return "float32", true
-	case graph.TypeDate:
-		return "Date", true
-	case graph.TypeTime:
-		return "Time", true
-	case graph.TypeLocalTime:
-		return "LocalTime", true
-	case graph.TypeTimestamp:
-		return "time.Time", true
-	case graph.TypeDuration:
-		return "Duration", true
-	case graph.TypeAnyPropertyValue:
-		return "any", true
-	case graph.TypeList:
-		// Intercepted by the Kind() guard above; unreachable here.
-		// Listed so the exhaustive linter sees the full constant set.
-		return "[]any", true
-	case graph.TypeAnyRecord:
-		// RECORD<ANY> spelled out, so the Kind() guard above intercepts
-		// it and this arm is unreachable. Listed so the exhaustive
-		// linter sees the full constant set, and answering
-		// "map[string]any" keeps it agreeing with the arm that does the
-		// work — the arrangement graph.TypeList already has.
-		return "map[string]any", true
-	case graph.TypeUUID:
+	if pt == graph.TypeUUID {
 		// The one width the two majors answer differently, and the
 		// reason this table has a field at all. dbtype.UUID landed in
 		// neo4j-go-driver v6.2.0; v5.28.4 has no counterpart — the two
@@ -190,7 +127,7 @@ func (t typeMap) Property(pt graph.PropertyType) (string, bool) {
 		// encode sites where the driver belongs.
 		//
 		// The empty string is spelled as a refusal here rather than
-		// left to fall through to the eight below, because the two
+		// left to fall through to the eight refused rows, because the two
 		// refusals are not the same refusal and generate() has to tell
 		// them apart: a width no major carries stays
 		// ErrUnrepresentableWidth, and this one becomes
@@ -205,19 +142,71 @@ func (t typeMap) Property(pt graph.PropertyType) (string, bool) {
 		// image this repository pins speaks Bolt 5.x. So the emitted
 		// code compiles and is asserted against a golden, and no live
 		// round trip is claimed for it (bd gqlc-eg4b).
-		if t.uuidCarrier == "" {
-			return "", false
-		}
-		return t.uuidCarrier, true
-	case graph.TypeInt128, graph.TypeInt256,
-		graph.TypeUint128, graph.TypeUint256,
-		graph.TypeFloat16, graph.TypeFloat128, graph.TypeFloat256,
-		graph.TypeDecimal:
-		// The eight unrepresentable widths — no faithful Go carrier on
-		// neo4j-go-driver (v5 and v6 alike). Permanent, per §9 (spec).
-		return "", false
+		return t.uuidCarrier, t.uuidCarrier != ""
 	}
-	return "", false
+	// PropertyType is an open string type, so a width internal/graph gains
+	// without a row arrives here rather than failing to compile, and reads
+	// the same empty text a refused row holds: the caller routes both to
+	// ErrUnrepresentableWidth naming the width.
+	return propertyCarriers[pt], propertyCarriers[pt] != ""
+}
+
+// propertyCarriers is the per-width half of the type table: the Go type
+// text each scalar and temporal width emits as, or the empty text for a
+// width this driver refuses. Property consults it after the container
+// guards and the UUID row, which is the one row whose answer is the
+// major's rather than the table's (see uuidCarrier) and so cannot be a
+// literal here; its row below holds the v5 answer so the rows walk sees
+// the width decided.
+//
+// A MAP LITERAL KEYED BY `graph.X` SELECTORS, under this name, in this
+// file — the shape typescan.PropertyRows reads, as the Property comment
+// says. A refused width has a row rather than an absence for the same
+// reason: a row saying "" is a decision the walk can hold to
+// types_test.go's unrepresentable table, and an absence is a fallthrough
+// nothing can tell from a width nobody thought about.
+var propertyCarriers = map[graph.PropertyType]string{
+	graph.TypeString:           "string",
+	graph.TypeBytes:            "[]byte",
+	graph.TypeBool:             "bool",
+	graph.TypeInt:              "int",
+	graph.TypeInt8:             "int8",
+	graph.TypeInt16:            "int16",
+	graph.TypeInt32:            "int32",
+	graph.TypeInt64:            "int64",
+	graph.TypeUint:             "uint",
+	graph.TypeUint8:            "uint8",
+	graph.TypeUint16:           "uint16",
+	graph.TypeUint32:           "uint32",
+	graph.TypeUint64:           "uint64",
+	graph.TypeFloat:            "float64",
+	graph.TypeFloat64:          "float64",
+	graph.TypeFloat32:          "float32",
+	graph.TypeDate:             "Date",
+	graph.TypeTime:             "Time",
+	graph.TypeLocalTime:        "LocalTime",
+	graph.TypeTimestamp:        "time.Time",
+	graph.TypeDuration:         "Duration",
+	graph.TypeAnyPropertyValue: "any",
+	// LIST<ANY> and RECORD<ANY> spelled out. Both are intercepted by the
+	// Kind() guards in Property, so these rows are unreachable; they are
+	// here so the rows walk sees the full constant set, and each answers
+	// what the guard that does the work answers.
+	graph.TypeList:      "[]any",
+	graph.TypeAnyRecord: "map[string]any",
+	// UUID is answered in Property off the major's uuidCarrier; this row is
+	// the v5 answer, a refusal.
+	graph.TypeUUID: "",
+	// The eight unrepresentable widths — no faithful Go carrier on
+	// neo4j-go-driver (v5 and v6 alike). Permanent, per §9 (spec).
+	graph.TypeInt128:   "",
+	graph.TypeInt256:   "",
+	graph.TypeUint128:  "",
+	graph.TypeUint256:  "",
+	graph.TypeFloat16:  "",
+	graph.TypeFloat128: "",
+	graph.TypeFloat256: "",
+	graph.TypeDecimal:  "",
 }
 
 // wireFamily folds one carrier text onto the equivalence class of declared
