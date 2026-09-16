@@ -164,83 +164,95 @@ func writeUnionDecoders(b *strings.Builder, plans []unionPlan) {
 		if !p.decode {
 			continue
 		}
-		byFamily := unionMembersByFamily(p.members)
-		fmt.Fprintf(b, "\n// decode%s dispatches an agtype value onto the member of\n// %s whose wire family it arrived as, and narrows it\n// to that member's declared width.\n",
-			p.suffix, p.pt)
-		fmt.Fprintf(b, "func decode%s(raw []byte) (%s, error) {\n", p.suffix, codegen.UnionCarrierText)
-		b.WriteString("\tbody := bytes.TrimSpace(raw)\n")
-		fmt.Fprintf(b, "\tif len(body) == 0 {\n\t\treturn nil, fmt.Errorf(%q, raw)\n\t}\n",
-			"decode "+string(p.pt)+": %q is not an agtype value")
+		writeUnionDecoder(b, p)
+	}
+}
 
-		// The three self-delimiting families, chosen by the opening byte.
-		opener := []struct {
-			family string
-			byte   string
-		}{
-			{"string", `'"'`},
-			{"list", `'['`},
-			{"map", `'{'`},
-		}
-		var arms strings.Builder
-		for _, o := range opener {
-			m, ok := byFamily[o.family]
-			if !ok {
-				continue
-			}
-			fmt.Fprintf(&arms, "\tcase %s:\n", o.byte)
-			writeUnionNarrow(&arms, p.pt, m, "\t\t")
-		}
-		if arms.Len() > 0 {
-			b.WriteString("\tswitch body[0] {\n")
-			b.WriteString(arms.String())
-			b.WriteString("\t}\n")
-		}
+// writeUnionDecoder emits decode<Suffix> for one union plan: the empty-
+// input refusal, the opening-byte switch, the boolean token test, the
+// numeric probes, and the closing refusal, in that order.
+func writeUnionDecoder(b *strings.Builder, p unionPlan) {
+	byFamily := unionMembersByFamily(p.members)
+	fmt.Fprintf(b, "\n// decode%s dispatches an agtype value onto the member of\n// %s whose wire family it arrived as, and narrows it\n// to that member's declared width.\n",
+		p.suffix, p.pt)
+	fmt.Fprintf(b, "func decode%s(raw []byte) (%s, error) {\n", p.suffix, codegen.UnionCarrierText)
+	b.WriteString("\tbody := bytes.TrimSpace(raw)\n")
+	fmt.Fprintf(b, "\tif len(body) == 0 {\n\t\treturn nil, fmt.Errorf(%q, raw)\n\t}\n",
+		"decode "+string(p.pt)+": %q is not an agtype value")
 
-		if m, ok := byFamily["boolean"]; ok {
-			// The two spellings are whole tokens rather than an opening
-			// byte, so this is a second switch and not a third case above:
-			// 't' and 'f' open nothing else in agtype's vocabulary, but
-			// matching on them would admit any text starting with either.
-			b.WriteString("\tif s := string(body); s == \"true\" || s == \"false\" {\n")
-			writeUnionNarrow(b, p.pt, m, "\t\t")
-			b.WriteString("\t}\n")
+	// The three self-delimiting families, chosen by the opening byte.
+	opener := []struct {
+		family string
+		byte   string
+	}{
+		{"string", `'"'`},
+		{"list", `'['`},
+		{"map", `'{'`},
+	}
+	var arms strings.Builder
+	for _, o := range opener {
+		m, ok := byFamily[o.family]
+		if !ok {
+			continue
 		}
+		fmt.Fprintf(&arms, "\tcase %s:\n", o.byte)
+		writeUnionNarrow(&arms, p.pt, m, "\t\t")
+	}
+	if arms.Len() > 0 {
+		b.WriteString("\tswitch body[0] {\n")
+		b.WriteString(arms.String())
+		b.WriteString("\t}\n")
+	}
 
-		// Integer before float, agtypeValue's rule.
-		numeric := []struct {
-			family string
-			probe  string
-		}{
-			{"integer", "agtypeInt64"},
-			{"float", "agtypeFloat64"},
-		}
-		for _, n := range numeric {
-			m, ok := byFamily[n.family]
-			if !ok {
-				continue
-			}
-			// A FLOAT64 member's narrowing IS the probe — agtypeFloat64
-			// both ways — and emitting the pair would read the same bytes
-			// twice to no effect. Collapsed rather than tolerated because
-			// a reader of the generated file cannot tell a redundant
-			// second read from a deliberate one, and the deliberate ones
-			// are right beside it: an INT32 member probes with
-			// agtypeInt64 and narrows with agtypeIntAs[int32], where the
-			// two reads answer different questions. Equivalent, not
-			// merely shorter: where probe and narrowing are one call, a
-			// failure sends the value to the next arm under either
-			// spelling.
-			if narrow := decodeFunc(m.GoType, m.Width); narrow == n.probe {
-				fmt.Fprintf(b, "\tif out, err := %s(body); err == nil {\n\t\treturn out, nil\n\t}\n", narrow)
-				continue
-			}
-			fmt.Fprintf(b, "\tif _, err := %s(body); err == nil {\n", n.probe)
-			writeUnionNarrow(b, p.pt, m, "\t\t")
-			b.WriteString("\t}\n")
-		}
+	if m, ok := byFamily["boolean"]; ok {
+		// The two spellings are whole tokens rather than an opening
+		// byte, so this is a second switch and not a third case above:
+		// 't' and 'f' open nothing else in agtype's vocabulary, but
+		// matching on them would admit any text starting with either.
+		b.WriteString("\tif s := string(body); s == \"true\" || s == \"false\" {\n")
+		writeUnionNarrow(b, p.pt, m, "\t\t")
+		b.WriteString("\t}\n")
+	}
 
-		fmt.Fprintf(b, "\treturn nil, fmt.Errorf(%q, raw)\n}\n",
-			"decode "+string(p.pt)+": %q is no member's wire shape")
+	writeUnionNumericArms(b, p.pt, byFamily)
+
+	fmt.Fprintf(b, "\treturn nil, fmt.Errorf(%q, raw)\n}\n",
+		"decode "+string(p.pt)+": %q is no member's wire shape")
+}
+
+// writeUnionNumericArms emits the integer and float probes of one union
+// decoder. Integer before float, agtypeValue's rule.
+func writeUnionNumericArms(b *strings.Builder, pt graph.PropertyType, byFamily map[string]codegen.UnionMemberPlan) {
+	numeric := []struct {
+		family string
+		probe  string
+	}{
+		{"integer", "agtypeInt64"},
+		{"float", "agtypeFloat64"},
+	}
+	for _, n := range numeric {
+		m, ok := byFamily[n.family]
+		if !ok {
+			continue
+		}
+		// A FLOAT64 member's narrowing IS the probe — agtypeFloat64
+		// both ways — and emitting the pair would read the same bytes
+		// twice to no effect. Collapsed rather than tolerated because
+		// a reader of the generated file cannot tell a redundant
+		// second read from a deliberate one, and the deliberate ones
+		// are right beside it: an INT32 member probes with
+		// agtypeInt64 and narrows with agtypeIntAs[int32], where the
+		// two reads answer different questions. Equivalent, not
+		// merely shorter: where probe and narrowing are one call, a
+		// failure sends the value to the next arm under either
+		// spelling.
+		if narrow := decodeFunc(m.GoType, m.Width); narrow == n.probe {
+			fmt.Fprintf(b, "\tif out, err := %s(body); err == nil {\n\t\treturn out, nil\n\t}\n", narrow)
+			continue
+		}
+		fmt.Fprintf(b, "\tif _, err := %s(body); err == nil {\n", n.probe)
+		writeUnionNarrow(b, pt, m, "\t\t")
+		b.WriteString("\t}\n")
 	}
 }
 
