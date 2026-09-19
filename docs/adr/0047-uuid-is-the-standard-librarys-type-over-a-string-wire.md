@@ -136,9 +136,14 @@ What differs from neo4j for an author:
 - `UNION<UUID|STRING>` is refused here too, and so is **`UNION<UUID|DATE>`**,
   which neo4j admits: on AGE a DATE is ISO text, so both members are the
   string family.
-- The refusal of a colliding union arrives through AGE's unserved-column
-  sentinel rather than `ErrUnrepresentableWidth`, so
-  `invalid/uuid_union_string_collision` stays a neo4j-only fixture.
+- Which sentinel refuses a colliding union on AGE depends on the POSITION the
+  query reaches it through. A whole-entity read is refused in the entity
+  sweep under `ErrUnrepresentableWidth`, as on neo4j, and
+  `invalid/uuid_union_string_collision` reads the entity so that one manifest
+  holds all three targets. A column projection of the same property is
+  answered first by AGE's own check that it can serve each column, as
+  "unsupported query"; the fixture projected the column at first and its AGE
+  arm went red on exactly that.
 - `invalid/uuid_width_unrepresentable`, the fixture that held AGE's refusal
   end to end, is removed with the refusal.
 

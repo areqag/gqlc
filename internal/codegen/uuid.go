@@ -22,10 +22,11 @@ var uuidCarrierSet = map[string]struct{}{UUIDCarrier: {}}
 // UUID the standard library has one since Go 1.27, so the carrier IS
 // that type and a caller hands uuid.NewV7() to a generated method with
 // no conversion. The alias rather than the qualified name at each site
-// keeps the "uuid" import to this file and the backend's conversions
-// file: every file that names the carrier on its surface spells it
-// unqualified, so none of their import walks has a package to account
-// for.
+// keeps the "uuid" import to this file and to the one file per backend
+// that PARSES a UUID — uuid_neo4j.go on the neo4j targets, models.go on
+// Apache AGE, where the agtype decoders live. A file that only names the
+// carrier spells it unqualified and owes no import for it, which is what
+// keeps the package out of the neo4j targets' per-file import walks.
 //
 // On the wire a UUID is its RFC 9562 text form on all three enrolled
 // targets — a Bolt STRING on both neo4j majors and an agtype string on

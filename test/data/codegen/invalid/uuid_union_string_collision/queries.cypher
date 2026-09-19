@@ -13,8 +13,17 @@
 // exactly this union until it moved to UNION<UUID|INT64>, the pairing that
 // still generates.
 //
-// Both majors, because both answer it and for the same reason. A
-// single-target fixture would leave the other major's refusal unwitnessed.
+// All three targets, because all three answer it and for the same reason: on
+// Apache AGE a UUID rides the agtype string, so the pair is one family there
+// too.
+//
+// A WHOLE-ENTITY READ, and the position is what lets one manifest hold the
+// three. Every target refuses the entity's property in its entity sweep, under
+// the sentinel below. A COLUMN projection of the same property would not do:
+// the neo4j targets still answer this sentinel, and AGE answers "unsupported
+// query" first, from its own check that it can serve each column — measured
+// when this fixture projected `a.either` and its AGE arm went red on exactly
+// that.
 
-// name: AccountEither :many
-MATCH (a:Account) RETURN a.either AS either
+// name: AccountWhole :many
+MATCH (a:Account) RETURN a

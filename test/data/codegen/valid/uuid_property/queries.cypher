@@ -30,10 +30,8 @@
 //   the one that reaches the union helper file. INT64 is the other member
 //   because STRING cannot be: a UUID arrives as a string, the members of a
 //   union have to be pairwise distinct on the wire (spec §4), and
-//   UNION<UUID|STRING> is therefore a refusal —
-//   test/data/codegen/invalid/uuid_union_string_collision, which is the two
-//   neo4j majors alone: AGE refuses the same union through a different
-//   sentinel, its unserved-column one, so one manifest cannot hold all three.
+//   UNION<UUID|STRING> is therefore a refusal on all three targets —
+//   test/data/codegen/invalid/uuid_union_string_collision.
 //
 // span is not a UUID and is the only property here that is not. It is a
 // DURATION, and DURATION SPECIFICALLY, because this fixture is the only place
