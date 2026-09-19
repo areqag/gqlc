@@ -1,6 +1,6 @@
 module github.com/areqag/gqlc
 
-go 1.26.6
+go 1.27.1
 
 require (
 	charm.land/huh/v2 v2.0.3
