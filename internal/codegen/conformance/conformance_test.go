@@ -1795,14 +1795,6 @@ func isCarrierBridge(base string) bool {
 // decode tests in internal/codegen/age.
 var inPlaceCarrierBridges = map[string]string{"apache-age-pgx-v5": "models.go"}
 
-// isCarrierDeclaration reports whether a file declares the temporal
-// carriers or bridges them. Excluded from the reference scan below,
-// because such a file naturally names them and would make the trigger
-// read as satisfied by its own presence.
-func isCarrierDeclaration(base string) bool {
-	return base == carrierFile || isCarrierBridge(base)
-}
-
 // temporalEmission is what one golden package says about ADR 0033's
 // emission trigger: where the package first names a carrier outside the
 // declaration files, whether it emitted the carriers, and which driver
@@ -1845,58 +1837,95 @@ func (e temporalEmission) breach() string {
 // and the Sel of a qualified type belongs to another package — time.Time
 // is the TIMESTAMP carrier and would otherwise match Time on every
 // fixture that projects a timestamp.
+//
+// A function a bridge file declares counts as naming a carrier too. A
+// neo4j package that only DECODES a closed union with a DATE member
+// spells `case dbtype.Date: v1 := toDate(t)` and returns the result as
+// `any`: it names toDate and never Date, and does not compile without
+// temporal.go, which declares toDate's result type. Read for the type
+// names alone, that package breached the do-not-emit half, and the
+// breach text pointed at narrowing the trigger that keeps it compiling
+// (bd gqlc-o8p3). The names are read off the bridge files rather than
+// spelled here, so a conversion added to a bridge is covered when it is
+// added. The carrier file and the bridge files are themselves left out
+// of the reference scan, because they name the carriers by being what
+// they are and would make the trigger read as satisfied by its own
+// presence. An in-place bridge contributes none: its file is not set apart
+// from the package, so there is no declaration list to read.
 func readTemporalEmission(dir string, carriers map[string]bool) (temporalEmission, error) {
-	files, err := filepath.Glob(filepath.Join(dir, "*.go"))
+	paths, err := filepath.Glob(filepath.Join(dir, "*.go"))
 	if err != nil {
 		return temporalEmission{}, err
 	}
 
 	var out temporalEmission
-	inPlace := inPlaceCarrierBridges[filepath.Base(dir)]
-	inPlaceNamesCarrier := false
 	fset := token.NewFileSet()
-	for _, path := range files {
+	scanned := map[string]*ast.File{}
+	names := maps.Clone(carriers)
+	for _, path := range paths {
 		base := filepath.Base(path)
-		if isCarrierBridge(base) {
-			out.bridges = append(out.bridges, base)
-		}
 		if base == carrierFile {
 			out.carriers = true
-		}
-		if isCarrierDeclaration(base) {
 			continue
 		}
 		file, err := parser.ParseFile(fset, path, nil, parser.SkipObjectResolution)
 		if err != nil {
 			return temporalEmission{}, fmt.Errorf("parsing %s: %w", path, err)
 		}
-		ast.Inspect(file, func(n ast.Node) bool {
-			switch node := n.(type) {
-			case *ast.SelectorExpr:
-				return false
-			case *ast.Ident:
-				if carriers[node.Name] {
-					if out.referencedBy == "" {
-						out.referencedBy = fmt.Sprintf("%s:%d", path, fset.Position(node.Pos()).Line)
-					}
-					if base == inPlace {
-						inPlaceNamesCarrier = true
-					}
-				}
+		if !isCarrierBridge(base) {
+			scanned[path] = file
+			continue
+		}
+		out.bridges = append(out.bridges, base)
+		for _, decl := range file.Decls {
+			if fn, ok := decl.(*ast.FuncDecl); ok && fn.Recv == nil {
+				names[fn.Name.Name] = true
 			}
-			return true
-		})
+		}
 	}
-	if inPlaceNamesCarrier {
-		out.bridges = append(out.bridges, inPlace)
+
+	inPlace := inPlaceCarrierBridges[filepath.Base(dir)]
+	for _, path := range paths {
+		file, ok := scanned[path]
+		if !ok {
+			continue
+		}
+		line := firstNamed(file, names)
+		if line == token.NoPos {
+			continue
+		}
+		if out.referencedBy == "" {
+			out.referencedBy = fmt.Sprintf("%s:%d", path, fset.Position(line).Line)
+		}
+		if filepath.Base(path) == inPlace {
+			out.bridges = append(out.bridges, inPlace)
+		}
 	}
 	return out, nil
 }
 
+// firstNamed answers where a file first spells an unqualified identifier
+// in names, or token.NoPos when it spells none.
+func firstNamed(file *ast.File, names map[string]bool) token.Pos {
+	found := token.NoPos
+	ast.Inspect(file, func(n ast.Node) bool {
+		switch node := n.(type) {
+		case *ast.SelectorExpr:
+			return false
+		case *ast.Ident:
+			if names[node.Name] && found == token.NoPos {
+				found = node.Pos()
+			}
+		}
+		return found == token.NoPos
+	})
+	return found
+}
+
 // TestTemporalCarriersAreEmittedExactlyWhenReferenced holds ADR 0033's
 // emission trigger in both directions, per golden package: temporal.go
-// is present when the rest of the package names a carrier, absent when
-// it does not, and never alone — a package that emits the carriers emits
+// is present when the rest of the package names a carrier or a function
+// its bridge file declares, absent when it does neither, and never alone — a package that emits the carriers emits
 // the target's driver bridge beside them.
 //
 // Both halves are load-bearing and they fail differently. Omission is a
@@ -1970,6 +1999,8 @@ func TestTemporalEmissionIsReadPerTarget(t *testing.T) {
 	const namesNothing = "package p\n\ntype Row struct{ ID string }\n"
 	const declaresCarriers = "package p\n\ntype Date struct{ Year int }\n"
 	const bridgesCarriers = "package p\n\nfunc toDate(v any) Date { return Date{} }\n"
+	const callsBridge = "package p\n\nfunc decode(v any) any { return toDate(v) }\n"
+	const callsElsewhere = "package p\n\nfunc decode(v any) any { return toInstant(v) }\n"
 
 	rows := []struct {
 		name string
@@ -2014,6 +2045,30 @@ func TestTemporalEmissionIsReadPerTarget(t *testing.T) {
 				"temporal_age.go": bridgesCarriers,
 			},
 			wantRef: false, wantCarriers: true, wantBridges: []string{"temporal_age.go"},
+			wantBreach: "emits temporal.go and names no carrier anywhere else, so five exported names are taken out of the caller's package for nothing",
+		},
+		{
+			// A decode-only closed union on neo4j: the package spells the
+			// bridge's function and never a carrier's type, and owes
+			// temporal.go for that function's result (bd gqlc-o8p3).
+			name: "a bridge function called with no carrier type named",
+			files: map[string]string{
+				"models.go":         callsBridge,
+				"temporal.go":       declaresCarriers,
+				"temporal_neo4j.go": bridgesCarriers,
+			},
+			wantRef: true, wantCarriers: true, wantBridges: []string{"temporal_neo4j.go"},
+		},
+		{
+			// The control for the row above: the function names counted
+			// are the ones a bridge file declares, not a spelling.
+			name: "a call to a function no bridge declares",
+			files: map[string]string{
+				"models.go":         callsElsewhere,
+				"temporal.go":       declaresCarriers,
+				"temporal_neo4j.go": bridgesCarriers,
+			},
+			wantRef: false, wantCarriers: true, wantBridges: []string{"temporal_neo4j.go"},
 			wantBreach: "emits temporal.go and names no carrier anywhere else, so five exported names are taken out of the caller's package for nothing",
 		},
 		{

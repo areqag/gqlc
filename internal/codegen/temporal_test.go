@@ -1,6 +1,7 @@
 package codegen_test
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -81,6 +82,7 @@ func TestCarrierTriggersReadUnionMembers(t *testing.T) {
 	carriers := map[graph.PropertyType]string{
 		graph.TypeDate:   "Date",
 		graph.TypeUUID:   codegen.UUIDCarrier,
+		graph.TypeBool:   "bool",
 		graph.TypeInt64:  "int64",
 		graph.TypeString: "string",
 	}
@@ -95,36 +97,58 @@ func TestCarrierTriggersReadUnionMembers(t *testing.T) {
 		}
 		return graph.UnionOf(out)
 	}
-	batch := func(width graph.PropertyType, goType string) codegen.Prepared {
-		return codegen.Prepared{Entities: []codegen.Entity{{
-			Name:   "Account",
-			Fields: []codegen.EntityField{{PropName: "either", Field: "Either", GoType: goType, Width: width}},
-		}}}
+	batch := func(widths ...graph.PropertyType) codegen.Prepared {
+		fields := make([]codegen.EntityField, 0, len(widths))
+		for i, width := range widths {
+			goType := codegen.UnionCarrierText
+			if width.Kind() == graph.KindList {
+				goType = "[]" + goType
+			}
+			name := fmt.Sprintf("either%d", i)
+			fields = append(fields, codegen.EntityField{PropName: name, Field: name, GoType: goType, Width: width})
+		}
+		return codegen.Prepared{Entities: []codegen.Entity{{Name: "Account", Fields: fields}}}
 	}
 
+	temporal, plain := unionOf(graph.TypeDate, graph.TypeInt64), unionOf(graph.TypeInt64, graph.TypeString)
 	rows := []struct {
 		name         string
-		width        graph.PropertyType
-		goType       string
+		widths       []graph.PropertyType
 		wantTemporal bool
 		wantUUID     bool
 	}{
-		{"no member is a carrier", unionOf(graph.TypeInt64, graph.TypeString), "any", false, false},
-		{"a temporal member", unionOf(graph.TypeDate, graph.TypeInt64), "any", true, false},
-		{"a UUID member", unionOf(graph.TypeUUID, graph.TypeInt64), "any", false, true},
-		{"a list of unions", graph.ListOf(unionOf(graph.TypeDate, graph.TypeInt64), false), "[]any", true, false},
+		{"no member is a carrier", []graph.PropertyType{plain}, false, false},
+		{"a temporal member", []graph.PropertyType{temporal}, true, false},
+		{"a UUID member", []graph.PropertyType{unionOf(graph.TypeUUID, graph.TypeInt64)}, false, true},
+		{"a list of unions", []graph.PropertyType{graph.ListOf(temporal, false)}, true, false},
 		{
 			// BYTES is a width the carrier above refuses. Both triggers
 			// answer true for it, on typeTextNamesCarrier's ground: a
 			// carrier file nothing references still compiles.
-			"a member the carrier refuses fails open", unionOf(graph.TypeBytes, graph.TypeInt64), "any", true, true,
+			"a member the carrier refuses fails open", []graph.PropertyType{unionOf(graph.TypeBytes, graph.TypeInt64)}, true, true,
 		},
 	}
 	for _, row := range rows {
 		t.Run(row.name, func(t *testing.T) {
-			p := batch(row.width, row.goType)
+			p := batch(row.widths...)
 			require.Equal(t, row.wantTemporal, codegen.ReferencesTemporalCarrier(p, carrier))
 			require.Equal(t, row.wantUUID, codegen.ReferencesUUIDCarrier(p, carrier))
 		})
 	}
+
+	// Two unions, with the carrier in the one UnionEncodings hands over
+	// LAST. A reading that stopped after the first encoding answers false
+	// here and true on every row above, each of which holds one union. The
+	// order is asserted rather than assumed, in both declaration orders, so
+	// a change to the canonical sort cannot turn this into a first-entry
+	// row without saying so.
+	t.Run("the carrier is in the later-sorting union", func(t *testing.T) {
+		early := unionOf(graph.TypeBool, graph.TypeInt64)
+		for _, widths := range [][]graph.PropertyType{{early, temporal}, {temporal, early}} {
+			p := batch(widths...)
+			require.Equal(t, []graph.PropertyType{early, temporal}, codegen.UnionEncodings(p.Entities, p.Queries))
+			require.True(t, codegen.ReferencesTemporalCarrier(p, carrier))
+			require.False(t, codegen.ReferencesUUIDCarrier(p, carrier))
+		}
+	})
 }

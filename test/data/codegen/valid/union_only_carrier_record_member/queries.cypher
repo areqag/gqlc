@@ -9,8 +9,12 @@
 // emitted no temporal.go and models.go failed to compile on `undefined: Date`
 // (bd gqlc-o8p3).
 //
-// AGE alone, for record_property's reason: a record is a map, and neo4j does
-// not hold a map in a property.
+// AGE alone, and not because neo4j refuses the declaration — it does not. Both
+// neo4j majors generate this schema, and on origin/master a99ab3b2 their
+// record_neo4j.go failed to compile for the same missing file. They are not
+// enrolled for the reason record_any_and_empty gives for keeping its own
+// record member off neo4j: whether the server holds a map in a property is
+// unmeasured (gqlc-jffyz step 5), and a golden here would pin that claim.
 //
 // A fixture of its own because one temporal.go serves a whole package, so this
 // shape beside another that triggers the file would witness nothing.

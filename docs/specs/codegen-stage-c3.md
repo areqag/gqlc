@@ -19,7 +19,8 @@ only the sections C3 touches.
 Stage C3 keeps the C2 file set (`db.go` / `querier.go` /
 `models.go` / `<name>.cypher.go`) byte-identical for the parts C3 does
 not touch, adds the `temporal.go` / `temporal_neo4j.go` pair for a
-batch whose surface references a neutral carrier (§5.8, §5.9),
+batch that names a neutral carrier, on its surface or as a closed
+union's member (§5.8, §5.9),
 extends the C2 property → Go type table with the four temporal-
 property rows and the eight unrepresentable-width rows, adds
 five new column-shape rows (`ResolvedList`, `ResolvedTemporal`,
