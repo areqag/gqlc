@@ -20,16 +20,21 @@ if [ -z "${want}" ]; then
     exit 2
 fi
 
-if ! resolved="$("${go_cmd}" version 2>&1)"; then
-    echo "\`${go_cmd} version\` would not run, so there is nothing to hold against go${want}: ${resolved}" >&2
+# stdout ALONE, and the version token compared whole. Folded together, a cold
+# module cache's stderr notice — `go: downloading go1.27.1 (linux/amd64)` —
+# names the wanted version followed by a space, and a substring match over both
+# streams is satisfied by that notice whatever the `go version` line says.
+# Measured 2026-09-19 with go1.27.1 over an empty GOMODCACHE: the notice goes to
+# stderr and `go version go1.27.1 linux/amd64` is the whole of stdout. The go
+# command's stderr is left to pass through to the caller's log.
+if ! reported="$("${go_cmd}" version)"; then
+    echo "\`${go_cmd} version\` would not run, so there is nothing to hold against go${want}." >&2
     exit 1
 fi
 
-case "$resolved" in
-    *"go${want} "* | *"go${want}") ;;
-    *)
-        echo "go.mod names go${want}, but the provisioned toolchain reports: ${resolved}" >&2
-        exit 1
-        ;;
-esac
-printf '%s\n' "${resolved}"
+read -r cmd verb token _ <<<"${reported}"
+if [ "${cmd} ${verb}" != "go version" ] || [ "${token}" != "go${want}" ]; then
+    echo "go.mod names go${want}, but the provisioned toolchain reports: ${reported}" >&2
+    exit 1
+fi
+printf '%s\n' "${reported}"
