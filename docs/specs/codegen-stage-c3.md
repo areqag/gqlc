@@ -1105,11 +1105,18 @@ per-source files:
   flat component structs, so `==` is value equality and the zero
   value is inspectable. TIMESTAMP is absent by design: `time.Time`
   is already driver-neutral.
-- **Emission trigger is `codegen.ReferencesTemporalCarrier(prepared)`** —
+- **Emission trigger is `codegen.ReferencesTemporalCarrier(prepared, carrier)`** —
   true iff some exported position of the prepared surface names a
-  carrier: an entity field, a query parameter, a row field, or any
-  nesting level of a list row field. A batch whose only temporal is
-  a TIMESTAMP emits no `temporal.go`.
+  carrier — an entity field, a query parameter, a row field, or any
+  nesting level of a list row field — or some member of a closed
+  union the batch reaches does. The second half is not on the
+  surface: a union carries as `any`, while its emitted helper pair
+  names each member's carrier, so a batch whose one DATE sits inside
+  `ANY<DATE | INT64>` owes the file all the same (bd gqlc-o8p3). The
+  members are read through `codegen.UnionEncodings` and
+  `codegen.UnionMembers`, which the helper emission is built on;
+  `carrier` is the backend's member carrier. A batch whose only
+  temporal is a TIMESTAMP emits no `temporal.go`.
 - **The trigger parses, it does not substring-match.** `Date` is a
   substring of `LocalDateTime` and of entity names a schema may
   choose, and a nested text (`[][]Date`) hides its leaf from a

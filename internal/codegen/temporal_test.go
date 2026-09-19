@@ -6,6 +6,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/areqag/gqlc/internal/codegen"
+	"github.com/areqag/gqlc/internal/graph"
 )
 
 // TestTypeTextNamesCarrier drives the walk over the temporal set, and
@@ -61,6 +62,72 @@ func TestTypeTextNamesCarrier(t *testing.T) {
 	for _, row := range rows {
 		t.Run(row.name, func(t *testing.T) {
 			require.Equal(t, row.want, codegen.TypeTextNamesCarrier(row.text, row.set))
+		})
+	}
+}
+
+// TestCarrierTriggersReadUnionMembers holds the two emission triggers over
+// a batch whose one property is a closed union, so its surface text is
+// `any` and the members are the only place a carrier can be named
+// (bd gqlc-o8p3).
+//
+// The emit rows are also held end to end, by TestGoldenBuild over
+// test/data/codegen/valid/union_only_*, which is where an omitted file is
+// an emitted package that does not compile. What those fixtures cannot
+// hold is here: the refused-member arm, which no batch reaches because
+// preparation refuses it first, and each trigger answering false for the
+// other family's member in one table rather than across two golden trees.
+func TestCarrierTriggersReadUnionMembers(t *testing.T) {
+	carrier := func(pt graph.PropertyType) (string, bool) {
+		switch pt {
+		case graph.TypeDate:
+			return "Date", true
+		case graph.TypeUUID:
+			return codegen.UUIDCarrier, true
+		case graph.TypeInt64:
+			return "int64", true
+		case graph.TypeString:
+			return "string", true
+		}
+		return "", false
+	}
+	unionOf := func(members ...graph.PropertyType) graph.PropertyType {
+		out := make([]graph.UnionMember, 0, len(members))
+		for _, m := range members {
+			out = append(out, graph.UnionMember{Type: m})
+		}
+		return graph.UnionOf(out)
+	}
+	batch := func(width graph.PropertyType, goType string) codegen.Prepared {
+		return codegen.Prepared{Entities: []codegen.Entity{{
+			Name:   "Account",
+			Fields: []codegen.EntityField{{PropName: "either", Field: "Either", GoType: goType, Width: width}},
+		}}}
+	}
+
+	rows := []struct {
+		name         string
+		width        graph.PropertyType
+		goType       string
+		wantTemporal bool
+		wantUUID     bool
+	}{
+		{"no member is a carrier", unionOf(graph.TypeInt64, graph.TypeString), "any", false, false},
+		{"a temporal member", unionOf(graph.TypeDate, graph.TypeInt64), "any", true, false},
+		{"a UUID member", unionOf(graph.TypeUUID, graph.TypeInt64), "any", false, true},
+		{"a list of unions", graph.ListOf(unionOf(graph.TypeDate, graph.TypeInt64), false), "[]any", true, false},
+		{
+			// BYTES is a width the carrier above refuses. Both triggers
+			// answer true for it, on typeTextNamesCarrier's ground: a
+			// carrier file nothing references still compiles.
+			"a member the carrier refuses fails open", unionOf(graph.TypeBytes, graph.TypeInt64), "any", true, true,
+		},
+	}
+	for _, row := range rows {
+		t.Run(row.name, func(t *testing.T) {
+			p := batch(row.width, row.goType)
+			require.Equal(t, row.wantTemporal, codegen.ReferencesTemporalCarrier(p, carrier))
+			require.Equal(t, row.wantUUID, codegen.ReferencesUUIDCarrier(p, carrier))
 		})
 	}
 }

@@ -1,0 +1,6 @@
+CREATE PROPERTY GRAPH TYPE UnionOnlyCarrierRecordMember AS {
+    (:Ledger {
+        id    :: INT64 NOT NULL,
+        entry :: ANY<RECORD { opened_on :: DATE NOT NULL } | INT64>
+    })
+}

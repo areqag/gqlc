@@ -1,0 +1,6 @@
+CREATE PROPERTY GRAPH TYPE UnionOnlyCarrierList AS {
+    (:Ledger {
+        id      :: INT64 NOT NULL,
+        entries :: LIST<ANY<DATE | INT64>>
+    })
+}
