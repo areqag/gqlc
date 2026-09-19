@@ -279,7 +279,9 @@ func recordLeafFields(goType string, width graph.PropertyType, tm typeMap) ([]co
 // packs, so a BIND reaches the wire through an emitted from<X> — bare,
 // Ptr or List — and conversionUses marks a direction on it. A *UUID
 // passed through as the pointer it is would reach the packer as a
-// pointer to a byte array, not as the text the property is stored as.
+// pointer to a Go array, which both majors refuse with an
+// UnsupportedTypeError rather than pack (renderUUIDConversions cites
+// the arms).
 //
 // The DECODE direction is where the families part, and
 // isTemporalCarrier below is the question those sites ask instead.

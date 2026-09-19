@@ -22,13 +22,15 @@ var uuidCarrierSet = map[string]struct{}{UUIDCarrier: {}}
 // UUID the standard library has one since Go 1.27, so the carrier IS
 // that type and a caller hands uuid.NewV7() to a generated method with
 // no conversion. The alias rather than the qualified name at each site
-// keeps the "uuid" import in this one file: every other emitted file
-// spells the carrier unqualified, so none of their import walks has a
-// package to account for.
+// keeps the "uuid" import to this file and the backend's conversions
+// file: every file that names the carrier on its surface spells it
+// unqualified, so none of their import walks has a package to account
+// for.
 //
-// On the wire a UUID is its RFC 9562 text form — a STRING to every
-// driver, stored as one and indexed as one. No backend's own UUID type
-// is involved, so the width is carried wherever a string is (ADR 0047).
+// On the wire a UUID is its RFC 9562 text form — a STRING to the driver,
+// on both neo4j majors, and no driver's own UUID type is involved
+// (ADR 0047). Apache AGE still refuses the width, so no AGE emission
+// reaches this file today.
 func RenderUUID(pkg string) []byte {
 	return []byte(Header() + `package ` + pkg + `
 

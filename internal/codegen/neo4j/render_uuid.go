@@ -31,11 +31,15 @@ import (
 // value another writer stored in one of those reads back; fromUUID
 // writes the canonical lowercase form alone.
 //
-// The list bodies are temporalListEncodeBody's, called with this
-// carrier's name. They are already generic in the name — each one builds
-// an []any and calls from<X> per element — and a []UUID needs the same
-// per-element walk for its own reason: packed as it stands, each element
-// is a byte array rather than the text the property holds.
+// The nullable-element list body and both Ptr wrappers are the temporal
+// ones, called with this carrier's name: they are generic in the name and
+// say nothing that is false of a UUID. The plain list body is this file's
+// own, because the temporal one's comment gives the temporal reason — a
+// struct the driver cannot marshal — and a []UUID needs the per-element
+// walk for a different one: a uuid.UUID is a Go array, and both majors'
+// packers refuse an array they do not know with an UnsupportedTypeError
+// (v5.28.4 outgoing.go packX's default arm; v6.2.0 packArray, which
+// admits dbtype.UUID alone).
 func renderUUIDConversions(pkg string, uses map[string]carrierUse) []byte {
 	name := codegen.UUIDCarrier
 
@@ -83,8 +87,18 @@ func from%[1]sPtr(v *%[1]s) any {
 `, name)
 	}
 	if use.list {
-		b.WriteString("\n")
-		b.WriteString(temporalListEncodeBody(name, false))
+		fmt.Fprintf(&b, `
+// %[2]s renders a list of %[1]s parameters element by element. The
+// driver refuses a Go array it does not know, so each element becomes the
+// text a %[1]s property holds before the list reaches the wire.
+func %[2]s(v []%[1]s) []any {
+	out := make([]any, len(v))
+	for i := range v {
+		out[i] = from%[1]s(v[i])
+	}
+	return out
+}
+`, name, temporalListHelper(name, false))
 		if use.listPtr {
 			b.WriteString("\n")
 			b.WriteString(temporalListEncodePtrBody(name, false))

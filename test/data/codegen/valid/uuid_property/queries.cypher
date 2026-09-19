@@ -60,9 +60,10 @@
 // The four match parameters are four distinct bind expressions and no two
 // share a helper. $ref is the bare non-nullable width, rendered by fromUUID.
 // $prior is nullable, so the nil check is fromUUIDPtr's — a *UUID handed to
-// the driver as it stands is a pointer to a byte array, not a string or a
-// null. $trail and $chain are the LISTS, which convert per element for the
-// same reason, through fromNullableUUIDList and fromUUIDList.
+// the driver as it stands is a pointer to a Go array, which the packer
+// refuses rather than binding as text or as null. $trail and $chain are the
+// LISTS, which convert per element for the same reason, through
+// fromNullableUUIDList and fromUUIDList.
 //
 // OpenAccount is the write the live half drives, and binds every property so
 // the node it creates is one AccountWhole can decode.

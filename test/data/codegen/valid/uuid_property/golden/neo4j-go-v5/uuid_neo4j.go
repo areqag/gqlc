@@ -33,9 +33,9 @@ func fromUUIDPtr(v *UUID) any {
 	return fromUUID(*v)
 }
 
-// fromUUIDList widens a list of UUID parameters element by element. The
-// driver marshals no gqlc struct, so each element converts before the
-// list reaches the wire.
+// fromUUIDList renders a list of UUID parameters element by element. The
+// driver refuses a Go array it does not know, so each element becomes the
+// text a UUID property holds before the list reaches the wire.
 func fromUUIDList(v []UUID) []any {
 	out := make([]any, len(v))
 	for i := range v {
