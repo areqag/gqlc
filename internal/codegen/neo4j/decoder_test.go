@@ -87,6 +87,7 @@ var decoderProbeLeaves = []decoderProbeWidth{
 	{graph.TypeFloat, "FLOAT"},
 	{graph.TypeFloat32, "FLOAT32"},
 	{graph.TypeFloat64, "FLOAT64"},
+	{graph.TypeUUID, "UUID"},
 	{graph.TypeAnyPropertyValue, "ANY VALUE"},
 }
 

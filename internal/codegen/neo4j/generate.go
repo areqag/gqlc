@@ -12,7 +12,7 @@ import (
 func generate(in codegen.Input, target driverTarget, packageName string) ([]codegen.File, error) {
 	prepared, err := codegen.Prepare(in, target.types(), packageName)
 	if err != nil {
-		return nil, refuse(err, target)
+		return nil, nameBackend(err)
 	}
 
 	pkg := prepared.Package
@@ -65,17 +65,14 @@ func generate(in codegen.Input, target driverTarget, packageName string) ([]code
 		)
 	}
 
-	// The neutral UUID carrier and its driver bridge, on exactly the
-	// terms the temporal pair above stands on and triggered separately
-	// from it: uuid.go is byte-identical across every target,
-	// uuid_neo4j.go is this backend's and holds every dbtype mention the
-	// carrier displaced off the public surface. Only the v6 target
-	// reaches here — v5 has no carrier for the width, so Prepare refuses
-	// the batch before emission.
+	// The UUID carrier and its conversions, triggered separately from
+	// the temporal pair above: uuid.go is byte-identical across every
+	// target, and uuid_neo4j.go is this backend's — the string form a
+	// UUID takes on its wire, which names no driver type (ADR 0047).
 	if codegen.ReferencesUUIDCarrier(prepared) {
 		files = append(files,
 			codegen.File{Path: "uuid.go", Contents: codegen.RenderUUID(pkg)},
-			codegen.File{Path: "uuid_neo4j.go", Contents: renderUUIDConversions(pkg, neutralUse, target)},
+			codegen.File{Path: "uuid_neo4j.go", Contents: renderUUIDConversions(pkg, neutralUse)},
 		)
 	}
 

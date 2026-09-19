@@ -162,7 +162,7 @@ func goTypeNeedsImports(ty string) (bool, bool) {
 // an import in the file that nothing there names.
 func decodeNeedsImports(ty string) (bool, bool) {
 	needDbtype, needTime := goTypeNeedsImports(ty)
-	return needDbtype || isNeutralCarrier(leafType(ty)), needTime
+	return needDbtype || isTemporalCarrier(leafType(ty)), needTime
 }
 
 // renderCypherFile emits one <name>.cypher.go file (spec §5.5). Per
@@ -398,14 +398,15 @@ func goTypeZeroText(goType string) string {
 	case "any":
 		return "nil"
 	case "time.Time", "Date", "Time", "LocalTime",
-		"LocalDateTime", "Duration":
+		"LocalDateTime", "Duration", codegen.UUIDCarrier:
 		// The six temporal property widths carry a struct, whose zero
 		// is a composite literal and not the numeric zero the default
 		// arm spells. zeroValueText's ColumnTemporal arm does not
 		// cover them: that is the kind a temporal *expression* takes, and a
 		// projection of a stored TIMESTAMP property is ColumnProperty.
 		// Unreached until a fixture ran a :one over one, at which point
-		// the emitted `return 0, err` did not compile.
+		// the emitted `return 0, err` did not compile. UUID is an array
+		// rather than a struct and is here on the same ground.
 		return goType + "{}"
 	default:
 		return "0"
@@ -1032,7 +1033,7 @@ func writeCarrierColumnDecodeIndent(site columnDecodeSite) {
 	// the shape-changing to<X> for a temporal. A numeric width the driver
 	// over-carries takes neither, because narrowing it can FAIL — those go
 	// through a checked call in each arm below (ADR 0037, bd gqlc-awtb).
-	checked := carrier != site.f.GoType && !isNeutralCarrier(site.f.GoType)
+	checked := carrier != site.f.GoType && !isTemporalCarrier(site.f.GoType)
 	valueExpr := site.varName
 	if carrier != site.f.GoType && !checked {
 		valueExpr = narrowExpr(site.f.GoType, site.varName)
@@ -1422,7 +1423,7 @@ func writePropertyElemArm(site listElemSite) {
 	fmt.Fprintf(site.b, "%sv, ok := %s.(%s)\n", site.indent, site.iterVar, carrier)
 	fmt.Fprintf(site.b, "%sif !ok {\n%s\t%sfmt.Errorf(\"%s: decode column %%q element %%d: expected %s, got %%T\", %q, i, %s)%s\n%s}\n", site.indent, site.indent, site.exit.open, site.p.MethodName, carrier, site.f.ColumnName, site.iterVar, site.exit.close, site.indent)
 	switch {
-	case isNeutralCarrier(base):
+	case isTemporalCarrier(base):
 		// The conversion is bound to a local first when the element is
 		// nullable, because Go has no address of a call result.
 		if site.e.Nullable {

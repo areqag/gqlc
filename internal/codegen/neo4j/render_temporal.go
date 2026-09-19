@@ -269,38 +269,41 @@ func recordLeafFields(goType string, width graph.PropertyType, tm typeMap) ([]co
 }
 
 // isNeutralCarrier reports whether a Go type text is exactly one of the
-// gqlc-owned neutral carrier names (ADR 0033) — the five temporal ones
-// or the UUID one. Exact, never a prefix or substring test: "Date" is
-// inside "LocalDateTime" and inside entity names a schema chose.
+// driver-free carrier names the generated package declares for itself —
+// the five temporal ones (ADR 0033) or the UUID one (ADR 0047). Exact,
+// never a prefix or substring test: "Date" is inside "LocalDateTime" and
+// inside entity names a schema chose.
 //
-// One predicate over both families rather than one per family, because
-// every site that asks is asking the same thing about the carrier and
-// not about the width behind it: the emitted type is gqlc's own, the
-// driver's counterpart is a different type, and the two are bridged by
-// an emitted to<X> / from<X> pair rather than reached directly. That is
-// as true of UUID as of Date. It is what decides narrowExpr against
-// narrowCall (a carrier is a shape change, never a range question, so it
-// has no failure to report), what puts dbtype in a decode site's import
-// block and keeps it out of a bind site's, and what conversionUses marks
-// a direction on.
+// One predicate over both families because the sites that ask it are
+// asking what the two share: the emitted type is not what the driver
+// packs, so a BIND reaches the wire through an emitted from<X> — bare,
+// Ptr or List — and conversionUses marks a direction on it. A *UUID
+// passed through as the pointer it is would reach the packer as a
+// pointer to a Go array, which both majors refuse with an
+// UnsupportedTypeError rather than pack (renderUUIDConversions cites
+// the arms).
 //
-// UUID rides here rather than converting inline, even though UUID and
-// dbtype.UUID ARE conversion-compatible and toUUID's whole body is that
-// conversion. A list parameter is why: the driver packs an array by
-// type-switching on dbtype.UUID itself (v6 bolt/outgoing.go packArray),
-// so a []UUID reaches the wire as an UnsupportedTypeError and no Go
-// conversion turns a []UUID into a []dbtype.UUID. The per-element widen
-// has to be an emitted helper, and once one direction owes a helper the
-// other costs a line and buys uniformity at all fifteen sites.
+// The DECODE direction is where the families part, and
+// isTemporalCarrier below is the question those sites ask instead.
 //
-// Which FILE the pair lands in is a separate question, answered by the
+// Which FILE the helpers land in is a separate question, answered by the
 // two render functions splitting on codegen.TemporalCarriers versus
 // codegen.UUIDCarrier — so a batch naming one family emits that family's
 // bridge alone.
 func isNeutralCarrier(goType string) bool {
-	if goType == codegen.UUIDCarrier {
-		return true
-	}
+	return goType == codegen.UUIDCarrier || isTemporalCarrier(goType)
+}
+
+// isTemporalCarrier reports whether a Go type text is exactly one of the
+// five neutral temporal carriers, which is what a DECODE site asks.
+//
+// A temporal decode is a shape change that cannot fail — a dbtype.Date
+// holds exactly what a Date holds — so it is narrowExpr's, and the site
+// asserts a dbtype value and owes the dbtype import. A UUID decode is
+// neither: it arrives as a string and is PARSED, which fails on text
+// that is not a UUID, so it rides narrowCall's checked lane with the
+// numeric widths and names no driver package.
+func isTemporalCarrier(goType string) bool {
 	for _, name := range codegen.TemporalCarriers {
 		if goType == name {
 			return true
@@ -387,7 +390,7 @@ func temporalListHelper(leaf string, elemNullable bool) string {
 // width cannot hold; they now go through narrowCall below, which fails
 // the decode instead (ADR 0037, bd gqlc-awtb).
 func narrowExpr(goType, src string) string {
-	if isNeutralCarrier(goType) {
+	if isTemporalCarrier(goType) {
 		return fmt.Sprintf("to%s(%s)", goType, src)
 	}
 	return fmt.Sprintf("%s(%s)", goType, src)
@@ -423,6 +426,11 @@ func narrowCall(goType string, width graph.PropertyType, src string) string {
 	}
 	if goType == "float32" {
 		return fmt.Sprintf("narrowFloat32(%s)", src)
+	}
+	if goType == codegen.UUIDCarrier {
+		// Not a range question but the same shape of answer: the stored
+		// string either is a UUID or fails the read (ADR 0047).
+		return fmt.Sprintf("to%s(%s)", goType, src)
 	}
 	return fmt.Sprintf("narrowInt[%s](%s)", goType, src)
 }

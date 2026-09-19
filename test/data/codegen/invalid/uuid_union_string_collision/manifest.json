@@ -1,10 +1,11 @@
 {
-  "package": "uuidproperty",
+  "package": "uuidunionstringcollision",
   "queryFiles": [
     "queries.cypher"
   ],
   "targets": [
     "neo4j-go-v5",
     "neo4j-go-v6"
-  ]
+  ],
+  "expectedError": "codegen.ErrUnrepresentableWidth"
 }

@@ -1,19 +1,16 @@
 // AGE alone, and the single target is the point of the fixture rather than
-// an omission. UUID divides the roster since stage 2 of bd gqlc-eg4b, so the
-// three targets that once shared this refusal now give three different
-// answers and no one fixture can hold them:
+// an omission: the two backends answer this declaration differently, so no
+// one fixture can hold both.
 //
 //   apache-age-pgx-v5 refuses with codegen.ErrUnrepresentableWidth, which is
 //   this fixture. agtype's value vocabulary is boolean / integer / float /
 //   string / list / map, so there is no shape a 128-bit identifier comes back
 //   as itself in, and this is the sentinel that says so.
 //
-//   neo4j-go-v5 refuses with neo4j.ErrUnrepresentableOnDriverVersion —
-//   test/data/codegen/invalid/uuid_width_driver_version. A different
-//   sentinel because it is a different refusal: the backend HAS a carrier
-//   and this driver major does not ship it.
-//
-//   neo4j-go-v6 EMITS — test/data/codegen/valid/uuid_property, with goldens.
+//   neo4j-go-v5 and neo4j-go-v6 EMIT —
+//   test/data/codegen/valid/uuid_property, with goldens. They carry the width
+//   as its RFC 9562 text (ADR 0047); whether AGE should do the same is bd
+//   gqlc-ytf9.
 //
 // The AGE refusal now carries the AGE name, which it did not while every
 // target refused: a refusal names its backend exactly when another enrolled

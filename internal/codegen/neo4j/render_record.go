@@ -475,7 +475,7 @@ func writeCarrierNarrow(site decodeSite, depth int, goType string, width graph.P
 		fmt.Fprintf(site.b, "%s\t%s[%s] = %s\n", indent, acc, idx, got)
 		fmt.Fprintf(site.b, "%s}\n", indent)
 		return acc
-	case isNeutralCarrier(goType):
+	case isTemporalCarrier(goType):
 		out := site.next()
 		fmt.Fprintf(site.b, "%s%s := %s\n", indent, out, narrowExpr(goType, held))
 		return out
@@ -549,11 +549,8 @@ func unionElementIsNullable(goType string, width graph.PropertyType) bool {
 //   - dbtype: a neutral carrier (ADR 0033) asserts against its dbtype
 //     counterpart, which only the DECODE direction does — the encode
 //     direction names from<X>, and dbtype appears inside that helper's
-//     own bridge file rather than here. UUID is a neutral carrier on the
-//     same terms as the five temporal ones and needs no arm of its own,
-//     because it reaches dbtype.UUID through the same emitted pair
-//     (isNeutralCarrier records why the conversion-compatible one is
-//     bridged anyway).
+//     own bridge file rather than here. UUID owes none in either
+//     direction: it arrives as a string and is parsed (ADR 0047).
 func recordFileImports(encodings []graph.PropertyType, uses map[graph.PropertyType]carrierUse, tm typeMap) (needFmt, needTime, needDbtype bool) {
 	for _, pt := range encodings {
 		use := uses[pt]
@@ -569,7 +566,7 @@ func recordFileImports(encodings []graph.PropertyType, uses map[graph.PropertyTy
 			if leaf == "time.Time" {
 				needTime = true
 			}
-			if use.decode && isNeutralCarrier(leaf) {
+			if use.decode && isTemporalCarrier(leaf) {
 				needDbtype = true
 			}
 		}

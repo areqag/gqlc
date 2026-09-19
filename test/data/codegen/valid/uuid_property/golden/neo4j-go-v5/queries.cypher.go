@@ -6,8 +6,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/neo4j/neo4j-go-driver/v6/neo4j"
-	"github.com/neo4j/neo4j-go-driver/v6/neo4j/dbtype"
+	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
+	"github.com/neo4j/neo4j-go-driver/v5/neo4j/dbtype"
 )
 
 const accountWholeQueryText = `MATCH (a:Account) WHERE a.id = $id RETURN a`
