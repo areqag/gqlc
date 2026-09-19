@@ -1243,6 +1243,17 @@ check-bd-gh-sync-pull-tiebreak:
 test-bd-prime-guard:
     @.githooks/bd-prime-guarded.rows .githooks/bd-prime-guarded
 
+# The rows for .github/scripts/assert-go-toolchain.sh, the assertion
+# .github/actions/setup-go makes about its own provisioning (bd gqlc-ma1l). <1s
+# warm. Stubbed `go` commands for the shapes a runner cannot be made to produce
+# on demand, and two rows against the real go on PATH.
+#
+# ENROLLED UNDER `tidy`, in ci.yml and in the `gates` recipe, beside
+# test-bd-prime-guard above and for its reason: the job already provides Go and
+# is already a required context.
+test-setup-go-assertion:
+    @.github/scripts/assert-go-toolchain.rows .github/scripts/assert-go-toolchain.sh
+
 # The rows for `just complexity`'s EXIT CODE, which is the only thing
 # .githooks/pre-commit has to tell "a function is over the gate" from "nothing
 # was graded" (bd gqlc-f0x1, gqlc-i8j9, gqlc-9nj3). ~4s: each row is a real
@@ -2711,6 +2722,9 @@ gates:
     # session hooks from. Those are different questions and both are wanted: a
     # local red says this host's bd has moved, a CI red says the guard has.
     run tidy           just test-bd-prime-guard
+    # The rows for setup-go's provisioned-toolchain assertion (bd gqlc-ma1l).
+    # ci.yml's tidy job runs the same command.
+    run tidy           just test-setup-go-assertion
     run govulncheck    just vuln
 
     # Refuse BEFORE the summary, not after: the summary is a coverage claim, and

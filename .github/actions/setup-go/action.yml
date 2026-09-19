@@ -116,7 +116,7 @@ runs:
         # through os.UserCacheDir(), so $XDG_CACHE_HOME decides it; and a
         # `go env -w` file at $GOENV (default ~/.config/go/env) moves both, an
         # environment variable being what outranks it. Measured 2026-08-29 under
-        # go1.26.6, the version go.mod names:
+        # go1.26.6, the version go.mod named then:
         #   XDG_CACHE_HOME=$s go env GOCACHE  unpinned -> $s/go-build
         #                                     pinned   -> $HOME/.cache/go-build
         #   $GOENV setting both               unpinned -> the config's paths
@@ -179,8 +179,10 @@ runs:
             sleep "$((attempt * 5))"
         done
 
+        go_cmd=go
+        toolchain="go${GO_VERSION}"
         if [ -n "$resolved" ]; then
-            echo "GOTOOLCHAIN=go${GO_VERSION}" >> "$GITHUB_ENV"
+            echo "GOTOOLCHAIN=${toolchain}" >> "$GITHUB_ENV"
         else
             # Fallback source: go.dev/dl. A second origin, deliberately not
             # GitHub and deliberately not the module proxy, so one outage does
@@ -210,20 +212,29 @@ runs:
             # `local` and not the version: the binary IS the version now, and a
             # GOTOOLCHAIN naming it would send this go command looking for the
             # module proxy again on the next invocation.
-            echo "GOTOOLCHAIN=local" >> "$GITHUB_ENV"
-            if ! resolved="$("$HOME/.local/go/bin/go" version 2>&1)"; then
-                infra_fail "the go.dev/dl tarball unpacked but the binary would not run: ${resolved}"
-            fi
+            go_cmd="$HOME/.local/go/bin/go"
+            toolchain=local
+            echo "GOTOOLCHAIN=${toolchain}" >> "$GITHUB_ENV"
         fi
 
         # The assertion is the point of the eager step. A provisioning path that
         # silently yields a DIFFERENT toolchain than go.mod names is green setup
         # over a build nobody asked for.
-        case "$resolved" in
-            *"go${GO_VERSION} "* | *"go${GO_VERSION}") ;;
-            *) infra_fail "go.mod names go${GO_VERSION}, but the provisioned toolchain reports: ${resolved}" ;;
-        esac
-        echo "provisioned: ${resolved}"
+        #
+        # It lives in a script so that rows can drive it (`just
+        # test-setup-go-assertion`, bd gqlc-ma1l), and it runs the go command
+        # again, under the GOTOOLCHAIN just written to $GITHUB_ENV, rather than
+        # reading $resolved: that capture folds stderr in, and a cold cache's
+        # "go: downloading go<version>" notice names the wanted version whatever
+        # was provisioned. The 2>&1 here feeds the failure message alone; the
+        # verdict is the exit status. The reason is the script's LAST line, the
+        # go command's own stderr coming ahead of it, and it is passed alone
+        # because a workflow command ends at the first newline.
+        if ! provisioned="$(GOTOOLCHAIN="$toolchain" ./.github/scripts/assert-go-toolchain.sh "$GO_VERSION" "$go_cmd" 2>&1)"; then
+            echo "$provisioned"
+            infra_fail "${provisioned##*$'\n'}"
+        fi
+        echo "provisioned: ${provisioned}"
 
     # The pin above is asserted here rather than trusted. If the two cache
     # paths drift from the actions/cache `path:`, the job stays green while

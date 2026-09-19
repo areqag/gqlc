@@ -1,0 +1,163 @@
+#!/usr/bin/env bash
+# Rows for .github/scripts/assert-go-toolchain.sh, run by
+# `just test-setup-go-assertion` (bd gqlc-ma1l).
+#
+# What is under test is the one claim .github/actions/setup-go makes about its
+# own provisioning: the toolchain the job builds with IS the one go.mod names.
+# The assertion used to read `go version 2>&1`, and on a cold module cache the
+# go command's own stderr notice — `go: downloading go1.27.1 (linux/amd64)` —
+# carries the wanted version followed by a space, so the notice satisfied the
+# match whatever the `go version` line said. Which stream carries which line
+# was measured 2026-09-19 with go1.27.1 over an empty GOMODCACHE: the notice on
+# stderr, `go version go1.27.1 linux/amd64` alone on stdout.
+#
+# $1 is the script under test, defaulting to the one beside this file. It is a
+# parameter so that a mutation run can point these rows at a mutated copy.
+#
+# The stub rows encode what the go command is BELIEVED to print; the two
+# real-go rows are the witness that the script agrees with the real one.
+set -uo pipefail
+
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+script="${1:-${here}/assert-go-toolchain.sh}"
+[ -f "${script}" ] || { echo "error: ${script} is not a file" >&2; exit 1; }
+
+scratch="$(mktemp -d)"
+trap 'rm -rf "${scratch}"' EXIT
+
+# One stub, steered per row through the environment: what it prints on each
+# stream and how it exits are the whole of what the script can observe.
+stub="${scratch}/go"
+cat >"${stub}" <<'EOF'
+#!/usr/bin/env bash
+[ -z "${STUB_STDERR:-}" ] || printf '%s\n' "${STUB_STDERR}" >&2
+[ -z "${STUB_STDOUT:-}" ] || printf '%s\n' "${STUB_STDOUT}"
+exit "${STUB_RC:-0}"
+EOF
+chmod +x "${stub}"
+
+pass=0
+fail=0
+row() {
+    local name="$1" verdict="$2" detail="$3"
+    if [ "${verdict}" = PASS ]; then
+        pass=$((pass + 1))
+        printf '  PASS  %-32s %s\n' "${name}" "${detail}"
+    else
+        fail=$((fail + 1))
+        printf '  FAIL  %-32s %s\n' "${name}" "${detail}" >&2
+    fi
+}
+
+# Leaves the script's exit status in rc, its stdout in out, and the LAST line of
+# its stderr in reason. The last line, because the go command's own stderr
+# passes through ahead of it and a refusal's reason is what the script adds.
+rc=0; out=""; reason=""
+run_assert() {
+    out="$("${script}" "$@" 2>"${scratch}/err")"
+    rc=$?
+    reason="$(tail -n 1 "${scratch}/err")"
+}
+
+want=1.27.1
+notice="go: downloading go${want} (linux/amd64)"
+
+# accepts NAME STDERR STDOUT: the stub's answer must be accepted, and the
+# `go version` line handed back whole as a line of stdout.
+accepts() {
+    local name="$1"
+    STUB_STDERR="$2" STUB_STDOUT="$3" run_assert "${want}" "${stub}"
+    if [ "${rc}" -eq 0 ] && printf '%s\n' "${out}" | command grep -Fxq -- "$3"; then
+        row "${name}" PASS "rc=0"
+    else
+        row "${name}" FAIL "rc=${rc}, expected 0 with '$3' on stdout; stdout: ${out}; reason: ${reason}"
+    fi
+}
+
+# refuses NAME STDERR STDOUT: the stub's answer must be refused, and refused
+# for THIS reason — rc=1 alone is also what a crash in the script looks like.
+# The reason is compared whole, so it must name both the version go.mod asked
+# for and the line the toolchain actually reported.
+refuses() {
+    local name="$1"
+    local expect="go.mod names go${want}, but the provisioned toolchain reports: $3"
+    STUB_STDERR="$2" STUB_STDOUT="$3" run_assert "${want}" "${stub}"
+    if [ "${rc}" -eq 1 ] && [ -z "${out}" ] && [ "${reason}" = "${expect}" ]; then
+        row "${name}" PASS "refused, reason names go${want} and the reported line"
+    else
+        row "${name}" FAIL "rc=${rc}, expected 1 with empty stdout and reason '${expect}'; stdout: ${out}; reason: ${reason}"
+    fi
+}
+
+# --- allow rows -----------------------------------------------------------
+# Written first on purpose: an assertion that refuses the honest cold-cache run
+# reds every job in the repository the first time a toolchain bump lands.
+
+accepts warm-cache-right-version "" "go version go${want} linux/amd64"
+accepts cold-cache-right-version "${notice}" "go version go${want} linux/amd64"
+
+# --- deny rows ------------------------------------------------------------
+
+# THE BEAD'S CASE. The download notice names the wanted version and the
+# `go version` line names another.
+refuses notice-right-version-wrong "${notice}" "go version go1.26.6 linux/amd64"
+refuses wrong-version-warm "" "go version go1.26.6 linux/amd64"
+
+# The version token is compared WHOLE. Each of these carries the wanted version
+# as a proper prefix of a different toolchain's name.
+refuses longer-patch-number "" "go version go${want}0 linux/amd64"
+refuses release-candidate-suffix "" "go version go${want}rc1 linux/amd64"
+# A distribution build. Measured 2026-09-19 on a host whose own go reports
+# go1.27.1-X:nodwarf5: GOTOOLCHAIN=go1.27.1 downloads go1.27.1 rather than use
+# it, so the go command itself holds the two to be different toolchains.
+refuses distribution-suffix "" "go version go${want}-X:nodwarf5 linux/amd64"
+# The wanted version somewhere on the line other than the version token.
+refuses version-not-in-token-field "" "go version devel go${want} linux/amd64"
+refuses notice-on-stdout-only "" "${notice}"
+refuses empty-stdout "" ""
+
+# A go command that exits non-zero is refused whatever it printed, and says so
+# rather than reporting a version mismatch nobody measured.
+STUB_STDOUT="go version go${want} linux/amd64" STUB_RC=3 run_assert "${want}" "${stub}"
+if [ "${rc}" -eq 1 ] && [ -z "${out}" ] && [ "${reason}" != "${reason#*would not run}" ]; then
+    row go-exits-nonzero PASS "refused, reason says it would not run"
+else
+    row go-exits-nonzero FAIL "rc=${rc}, expected 1 with empty stdout and a 'would not run' reason; stdout: ${out}; reason: ${reason}"
+fi
+
+# An empty version must not reach the comparison: `go` alone is a prefix of
+# every line the go command prints.
+STUB_STDOUT="go version go${want} linux/amd64" run_assert "" "${stub}"
+if [ "${rc}" -eq 2 ] && [ -z "${out}" ]; then
+    row empty-version-is-usage-error PASS "rc=2"
+else
+    row empty-version-is-usage-error FAIL "rc=${rc}, expected 2 with empty stdout; stdout: ${out}; reason: ${reason}"
+fi
+
+# --- the real go command --------------------------------------------------
+# Both directions against the go on PATH, pinned the way setup-go and `just
+# vuln` pin it. A stub can only agree with whoever wrote it.
+# A missing go is a FAIL rather than a skip: every other gate in this repository
+# needs one, and a battery that drops its only real rows in silence reads
+# complete while the stub's author is the sole witness.
+real_want="$("${here}/go-toolchain-version.sh" "${here}/../../go.mod")" || real_want=""
+if [ -z "${real_want}" ] || ! command -v go >/dev/null 2>&1; then
+    row real-go-rows FAIL "no go on PATH, or no version in go.mod (read '${real_want}')"
+else
+    GOTOOLCHAIN="go${real_want}" run_assert "${real_want}" go
+    if [ "${rc}" -eq 0 ] && [ "${out}" != "${out#go version go"${real_want}" }" ]; then
+        row real-go-pinned-is-accepted PASS "${out}"
+    else
+        row real-go-pinned-is-accepted FAIL "rc=${rc}, expected 0; stdout: ${out}; reason: ${reason}"
+    fi
+    expect="go.mod names go0.0.0, but the provisioned toolchain reports: go version go${real_want} "
+    GOTOOLCHAIN="go${real_want}" run_assert 0.0.0 go
+    if [ "${rc}" -eq 1 ] && [ -z "${out}" ] && [ "${reason}" != "${reason#"${expect}"}" ]; then
+        row real-go-wrong-want-is-refused PASS "refused, reason names go0.0.0 and go${real_want}"
+    else
+        row real-go-wrong-want-is-refused FAIL "rc=${rc}, expected 1 with empty stdout and a reason starting '${expect}'; stdout: ${out}; reason: ${reason}"
+    fi
+fi
+
+echo "assert-go-toolchain: ${pass} passed, ${fail} failed"
+[ "${fail}" -eq 0 ]
