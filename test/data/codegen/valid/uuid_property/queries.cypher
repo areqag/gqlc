@@ -1,15 +1,16 @@
-// Both neo4j majors, and the two goldens differ in nothing but the driver's
-// import path: a UUID is carried as the standard library's uuid.UUID and is a
-// STRING on the wire — its RFC 9562 text — so no driver type is involved and
-// neither major has anything to disagree about (ADR 0047). AGE still refuses
-// the width; that is test/data/codegen/invalid/uuid_width_unrepresentable, and
-// the two schemas agree on the declaration so that the answer is the only
-// variable.
+// All three targets. A UUID is carried as the standard library's uuid.UUID
+// and is a STRING on the wire — its RFC 9562 text — so no driver type is
+// involved (ADR 0047). The two neo4j goldens differ in nothing but the
+// driver's import path. The AGE golden differs from them in one way worth
+// reading for: it has a checked decoder, agtypeUUID, and NO encoder, because
+// its parameters cross through encoding/json and uuid.UUID marshals itself as
+// the text that decoder reads.
 //
-// THE LIVE HALF IS TestNeo4jStoresAndRoundTripsAUUID, against the pinned
-// image, on both majors: that a UUID written through OpenAccount is stored in
-// a property slot, as the text fromUUID renders, and reads back equal through
-// each of the three read positions below (bd gqlc-ybk2).
+// THE LIVE HALVES are TestNeo4jStoresAndRoundTripsAUUID (both majors, bd
+// gqlc-ybk2) and TestAGEStoresAndRoundTripsAUUID (bd gqlc-ytf9), each against
+// its pinned image: that a UUID written through OpenAccount is stored in a
+// property slot, as canonical text, and reads back equal through each of the
+// three read positions below.
 //
 // What the four UUID properties are for, none of them decoration:
 //
@@ -30,7 +31,9 @@
 //   because STRING cannot be: a UUID arrives as a string, the members of a
 //   union have to be pairwise distinct on the wire (spec §4), and
 //   UNION<UUID|STRING> is therefore a refusal —
-//   test/data/codegen/invalid/uuid_union_string_collision.
+//   test/data/codegen/invalid/uuid_union_string_collision, which is the two
+//   neo4j majors alone: AGE refuses the same union through a different
+//   sentinel, its unserved-column one, so one manifest cannot hold all three.
 //
 // span is not a UUID and is the only property here that is not. It is a
 // DURATION, and DURATION SPECIFICALLY, because this fixture is the only place
@@ -57,7 +60,7 @@
 // returns need the carrier's ZERO — an array, so a composite literal and not
 // the numeric zero the default arm spells.
 //
-// The four match parameters are four distinct bind expressions and no two
+// On the neo4j targets the four match parameters are four distinct bind expressions and no two
 // share a helper. $ref is the bare non-nullable width, rendered by fromUUID.
 // $prior is nullable, so the nil check is fromUUIDPtr's — a *UUID handed to
 // the driver as it stands is a pointer to a Go array, which the packer

@@ -5,6 +5,9 @@ standard library's `uuid.UUID`, on **both** neo4j driver majors, and the value
 is stored as its RFC 9562 text — a STRING to the driver and to the server. No
 driver type is involved in either direction.
 
+Apache AGE adopted the same carrier on 2026-09-19 (bead `gqlc-ytf9`); see
+"Apache AGE" below. With it the width is carried by all three enrolled targets.
+
 **This is a breaking change to already-generated code** for anyone who
 generated against `neo4j-go-v6` between PR #2898 and this one. The emitted
 `UUID` was a gqlc-owned `type UUID [16]byte`; it is now
@@ -91,8 +94,53 @@ string: a `string` field over a `UUID` declaration, where any text reads
 back. Decision 4 is the answer to it. The declared type is on the Go surface
 as `uuid.UUID`, not `string`, and a value that is not one does not arrive.
 
-Whether Apache AGE should adopt the same carrier on the same argument is not
-decided here. It still refuses the width; bead `gqlc-ytf9` holds the question.
+When this was first written Apache AGE still refused the width on exactly
+that ground, and whether it should follow was left to bead `gqlc-ytf9`. The
+owner ruled that it should; the next section is that change.
+
+## Apache AGE
+
+AGE carries the width the way it already carries `DATE`: in the agtype string
+scalar, read back through a decoder that parses. `propertyCarriers` answers
+`"UUID"`, `wireFamily` files it under `string`, and the emitted `agtypeUUID`
+reads the text through `agtypeString` and then `uuid.Parse`, failing the read
+on text that is not a UUID. `uuid.go` is the same file the neo4j targets emit.
+
+**There is no encoder.** This backend binds parameters through
+`encoding/json`, and `uuid.UUID` implements `encoding.TextMarshaler`, so it
+marshals as the lowercase hyphenated text `agtypeUUID` reads. Probed before
+relying on it, and then measured live: bare, behind a pointer, as a list
+element, as a nil pointer (`null`), as a nil list element (`null`), and as the
+dynamic value inside the `any` a union carries. The cost of that economy is
+that the write form rests on the `uuid` package's marshalling rather than on
+text gqlc emits; the live storage row is what would notice it change.
+
+`TestAGEStoresAndRoundTripsAUUID` runs the neo4j half's rows against the
+pinned AGE image — 8 rows, 8 PASS on 2026-09-19 — with two differences that
+are the store's. A **nil list element is stored and read back**, which neo4j's
+property arrays cannot hold, so `agtypeNullableElem`'s nil arm is reached by a
+value that came from the server. And a bound list **holding a null still
+matches** the stored list under `=`; that was written into the test as the
+opposite belief first and corrected by a probe, so it is recorded here as
+measured rather than assumed.
+
+Three mutations in a scratch copy, victims declared first: `agtypeUUID`
+swallowing its parse error failed the not-a-UUID row; a nullable list element
+decoded as the zero UUID instead of nil failed the read-back row; `OpenAccount`
+binding `ref` upper-cased failed the storage row and — not predicted — the
+parameter row, since the mutant stores upper case while the parameter stays
+lower. The unmutated control ran clean.
+
+What differs from neo4j for an author:
+
+- `UNION<UUID|STRING>` is refused here too, and so is **`UNION<UUID|DATE>`**,
+  which neo4j admits: on AGE a DATE is ISO text, so both members are the
+  string family.
+- The refusal of a colliding union arrives through AGE's unserved-column
+  sentinel rather than `ErrUnrepresentableWidth`, so
+  `invalid/uuid_union_string_collision` stays a neo4j-only fixture.
+- `invalid/uuid_width_unrepresentable`, the fixture that held AGE's refusal
+  end to end, is removed with the refusal.
 
 ## Measured
 
@@ -145,6 +193,10 @@ not, because it upper-cases the write and the parameter alike.
 - **Generated code that declares a UUID property requires Go 1.27** from its
   consumer. Code that declares none is unaffected: `uuid.go` is emitted only
   when the surface names the carrier.
+
+- **`UUID` is a reserved identifier declared by every target** now, where it
+  was declared by the neo4j targets alone while AGE refused the width
+  (`docs/specs/codegen-sentinel-taxonomy.md` §6).
 
 - **The driver's `dbtype.UUID` is never asserted by generated code.** It stays
   in `driverScalarCarriers` as an unwitnessed row, so a driver type returning

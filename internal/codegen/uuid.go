@@ -27,10 +27,9 @@ var uuidCarrierSet = map[string]struct{}{UUIDCarrier: {}}
 // unqualified, so none of their import walks has a package to account
 // for.
 //
-// On the wire a UUID is its RFC 9562 text form — a STRING to the driver,
-// on both neo4j majors, and no driver's own UUID type is involved
-// (ADR 0047). Apache AGE still refuses the width, so no AGE emission
-// reaches this file today.
+// On the wire a UUID is its RFC 9562 text form on all three enrolled
+// targets — a Bolt STRING on both neo4j majors and an agtype string on
+// Apache AGE — and no driver's own UUID type is involved (ADR 0047).
 func RenderUUID(pkg string) []byte {
 	return []byte(Header() + `package ` + pkg + `
 

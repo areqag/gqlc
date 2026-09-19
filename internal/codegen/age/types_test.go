@@ -66,6 +66,10 @@ func TestTypeMapProperty(t *testing.T) {
 		{graph.TypeLocalTime, "LocalTime"},
 		{graph.TypeTime, "Time"},
 		{graph.TypeDuration, "Duration"},
+		// An alias of the standard library's uuid.UUID, declared in the
+		// emitted uuid.go, riding the string scalar as its RFC 9562 text
+		// the way DATE rides it as ISO text (ADR 0047).
+		{graph.TypeUUID, "UUID"},
 	}
 	for _, tt := range representable {
 		t.Run("representable/"+string(tt.pt), func(t *testing.T) {
@@ -83,12 +87,6 @@ func TestTypeMapProperty(t *testing.T) {
 		graph.TypeUint128, graph.TypeUint256,
 		graph.TypeFloat16, graph.TypeFloat128, graph.TypeFloat256,
 		graph.TypeDecimal,
-		// agtype's value vocabulary is boolean / integer / float /
-		// string / list / map, so a 128-bit identifier has no shape to
-		// come back as itself in. Permanent for as long as that is
-		// true of agtype, and so unlike the neo4j table's UUID row,
-		// which is waiting on a carrier the driver already ships.
-		graph.TypeUUID,
 	}
 	for _, pt := range unrepresentable {
 		t.Run("unrepresentable/"+string(pt), func(t *testing.T) {

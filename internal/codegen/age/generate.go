@@ -149,8 +149,8 @@ func generate(in codegen.Input, packageName string) (files []codegen.File, err e
 	return codegen.Finalise(files)
 }
 
-// sourceFiles renders the files that follow models.go: temporal.go when
-// the prepared surface references a temporal carrier, then one
+// sourceFiles renders the files that follow models.go: temporal.go and
+// uuid.go, each when the prepared surface references its carrier, then one
 // `<name>.cypher.go` per source file.
 func sourceFiles(pkg string, prepared codegen.Prepared) []codegen.File {
 	var files []codegen.File
@@ -163,6 +163,13 @@ func sourceFiles(pkg string, prepared codegen.Prepared) []codegen.File {
 	// models.go, which are where this backend's encoding lives.
 	if codegen.ReferencesTemporalCarrier(prepared) {
 		files = append(files, codegen.File{Path: "temporal.go", Contents: codegen.RenderTemporal(pkg)})
+	}
+	// The UUID carrier, on the same terms and triggered separately (ADR
+	// 0047). No conversions file follows it either, and here not even an
+	// encoder does: agtypeUUID in models.go is the whole of this backend's
+	// half, the JSON encoder writing a uuid.UUID as the text that reads.
+	if codegen.ReferencesUUIDCarrier(prepared) {
+		files = append(files, codegen.File{Path: "uuid.go", Contents: codegen.RenderUUID(pkg)})
 	}
 	// Per-source `<name>.cypher.go` emission — grouped by SourceFile
 	// basename in first-appearance order (§5.5).

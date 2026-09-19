@@ -1409,8 +1409,8 @@ var driverSliceCarriers = map[string]bool{
 // dbtype.UUID is the one unwitnessed entry that IS settled, and settled
 // the other way: v6's driver can produce it, so it belongs to the
 // vocabulary, and no emission asserts it because gqlc carries a UUID as
-// a string on both neo4j majors (ADR 0047) — the only targets this sweep
-// reads; Apache AGE still refuses the width. Its flag flipping to true is a
+// a string on both neo4j majors (ADR 0047), the only targets this sweep
+// reads. Its flag flipping to true is a
 // driver type returning to the emitted code, which is what the row is
 // kept to catch.
 var driverScalarCarriers = map[string]bool{
