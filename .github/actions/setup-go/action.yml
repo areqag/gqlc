@@ -116,7 +116,7 @@ runs:
         # through os.UserCacheDir(), so $XDG_CACHE_HOME decides it; and a
         # `go env -w` file at $GOENV (default ~/.config/go/env) moves both, an
         # environment variable being what outranks it. Measured 2026-08-29 under
-        # go1.26.6, the version go.mod names:
+        # go1.26.6, the version go.mod named then:
         #   XDG_CACHE_HOME=$s go env GOCACHE  unpinned -> $s/go-build
         #                                     pinned   -> $HOME/.cache/go-build
         #   $GOENV setting both               unpinned -> the config's paths
@@ -227,9 +227,12 @@ runs:
         # reading $resolved: that capture folds stderr in, and a cold cache's
         # "go: downloading go<version>" notice names the wanted version whatever
         # was provisioned. The 2>&1 here feeds the failure message alone; the
-        # verdict is the exit status.
+        # verdict is the exit status. The reason is the script's LAST line, the
+        # go command's own stderr coming ahead of it, and it is passed alone
+        # because a workflow command ends at the first newline.
         if ! provisioned="$(GOTOOLCHAIN="$toolchain" ./.github/scripts/assert-go-toolchain.sh "$GO_VERSION" "$go_cmd" 2>&1)"; then
-            infra_fail "$provisioned"
+            echo "$provisioned"
+            infra_fail "${provisioned##*$'\n'}"
         fi
         echo "provisioned: ${provisioned}"
 
