@@ -1,0 +1,5 @@
+{
+  "package": "uniononlycarrierunderrecord",
+  "queryFiles": ["queries.cypher"],
+  "targets": ["apache-age-pgx-v5"]
+}

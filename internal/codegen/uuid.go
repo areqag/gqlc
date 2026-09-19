@@ -1,5 +1,7 @@
 package codegen
 
+import "github.com/areqag/gqlc/internal/graph"
+
 // UUIDCarrier is the exported name uuid.go declares for the UUID property
 // width. It names no driver type, on the ground ADR 0033 gives the five
 // temporal carriers, and it is not a type of gqlc's own either: it is an
@@ -43,10 +45,10 @@ type UUID = uuid.UUID
 `)
 }
 
-// ReferencesUUIDCarrier reports whether the prepared batch's public
-// surface names the carrier — the emission trigger for uuid.go, on ADR
-// 0033's rule that a carrier file is emitted only when the generated
-// surface references it.
+// ReferencesUUIDCarrier reports whether the emitted package names the
+// carrier, on its public surface or in a closed union's member arms —
+// the emission trigger for uuid.go, on ADR 0033's rule that a carrier
+// file is emitted only when the generated package references it.
 //
 // Asked separately from ReferencesTemporalCarrier rather than folded
 // into one "names any carrier" question, because the two files are
@@ -55,6 +57,6 @@ type UUID = uuid.UUID
 // for every temporal fixture in the corpus. One combined trigger would
 // emit both for either, which is the unreferenced-declaration cost ADR
 // 0033 weighed and declined.
-func ReferencesUUIDCarrier(p Prepared) bool {
-	return referencesCarrier(p, uuidCarrierSet)
+func ReferencesUUIDCarrier(p Prepared, carrier func(graph.PropertyType) (string, bool)) bool {
+	return referencesCarrier(p, carrier, uuidCarrierSet)
 }

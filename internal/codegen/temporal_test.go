@@ -1,11 +1,13 @@
 package codegen_test
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/areqag/gqlc/internal/codegen"
+	"github.com/areqag/gqlc/internal/graph"
 )
 
 // TestTypeTextNamesCarrier drives the walk over the temporal set, and
@@ -63,4 +65,90 @@ func TestTypeTextNamesCarrier(t *testing.T) {
 			require.Equal(t, row.want, codegen.TypeTextNamesCarrier(row.text, row.set))
 		})
 	}
+}
+
+// TestCarrierTriggersReadUnionMembers holds the two emission triggers over
+// a batch whose one property is a closed union, so its surface text is
+// `any` and the members are the only place a carrier can be named
+// (bd gqlc-o8p3).
+//
+// The emit rows are also held end to end, by TestGoldenBuild over
+// test/data/codegen/valid/union_only_*, which is where an omitted file is
+// an emitted package that does not compile. What those fixtures cannot
+// hold is here: the refused-member arm, which no batch reaches because
+// preparation refuses it first, and each trigger answering false for the
+// other family's member in one table rather than across two golden trees.
+func TestCarrierTriggersReadUnionMembers(t *testing.T) {
+	carriers := map[graph.PropertyType]string{
+		graph.TypeDate:   "Date",
+		graph.TypeUUID:   codegen.UUIDCarrier,
+		graph.TypeBool:   "bool",
+		graph.TypeInt64:  "int64",
+		graph.TypeString: "string",
+	}
+	carrier := func(pt graph.PropertyType) (string, bool) {
+		text, ok := carriers[pt]
+		return text, ok
+	}
+	unionOf := func(members ...graph.PropertyType) graph.PropertyType {
+		out := make([]graph.UnionMember, 0, len(members))
+		for _, m := range members {
+			out = append(out, graph.UnionMember{Type: m})
+		}
+		return graph.UnionOf(out)
+	}
+	batch := func(widths ...graph.PropertyType) codegen.Prepared {
+		fields := make([]codegen.EntityField, 0, len(widths))
+		for i, width := range widths {
+			goType := codegen.UnionCarrierText
+			if width.Kind() == graph.KindList {
+				goType = "[]" + goType
+			}
+			name := fmt.Sprintf("either%d", i)
+			fields = append(fields, codegen.EntityField{PropName: name, Field: name, GoType: goType, Width: width})
+		}
+		return codegen.Prepared{Entities: []codegen.Entity{{Name: "Account", Fields: fields}}}
+	}
+
+	temporal, plain := unionOf(graph.TypeDate, graph.TypeInt64), unionOf(graph.TypeInt64, graph.TypeString)
+	rows := []struct {
+		name         string
+		widths       []graph.PropertyType
+		wantTemporal bool
+		wantUUID     bool
+	}{
+		{"no member is a carrier", []graph.PropertyType{plain}, false, false},
+		{"a temporal member", []graph.PropertyType{temporal}, true, false},
+		{"a UUID member", []graph.PropertyType{unionOf(graph.TypeUUID, graph.TypeInt64)}, false, true},
+		{"a list of unions", []graph.PropertyType{graph.ListOf(temporal, false)}, true, false},
+		{
+			// BYTES is a width the carrier above refuses. Both triggers
+			// answer true for it, on typeTextNamesCarrier's ground: a
+			// carrier file nothing references still compiles.
+			"a member the carrier refuses fails open", []graph.PropertyType{unionOf(graph.TypeBytes, graph.TypeInt64)}, true, true,
+		},
+	}
+	for _, row := range rows {
+		t.Run(row.name, func(t *testing.T) {
+			p := batch(row.widths...)
+			require.Equal(t, row.wantTemporal, codegen.ReferencesTemporalCarrier(p, carrier))
+			require.Equal(t, row.wantUUID, codegen.ReferencesUUIDCarrier(p, carrier))
+		})
+	}
+
+	// Two unions, with the carrier in the one UnionEncodings hands over
+	// LAST. A reading that stopped after the first encoding answers false
+	// here and true on every row above, each of which holds one union. The
+	// order is asserted rather than assumed, in both declaration orders, so
+	// a change to the canonical sort cannot turn this into a first-entry
+	// row without saying so.
+	t.Run("the carrier is in the later-sorting union", func(t *testing.T) {
+		early := unionOf(graph.TypeBool, graph.TypeInt64)
+		for _, widths := range [][]graph.PropertyType{{early, temporal}, {temporal, early}} {
+			p := batch(widths...)
+			require.Equal(t, []graph.PropertyType{early, temporal}, codegen.UnionEncodings(p.Entities, p.Queries))
+			require.True(t, codegen.ReferencesTemporalCarrier(p, carrier))
+			require.False(t, codegen.ReferencesUUIDCarrier(p, carrier))
+		}
+	})
 }

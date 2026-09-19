@@ -197,7 +197,7 @@ not, because it upper-cases the write and the parameter alike.
 
 - **Generated code that declares a UUID property requires Go 1.27** from its
   consumer. Code that declares none is unaffected: `uuid.go` is emitted only
-  when the surface names the carrier.
+  when the package names the carrier, directly or as a closed union's member.
 
 - **`UUID` is a reserved identifier declared by every target** now, where it
   was declared by the neo4j targets alone while AGE refused the width

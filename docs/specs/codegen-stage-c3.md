@@ -19,7 +19,8 @@ only the sections C3 touches.
 Stage C3 keeps the C2 file set (`db.go` / `querier.go` /
 `models.go` / `<name>.cypher.go`) byte-identical for the parts C3 does
 not touch, adds the `temporal.go` / `temporal_neo4j.go` pair for a
-batch whose surface references a neutral carrier (§5.8, §5.9),
+batch that names a neutral carrier, on its surface or as a closed
+union's member (§5.8, §5.9),
 extends the C2 property → Go type table with the four temporal-
 property rows and the eight unrepresentable-width rows, adds
 five new column-shape rows (`ResolvedList`, `ResolvedTemporal`,
@@ -1105,11 +1106,18 @@ per-source files:
   flat component structs, so `==` is value equality and the zero
   value is inspectable. TIMESTAMP is absent by design: `time.Time`
   is already driver-neutral.
-- **Emission trigger is `codegen.ReferencesTemporalCarrier(prepared)`** —
+- **Emission trigger is `codegen.ReferencesTemporalCarrier(prepared, carrier)`** —
   true iff some exported position of the prepared surface names a
-  carrier: an entity field, a query parameter, a row field, or any
-  nesting level of a list row field. A batch whose only temporal is
-  a TIMESTAMP emits no `temporal.go`.
+  carrier — an entity field, a query parameter, a row field, or any
+  nesting level of a list row field — or some member of a closed
+  union the batch reaches does. The second half is not on the
+  surface: a union carries as `any`, while its emitted helper pair
+  names each member's carrier, so a batch whose one DATE sits inside
+  `ANY<DATE | INT64>` owes the file all the same (bd gqlc-o8p3). The
+  members are read through `codegen.UnionEncodings` and
+  `codegen.UnionMembers`, which the helper emission is built on;
+  `carrier` is the backend's member carrier. A batch whose only
+  temporal is a TIMESTAMP emits no `temporal.go`.
 - **The trigger parses, it does not substring-match.** `Date` is a
   substring of `LocalDateTime` and of entity names a schema may
   choose, and a nested text (`[][]Date`) hides its leaf from a
