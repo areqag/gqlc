@@ -150,25 +150,27 @@ func generate(in codegen.Input, packageName string) (files []codegen.File, err e
 }
 
 // sourceFiles renders the files that follow models.go: temporal.go and
-// uuid.go, each when the prepared surface references its carrier, then one
+// uuid.go, each when the emitted package names its carrier, then one
 // `<name>.cypher.go` per source file.
 func sourceFiles(pkg string, prepared codegen.Prepared) []codegen.File {
 	var files []codegen.File
 	// The neutral temporal carriers, emitted byte-identically on every
-	// backend and only when the prepared surface references one (ADR
-	// 0033). No driver bridge follows them here: the neo4j targets pair
-	// this file with a temporal_<driver>.go converting to and from the
-	// driver's own temporal types, and agtype has none — a carrier
-	// reaches the wire through the agtype encode and decode helpers in
-	// models.go, which are where this backend's encoding lives.
-	if codegen.ReferencesTemporalCarrier(prepared) {
+	// backend and only when the package names one — on the prepared
+	// surface, or in a closed union's member arms in models.go, which
+	// the surface spells `any` (ADR 0033). No driver bridge follows them
+	// here: the neo4j targets pair this file with a temporal_<driver>.go
+	// converting to and from the driver's own temporal types, and agtype
+	// has none — a carrier reaches the wire through the agtype encode
+	// and decode helpers in models.go, which are where this backend's
+	// encoding lives.
+	if codegen.ReferencesTemporalCarrier(prepared, unionMemberCarrier) {
 		files = append(files, codegen.File{Path: "temporal.go", Contents: codegen.RenderTemporal(pkg)})
 	}
 	// The UUID carrier, on the same terms and triggered separately (ADR
 	// 0047). No conversions file follows it either, and here not even an
 	// encoder does: agtypeUUID in models.go is the whole of this backend's
 	// half, the JSON encoder writing a uuid.UUID as the text that reads.
-	if codegen.ReferencesUUIDCarrier(prepared) {
+	if codegen.ReferencesUUIDCarrier(prepared, unionMemberCarrier) {
 		files = append(files, codegen.File{Path: "uuid.go", Contents: codegen.RenderUUID(pkg)})
 	}
 	// Per-source `<name>.cypher.go` emission — grouped by SourceFile

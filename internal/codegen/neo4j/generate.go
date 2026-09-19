@@ -54,11 +54,13 @@ func generate(in codegen.Input, target driverTarget, packageName string) ([]code
 	}
 
 	// The neutral temporal carriers and their driver bridge, emitted as
-	// a pair and only when the prepared surface references a carrier
-	// (ADR 0033). temporal.go is byte-identical across every target;
-	// temporal_neo4j.go is this backend's, and holds every dbtype
-	// mention the carriers displaced off the public surface.
-	if codegen.ReferencesTemporalCarrier(prepared) {
+	// a pair and only when the package names a carrier — on the prepared
+	// surface, or in a union helper's member arms above, which the
+	// surface spells `any` (ADR 0033). temporal.go is byte-identical
+	// across every target; temporal_neo4j.go is this backend's, and
+	// holds every dbtype mention the carriers displaced off the public
+	// surface.
+	if codegen.ReferencesTemporalCarrier(prepared, target.types().Property) {
 		files = append(files,
 			codegen.File{Path: "temporal.go", Contents: codegen.RenderTemporal(pkg)},
 			codegen.File{Path: "temporal_neo4j.go", Contents: renderTemporalConversions(pkg, neutralUse, target)},
@@ -69,7 +71,7 @@ func generate(in codegen.Input, target driverTarget, packageName string) ([]code
 	// the temporal pair above: uuid.go is byte-identical across every
 	// target, and uuid_neo4j.go is this backend's — the string form a
 	// UUID takes on its wire, which names no driver type (ADR 0047).
-	if codegen.ReferencesUUIDCarrier(prepared) {
+	if codegen.ReferencesUUIDCarrier(prepared, target.types().Property) {
 		files = append(files,
 			codegen.File{Path: "uuid.go", Contents: codegen.RenderUUID(pkg)},
 			codegen.File{Path: "uuid_neo4j.go", Contents: renderUUIDConversions(pkg, neutralUse)},

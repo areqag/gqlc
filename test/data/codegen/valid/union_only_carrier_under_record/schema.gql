@@ -1,0 +1,6 @@
+CREATE PROPERTY GRAPH TYPE UnionOnlyCarrierUnderRecord AS {
+    (:Ledger {
+        id    :: INT64 NOT NULL,
+        entry :: RECORD { stamp :: ANY<DATE | INT64> } NOT NULL
+    })
+}

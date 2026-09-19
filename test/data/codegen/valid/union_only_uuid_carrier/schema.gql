@@ -1,0 +1,6 @@
+CREATE PROPERTY GRAPH TYPE UnionOnlyUuidCarrier AS {
+    (:Account {
+        id     :: INT64 NOT NULL,
+        either :: ANY<UUID | INT64>
+    })
+}

@@ -3,6 +3,8 @@ package codegen
 import (
 	"go/ast"
 	"go/parser"
+
+	"github.com/areqag/gqlc/internal/graph"
 )
 
 // TemporalCarriers is the set of exported names temporal.go declares
@@ -70,10 +72,11 @@ type Duration struct {
 `)
 }
 
-// ReferencesTemporalCarrier reports whether the prepared batch's public
-// surface names any carrier — the emission trigger for temporal.go
-// (ADR 0033: emitted only when the generated surface references at
-// least one). Every Go type text reaching an exported position is
+// ReferencesTemporalCarrier reports whether the emitted package names any
+// carrier — the emission trigger for temporal.go (ADR 0033: emitted only
+// when the generated package references at least one). Two places can
+// name one: the public surface, and the member arms of a closed union's
+// helper pair (see unionMembersNameCarrier). Every Go type text at either is
 // parsed and walked for an identifier equal to a carrier name.
 //
 // Parsed rather than substring-matched: "Date" is a substring of
@@ -82,8 +85,11 @@ type Duration struct {
 // A user identifier that equals a carrier name cannot reach here — the
 // names are in reservedIdentifiers, so Phase A already refused the
 // batch with ErrIdentifierCollision.
-func ReferencesTemporalCarrier(p Prepared) bool {
-	return referencesCarrier(p, temporalCarrierSet)
+//
+// carrier is the member carrier the backend's own union emission hands
+// UnionMembers, threaded in for the reason it is threaded in there.
+func ReferencesTemporalCarrier(p Prepared, carrier func(graph.PropertyType) (string, bool)) bool {
+	return referencesCarrier(p, carrier, temporalCarrierSet)
 }
 
 // referencesCarrier is the walk both emission triggers ask, over the set
@@ -92,7 +98,10 @@ func ReferencesTemporalCarrier(p Prepared) bool {
 // parameters, row fields and every nested list element — and a second
 // copy would be a second answer to that question, free to drift from
 // this one the next time a position is added to the prepared surface.
-func referencesCarrier(p Prepared, set map[string]struct{}) bool {
+//
+// The surface is not the whole of it: unionMembersNameCarrier reads the
+// one place a carrier is named that no surface text holds.
+func referencesCarrier(p Prepared, carrier func(graph.PropertyType) (string, bool), set map[string]struct{}) bool {
 	for _, e := range p.Entities {
 		for _, f := range e.Fields {
 			if typeTextNamesCarrier(f.GoType, set) {
@@ -103,6 +112,41 @@ func referencesCarrier(p Prepared, set map[string]struct{}) bool {
 	for _, q := range p.Queries {
 		if queryNamesCarrier(q, set) {
 			return true
+		}
+	}
+	return unionMembersNameCarrier(p, carrier, set)
+}
+
+// unionMembersNameCarrier is referencesCarrier's reading of the closed
+// unions the batch reaches. A closed union carries as `any` at every
+// position, its own and a record field's alike, so a carrier named only
+// by a union MEMBER is on no surface text — while the union's emitted
+// helper pair spells each member's carrier in a type-switch arm and
+// calls its conversion by name. Read off the surface alone, a batch
+// whose one DATE sat inside ANY<DATE | INT64> emitted a package that
+// named Date and declared none (bd gqlc-o8p3).
+//
+// The members are read from the two functions the helper emission
+// itself is built on: UnionEncodings is the set a helper pair is emitted
+// for, already closed over list elements, record fields and union
+// members, and UnionMembers is the text each arm is spelled from. A
+// member's text names what is inside it — a record member its fields, a
+// list member its element — and a union nested below one is an entry of
+// UnionEncodings in its own right, so no descent is written here.
+//
+// A union one of whose members carrier refuses fails preparation and
+// cannot reach here. It answers true, on the ground typeTextNamesCarrier
+// gives for a text that does not parse.
+func unionMembersNameCarrier(p Prepared, carrier func(graph.PropertyType) (string, bool), set map[string]struct{}) bool {
+	for _, pt := range UnionEncodings(p.Entities, p.Queries) {
+		members, ok := UnionMembers(pt, carrier)
+		if !ok {
+			return true
+		}
+		for _, m := range members {
+			if typeTextNamesCarrier(m.GoType, set) {
+				return true
+			}
 		}
 	}
 	return false
