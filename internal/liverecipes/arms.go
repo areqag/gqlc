@@ -52,6 +52,10 @@ var LiveArms = map[string]Arm{
 	"TestNeo4jRefusesANestedListStoredProperty":     ArmNeo4j,
 	"TestNeo4jRefusesAMapValuedStoredProperty":      ArmNeo4j,
 	"TestNeo4jRefusesAUint64ParameterAboveMaxInt64": ArmNeo4j,
+	// The UUID storage and round-trip measurement (bd gqlc-ybk2, ADR 0047).
+	// Its own neo4j container, both driver majors against it, no AGE half
+	// while AGE refuses the width.
+	"TestNeo4jStoresAndRoundTripsAUUID": ArmNeo4j,
 	// The LIST<UNION<…>> storage measurement (bd gqlc-npus), beside the
 	// nested-list and map-valued rows it is modelled on. Its own neo4j
 	// container, no AGE half.

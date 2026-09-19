@@ -4,19 +4,45 @@ package uuidproperty
 
 import (
 	"fmt"
-
-	"github.com/neo4j/neo4j-go-driver/v6/neo4j/dbtype"
 )
 
-// decodeUnion889922c6 dispatches a driver value onto the member of UNION<STRING|UUID> whose wire
-// shape it arrived as, and narrows it to that member's declared width.
-func decodeUnion889922c6(v any) (any, error) {
+// encodeUnion26f53c9e validates a value against the member set UNION<INT64|UUID> declares, and
+// widens the matched member to the carrier this driver packs. A value
+// outside the set is refused by name, which is what declaring the
+// members buys over ADR 0020's open union.
+func encodeUnion26f53c9e(v any) (any, error) {
 	switch t := v.(type) {
-	case string:
+	case int64:
 		return t, nil
-	case dbtype.UUID:
-		v1 := toUUID(t)
+	case UUID:
+		return fromUUID(t), nil
+	}
+	return nil, fmt.Errorf("encode %s: no member carries %T", "UNION<INT64|UUID>", v)
+}
+
+// encodeUnion26f53c9ePtr binds a nullable UNION<INT64|UUID> parameter: a nil pointer is the
+// Cypher null the schema's nullability declared, and is the call site's
+// answer rather than the member set's — no member matches nil, so
+// encodeUnion26f53c9e would refuse it.
+func encodeUnion26f53c9ePtr(v *any) (any, error) {
+	if v == nil {
+		return nil, nil
+	}
+	return encodeUnion26f53c9e(*v)
+}
+
+// decodeUnion26f53c9e dispatches a driver value onto the member of UNION<INT64|UUID> whose wire
+// shape it arrived as, and narrows it to that member's declared width.
+func decodeUnion26f53c9e(v any) (any, error) {
+	switch t := v.(type) {
+	case int64:
+		return t, nil
+	case string:
+		v1, err := toUUID(t)
+		if err != nil {
+			return nil, fmt.Errorf("decode %s: %w", "UNION<INT64|UUID>", err)
+		}
 		return v1, nil
 	}
-	return nil, fmt.Errorf("decode %s: no member carries %T", "UNION<STRING|UUID>", v)
+	return nil, fmt.Errorf("decode %s: no member carries %T", "UNION<INT64|UUID>", v)
 }

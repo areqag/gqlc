@@ -10,13 +10,13 @@ import (
 	"github.com/neo4j/neo4j-go-driver/v6/neo4j/dbtype"
 )
 
-const accountWholeQueryText = `MATCH (a:Account) RETURN a`
+const accountWholeQueryText = `MATCH (a:Account) WHERE a.id = $id RETURN a`
 
 // AccountWhole executes the AccountWhole query.
 //
-//	MATCH (a:Account) RETURN a
-func (q *queries) AccountWhole(ctx context.Context) (Account, error) {
-	records, err := q.db.run(ctx, accountWholeQueryText, nil, neo4j.AccessModeRead)
+//	MATCH (a:Account) WHERE a.id = $id RETURN a
+func (q *queries) AccountWhole(ctx context.Context, arg int64) (Account, error) {
+	records, err := q.db.run(ctx, accountWholeQueryText, map[string]any{"id": arg}, neo4j.AccessModeRead)
 	if err != nil {
 		return Account{}, err
 	}
@@ -62,21 +62,28 @@ func (q *queries) AccountColumns(ctx context.Context) ([]AccountColumnsRow, erro
 	out := make([]AccountColumnsRow, 0, len(records))
 	for _, record := range records {
 		var row AccountColumnsRow
-		value0, isNil, err := neo4j.GetRecordValue[dbtype.UUID](record, "ref")
+		value0, isNil, err := neo4j.GetRecordValue[string](record, "ref")
 		if err != nil {
 			return nil, fmt.Errorf("AccountColumns: decode column %q: %w", "ref", err)
 		}
 		if isNil {
 			return nil, fmt.Errorf("AccountColumns: column %q is non-nullable but arrived null", "ref")
 		}
-		row.Ref = toUUID(value0)
-		value1, isNil, err := neo4j.GetRecordValue[dbtype.UUID](record, "prior")
+		value0n, err := toUUID(value0)
+		if err != nil {
+			return nil, fmt.Errorf("AccountColumns: decode column %q: %w", "ref", err)
+		}
+		row.Ref = value0n
+		value1, isNil, err := neo4j.GetRecordValue[string](record, "prior")
 		if err != nil {
 			return nil, fmt.Errorf("AccountColumns: decode column %q: %w", "prior", err)
 		}
 		var value1Ptr *UUID
 		if !isNil {
-			v := toUUID(value1)
+			v, err := toUUID(value1)
+			if err != nil {
+				return nil, fmt.Errorf("AccountColumns: decode column %q: %w", "prior", err)
+			}
 			value1Ptr = &v
 		}
 		row.Prior = value1Ptr
@@ -92,11 +99,14 @@ func (q *queries) AccountColumns(ctx context.Context) ([]AccountColumnsRow, erro
 					acc2 = append(acc2, nil)
 					continue
 				}
-				v, ok := elem.(dbtype.UUID)
+				v, ok := elem.(string)
 				if !ok {
-					return nil, fmt.Errorf("AccountColumns: decode column %q element %d: expected dbtype.UUID, got %T", "trail", i, elem)
+					return nil, fmt.Errorf("AccountColumns: decode column %q element %d: expected string, got %T", "trail", i, elem)
 				}
-				vn := toUUID(v)
+				vn, err := toUUID(v)
+				if err != nil {
+					return nil, fmt.Errorf("AccountColumns: decode column %q element %d: %w", "trail", i, err)
+				}
 				acc2 = append(acc2, &vn)
 			}
 			value2Ptr = &acc2
@@ -110,11 +120,15 @@ func (q *queries) AccountColumns(ctx context.Context) ([]AccountColumnsRow, erro
 		if !isNil {
 			acc3 := make([]UUID, 0, len(value3))
 			for i, elem := range value3 {
-				v, ok := elem.(dbtype.UUID)
+				v, ok := elem.(string)
 				if !ok {
-					return nil, fmt.Errorf("AccountColumns: decode column %q element %d: expected dbtype.UUID, got %T", "chain", i, elem)
+					return nil, fmt.Errorf("AccountColumns: decode column %q element %d: expected string, got %T", "chain", i, elem)
 				}
-				acc3 = append(acc3, toUUID(v))
+				vn, err := toUUID(v)
+				if err != nil {
+					return nil, fmt.Errorf("AccountColumns: decode column %q element %d: %w", "chain", i, err)
+				}
+				acc3 = append(acc3, vn)
 			}
 			value3Ptr = &acc3
 		}
@@ -125,7 +139,7 @@ func (q *queries) AccountColumns(ctx context.Context) ([]AccountColumnsRow, erro
 		}
 		var value4Ptr *any
 		if value4 != nil {
-			v, err := decodeUnion889922c6(value4)
+			v, err := decodeUnion26f53c9e(value4)
 			if err != nil {
 				return nil, fmt.Errorf("AccountColumns: decode column %q: %w", "either", err)
 			}
@@ -143,6 +157,36 @@ func (q *queries) AccountColumns(ctx context.Context) ([]AccountColumnsRow, erro
 		out = append(out, row)
 	}
 	return out, nil
+}
+
+const accountRefQueryText = `MATCH (a:Account) WHERE a.id = $id RETURN a.ref AS ref`
+
+// AccountRef executes the AccountRef query.
+//
+//	MATCH (a:Account) WHERE a.id = $id RETURN a.ref AS ref
+func (q *queries) AccountRef(ctx context.Context, arg int64) (UUID, error) {
+	records, err := q.db.run(ctx, accountRefQueryText, map[string]any{"id": arg}, neo4j.AccessModeRead)
+	if err != nil {
+		return UUID{}, err
+	}
+	if len(records) == 0 {
+		return UUID{}, ErrNoRows
+	}
+	if len(records) > 1 {
+		return UUID{}, ErrMultipleResults
+	}
+	value, isNil, err := neo4j.GetRecordValue[string](records[0], "ref")
+	if err != nil {
+		return UUID{}, fmt.Errorf("AccountRef: decode column %q: %w", "ref", err)
+	}
+	if isNil {
+		return UUID{}, fmt.Errorf("AccountRef: column %q is non-nullable but arrived null", "ref")
+	}
+	valuen, err := toUUID(value)
+	if err != nil {
+		return UUID{}, fmt.Errorf("AccountRef: decode column %q: %w", "ref", err)
+	}
+	return valuen, nil
 }
 
 const accountByRefQueryText = `MATCH (a:Account) WHERE a.ref = $ref RETURN a.id AS id`
@@ -239,4 +283,28 @@ func (q *queries) AccountByChain(ctx context.Context, arg *[]UUID) ([]int64, err
 		out = append(out, value)
 	}
 	return out, nil
+}
+
+const openAccountQueryText = `CREATE (a:Account {id: $id, ref: $ref, prior: $prior, trail: $trail, chain: $chain, either: $either, span: $span})`
+
+type OpenAccountParams struct {
+	Id     int64
+	Ref    UUID
+	Prior  *UUID
+	Trail  *[]*UUID
+	Chain  *[]UUID
+	Either *any
+	Span   Duration
+}
+
+// OpenAccount executes the OpenAccount query.
+//
+//	CREATE (a:Account {id: $id, ref: $ref, prior: $prior, trail: $trail, chain: $chain, either: $either, span: $span})
+func (q *queries) OpenAccount(ctx context.Context, arg OpenAccountParams) error {
+	param5, err := encodeUnion26f53c9ePtr(arg.Either)
+	if err != nil {
+		return err
+	}
+	_, err = q.db.run(ctx, openAccountQueryText, map[string]any{"id": arg.Id, "ref": fromUUID(arg.Ref), "prior": fromUUIDPtr(arg.Prior), "trail": fromNullableUUIDListPtr(arg.Trail), "chain": fromUUIDListPtr(arg.Chain), "either": param5, "span": fromDuration(arg.Span)}, neo4j.AccessModeWrite)
+	return err
 }

@@ -42,16 +42,20 @@ func decodeAccount(node dbtype.Node) (Account, error) {
 		}
 		narrowed := make([]UUID, 0, len(s))
 		for i0, elem0 := range s {
-			v0, ok := elem0.(dbtype.UUID)
+			v0, ok := elem0.(string)
 			if !ok {
-				return Account{}, fmt.Errorf("decode Account.Chain: property %q element %d: expected dbtype.UUID, got %T", "chain", i0, elem0)
+				return Account{}, fmt.Errorf("decode Account.Chain: property %q element %d: expected string, got %T", "chain", i0, elem0)
 			}
-			narrowed = append(narrowed, toUUID(v0))
+			v0n, err := toUUID(v0)
+			if err != nil {
+				return Account{}, fmt.Errorf("decode Account.Chain: property %q element %d: %w", "chain", i0, err)
+			}
+			narrowed = append(narrowed, v0n)
 		}
 		out.Chain = &narrowed
 	}
 	if v, ok := node.Props["either"]; ok && v != nil {
-		u1, err := decodeUnion889922c6(v)
+		u1, err := decodeUnion26f53c9e(v)
 		if err != nil {
 			return Account{}, fmt.Errorf("decode Account.Either: property %q: %w", "either", err)
 		}
@@ -63,18 +67,25 @@ func decodeAccount(node dbtype.Node) (Account, error) {
 	}
 	out.Id = value0
 	if v, ok := node.Props["prior"]; ok {
-		s, ok := v.(dbtype.UUID)
+		s, ok := v.(string)
 		if !ok {
-			return Account{}, fmt.Errorf("decode Account.Prior: property %q: expected dbtype.UUID, got %T", "prior", v)
+			return Account{}, fmt.Errorf("decode Account.Prior: property %q: expected string, got %T", "prior", v)
 		}
-		narrowed := toUUID(s)
+		narrowed, err := toUUID(s)
+		if err != nil {
+			return Account{}, fmt.Errorf("decode Account.Prior: %w", err)
+		}
 		out.Prior = &narrowed
 	}
-	value1, err := neo4j.GetProperty[dbtype.UUID](node, "ref")
+	value1, err := neo4j.GetProperty[string](node, "ref")
 	if err != nil {
 		return Account{}, fmt.Errorf("decode Account.Ref: %w", err)
 	}
-	out.Ref = toUUID(value1)
+	value1n, err := toUUID(value1)
+	if err != nil {
+		return Account{}, fmt.Errorf("decode Account.Ref: %w", err)
+	}
+	out.Ref = value1n
 	value2, err := neo4j.GetProperty[dbtype.Duration](node, "span")
 	if err != nil {
 		return Account{}, fmt.Errorf("decode Account.Span: %w", err)
@@ -91,11 +102,14 @@ func decodeAccount(node dbtype.Node) (Account, error) {
 				narrowed = append(narrowed, nil)
 				continue
 			}
-			v0, ok := elem0.(dbtype.UUID)
+			v0, ok := elem0.(string)
 			if !ok {
-				return Account{}, fmt.Errorf("decode Account.Trail: property %q element %d: expected dbtype.UUID, got %T", "trail", i0, elem0)
+				return Account{}, fmt.Errorf("decode Account.Trail: property %q element %d: expected string, got %T", "trail", i0, elem0)
 			}
-			v0n := toUUID(v0)
+			v0n, err := toUUID(v0)
+			if err != nil {
+				return Account{}, fmt.Errorf("decode Account.Trail: property %q element %d: %w", "trail", i0, err)
+			}
 			narrowed = append(narrowed, &v0n)
 		}
 		out.Trail = &narrowed

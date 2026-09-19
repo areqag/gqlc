@@ -352,7 +352,7 @@ func writeEntityFieldDecode(b *strings.Builder, e codegen.Entity, i int, f codeg
 		narrowed := value + "s"
 		writeSliceNarrow(b, e, f, f.GoType, value, narrowed, "\t")
 		fmt.Fprintf(b, "\tout.%s = %s\n", f.Field, narrowed)
-	case isNeutralCarrier(f.GoType):
+	case isTemporalCarrier(f.GoType):
 		fmt.Fprintf(b, "\tout.%s = %s\n", f.Field, narrowExpr(f.GoType, value))
 	case carrier != f.GoType:
 		narrowed := value + "n"
@@ -380,7 +380,7 @@ func writeNullableEntityFieldDecode(b *strings.Builder, e codegen.Entity, f code
 	case isSliceType(f.GoType):
 		writeSliceNarrow(b, e, f, f.GoType, "s", "narrowed", "\t\t")
 		fmt.Fprintf(b, "\t\tout.%s = &narrowed\n", f.Field)
-	case isNeutralCarrier(f.GoType):
+	case isTemporalCarrier(f.GoType):
 		fmt.Fprintf(b, "\t\tnarrowed := %s\n", narrowExpr(f.GoType, "s"))
 		fmt.Fprintf(b, "\t\tout.%s = &narrowed\n", f.Field)
 	case carrier != f.GoType:
@@ -575,7 +575,7 @@ func writeSliceNarrow(b *strings.Builder, e codegen.Entity, f codegen.EntityFiel
 	fmt.Fprintf(b, "%s\t%s element %%d: expected %s, got %%T\", %q, i0, elem0)\n", body, fail, carrier, f.PropName)
 	fmt.Fprintf(b, "%s}\n", body)
 	switch {
-	case isNeutralCarrier(base):
+	case isTemporalCarrier(base):
 		if nullable {
 			fmt.Fprintf(b, "%sv0n := %s\n", body, narrowExpr(base, "v0"))
 			fmt.Fprintf(b, "%s%s = append(%s, &v0n)\n", body, dst, dst)

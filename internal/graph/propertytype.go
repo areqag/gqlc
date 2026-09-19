@@ -370,10 +370,9 @@ const (
 	// It is not an ISO 39075 value type. The GQL grammar's <predefined type>
 	// has no UUID alternative and neither does Cypher 25; the bare keyword is
 	// gqlc's own (GQL.g4 uuidType). Its target support is likewise partial
-	// rather than universal: neo4j-go-driver grew dbtype.UUID at v6.2.0 and
-	// v5 has none, so a v5 emission refuses it — see neo4j.ErrRequiresDriverV6,
-	// whose whole reason for existing is that this refusal is about the
-	// driver rather than about the width.
+	// rather than universal: both neo4j majors carry it, as the standard
+	// library's uuid.UUID over its RFC 9562 text, and Apache AGE refuses it
+	// (ADR 0047).
 	TypeUUID PropertyType = "UUID"
 
 	// TypeAnyPropertyValue is the open dynamic union of storable property value

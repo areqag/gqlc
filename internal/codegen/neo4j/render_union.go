@@ -248,10 +248,8 @@ func unionFail(pt graph.PropertyType, direction string, depth int, tail string) 
 //   - dbtype: a neutral carrier (ADR 0033) dispatches on its dbtype
 //     counterpart, which only the DECODE direction does — the encode
 //     direction names from<X>, whose own bridge file holds the dbtype
-//     mention. UUID is a neutral carrier on the same terms as the five
-//     temporal ones and needs no arm of its own, because it reaches
-//     dbtype.UUID through the same emitted pair (isNeutralCarrier
-//     records why the conversion-compatible one is bridged anyway).
+//     mention. UUID owes none in either direction: it dispatches on
+//     string and is parsed (ADR 0047).
 func unionFileImports(encodings []graph.PropertyType, uses map[graph.PropertyType]carrierUse, tm typeMap) (needTime, needDbtype bool) {
 	for _, pt := range encodings {
 		use := uses[pt]
@@ -264,7 +262,7 @@ func unionFileImports(encodings []graph.PropertyType, uses map[graph.PropertyTyp
 			if leaf == "time.Time" {
 				needTime = true
 			}
-			if use.decode && isNeutralCarrier(leaf) {
+			if use.decode && isTemporalCarrier(leaf) {
 				needDbtype = true
 			}
 		}

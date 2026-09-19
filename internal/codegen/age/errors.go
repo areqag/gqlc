@@ -287,10 +287,10 @@ func carriedByNoBackend(pt graph.PropertyType) bool {
 // this backend's name.
 //
 // It is oversizedNumerics and nothing else. It held graph.TypeUUID too
-// until stage 2 of bd gqlc-eg4b gave neo4j-go-v6 the dbtype.UUID carrier
-// that shipped in neo4j-go-driver v6.2.0; the entry was removed in that
-// same change, because it had gone from true to false and a stale one is
-// AGE withholding a name it owes. UUID now divides the roster, so this
+// until neo4j gained a carrier for the width — both majors carry it
+// today (ADR 0047); the entry was removed in the change that first gave
+// one of them a carrier, because it had gone from true to false and a
+// stale one is AGE withholding a name it owes. UUID now divides the roster, so this
 // table's refusal of it is contingent and carries the AGE name like
 // BYTES does. That was not left to be noticed later: the composition
 // root reds on it (TestAContingentRefusalNamesItsBackend), which is what

@@ -11,3 +11,8 @@ import (
 func toDuration(v dbtype.Duration) Duration {
 	return Duration{Months: v.Months, Days: v.Days, Seconds: v.Seconds, Nanos: v.Nanos}
 }
+
+// fromDuration copies a duration field for field.
+func fromDuration(v Duration) dbtype.Duration {
+	return dbtype.Duration{Months: v.Months, Days: v.Days, Seconds: v.Seconds, Nanos: v.Nanos}
+}

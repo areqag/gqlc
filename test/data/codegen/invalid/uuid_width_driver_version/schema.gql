@@ -1,3 +1,0 @@
-CREATE PROPERTY GRAPH TYPE UuidWidthDriverVersion AS {
-    (:Account { id :: UUID NOT NULL })
-}

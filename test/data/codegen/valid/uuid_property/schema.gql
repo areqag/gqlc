@@ -5,7 +5,7 @@ CREATE PROPERTY GRAPH TYPE UuidProperty AS {
         prior  :: UUID,
         trail  :: LIST<UUID>,
         chain  :: LIST<UUID NOT NULL>,
-        either :: ANY<UUID | STRING>,
+        either :: ANY<UUID | INT64>,
         span   :: DURATION(DAY TO SECOND) NOT NULL
     })
 }

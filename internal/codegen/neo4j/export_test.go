@@ -36,10 +36,6 @@ var (
 // DriverTarget is one driver major's emission target. The type is
 // unexported, so an external test cannot build one; these two are the
 // only ones there are, and a test names the major it is asking about.
-//
-// V6 is not decoration on V5: it is the only major whose type table
-// carries a UUID, so a row that wants dbtype.UUID anywhere in an
-// emission has to ask for it here.
 type DriverTarget = driverTarget
 
 var (
@@ -77,14 +73,11 @@ func RenderQuerier(pkg string, prepared []codegen.Query) []byte {
 // use record. The use map's element type is unexported, so a test states
 // the directions as CarrierUseFlags and this converts.
 //
-// The target is the caller's since stage 2 of bd gqlc-eg4b. It used to be
-// v5 unconditionally, on the reading that the only thing a target decides
-// in this file is the dbtype import path — true while the two majors
-// carried the same widths, and false now that one of them carries UUID
-// and the other does not. A record with a UUID field emits on V6 and is
-// skipped whole on V5, and that is the difference no golden of this file
-// covers, because neo4j refuses a record as a stored property and no
-// on-disk fixture can put one on a neo4j target.
+// The target is the caller's. All it decides in this file today is the
+// dbtype import path, and it is a parameter rather than v5
+// unconditionally because no golden of this file covers the other major:
+// neo4j refuses a record as a stored property, so no on-disk fixture can
+// put one on a neo4j target.
 func RenderRecordHelpers(pkg string, encodings []graph.PropertyType, uses map[graph.PropertyType]CarrierUseFlags, target DriverTarget) []byte {
 	inner := make(map[graph.PropertyType]carrierUse, len(uses))
 	for pt, f := range uses {

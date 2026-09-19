@@ -249,11 +249,9 @@ func answersByTarget(t *testing.T, reg codegen.Registry, keys []string, pt graph
 // enrolled backends PUBLISH through their registry entries.
 //
 // The second half is not decoration. A backend may refuse for a reason
-// the front end has no sentinel for — neo4j.ErrUnrepresentableOnDriverVersion
-// is one, raised for a width this backend carries on its other driver
-// major — and such a refusal cites nothing in codegen.AllSentinels. The
-// sweep would then fail it as unreasoned when it is the most precisely
-// reasoned refusal on the roster.
+// the front end has no sentinel for, and such a refusal cites nothing in
+// codegen.AllSentinels. The sweep would then fail it as unreasoned when
+// it is the most precisely reasoned refusal on the roster.
 //
 // Read off the registry rather than by importing the backends, for the
 // reason this file is at the composition root at all: Registry.Sentinels

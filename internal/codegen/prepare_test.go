@@ -985,12 +985,12 @@ func TestStorageRefusalReachesTheCallerAsItsOwnSentinel(t *testing.T) {
 // Apache AGE emission declares.
 var ageOnlyTargets = []string{"apache-age-pgx-v5"}
 
-// neo4jV6OnlyTargets is the golden target set for the one name only the
-// neo4j-go-v6 emission declares. It is a narrower asymmetry than
-// ageOnlyTargets': that one splits by backend, this one splits two
-// majors of the SAME backend, because the carrier it names bridges a
-// driver type that landed in v6.2.0 and has no v5.28.4 counterpart.
-var neo4jV6OnlyTargets = []string{"neo4j-go-v6"}
+// neo4jOnlyTargets is the golden target set for the one name only the
+// neo4j emission declares, on both of its majors. It is ageOnlyTargets'
+// mirror image: the split is by backend, and it stands because Apache
+// AGE still refuses the UUID width rather than because it could not
+// carry a string (ADR 0047).
+var neo4jOnlyTargets = []string{"neo4j-go-v5", "neo4j-go-v6"}
 
 // reservedIdentifierRows is the reserved set written out longhand, with
 // the scope each name's emitted declaration occupies and the golden
@@ -1010,13 +1010,13 @@ var neo4jV6OnlyTargets = []string{"neo4j-go-v6"}
 // declares Time while still refusing a zoned TIME column (gqlc-oeqi):
 // what reserves the name is the emission, not the admission.
 //
-// UUID is the sixth neutral carrier and it IS asymmetric, which is the
-// sharpest case of the uniformity cost above rather than an exception to
-// it: uuid.go is declared by one target of three, so reserving the name
-// refuses `NODE TYPE UUID` on two targets whose emission leaves it free.
-// The rule that made the temporal five symmetric does not reach here —
-// they are declared as a block by a file five widths can trigger, and
-// UUID has a file of its own with one trigger.
+// UUID is the sixth carrier and it IS asymmetric, a case of the
+// uniformity cost above rather than an exception to it: uuid.go is
+// declared by two targets of three, so reserving the name refuses
+// `NODE TYPE UUID` on the one target whose emission leaves it free. The
+// rule that made the temporal five symmetric does not reach here — they
+// are declared as a block by a file five widths can trigger, and UUID
+// has a file of its own with one trigger.
 var reservedIdentifierRows = []struct {
 	name       string
 	scope      codegen.IdentifierScope
@@ -1044,7 +1044,7 @@ var reservedIdentifierRows = []struct {
 	{"LocalTime", codegen.ScopePackage, nil},
 	{"LocalDateTime", codegen.ScopePackage, nil},
 	{"Duration", codegen.ScopePackage, nil},
-	{"UUID", codegen.ScopePackage, neo4jV6OnlyTargets},
+	{"UUID", codegen.ScopePackage, neo4jOnlyTargets},
 }
 
 // TestReservedIdentifiersAreUniformAcrossBackends pins the reserved set
@@ -1678,7 +1678,7 @@ var fixedDeclarationFiles = map[string]bool{
 	// exports nothing today, and classifying it here rather than as
 	// input-derived is what would force a reserved row if it ever did.
 	"temporal.go": true, "temporal_neo4j.go": true,
-	// The neutral UUID carrier in uuid.go and its driver bridge in
+	// The UUID carrier in uuid.go and its string conversions in
 	// uuid_neo4j.go, on exactly the terms of the temporal pair above. The
 	// carrier is the emitter's own name, not a name any batch chose — what
 	// the batch decides is whether the pair is emitted at all, which is the

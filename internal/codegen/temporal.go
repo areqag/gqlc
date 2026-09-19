@@ -134,9 +134,10 @@ func queryNamesCarrier(q Query, set map[string]struct{}) bool {
 // typeTextNamesCarrier reports whether one emitted Go type text names a
 // carrier in set. A qualified type is not descended into: its Sel is
 // another package's identifier, and three of the carrier names collide
-// there — time.Time is the TIMESTAMP carrier, and dbtype.Date and
-// dbtype.UUID are what a neo4j conversion still names internally, so a
-// walk that read Sel would report every batch as carrier-bearing.
+// there — time.Time is the TIMESTAMP carrier, dbtype.Date is what a neo4j
+// conversion still names internally, and uuid.UUID is the standard
+// library type the UUID carrier aliases, so a walk that read Sel would
+// report every batch as carrier-bearing.
 //
 // A text go/parser rejects is an emitter bug, and this answers true for
 // it: emitting a carrier file nothing references still compiles, while

@@ -256,12 +256,15 @@ var propertyCarriers = map[graph.PropertyType]string{
 	// declared type, which is the silent widening §5.1 exists to
 	// refuse.
 	//
-	// The refusal NAMES this backend, which it did not until
-	// stage 2 of bd gqlc-eg4b: neo4j-go-v6 carries UUID as
-	// dbtype.UUID, so this is AGE's answer rather than the
+	// The refusal NAMES this backend, because both neo4j majors carry
+	// the width (ADR 0047), so this is AGE's answer rather than the
 	// declaration's obstacle and an author reading it has somewhere
 	// to go. The name follows from UUID's absence from
 	// uncarriedEverywhere rather than from anything written here.
+	//
+	// ADR 0047 carries it there as exactly the string this comment
+	// declines, on the ground that a CHECKED decode does not drop the
+	// declared type. Whether AGE follows is bd gqlc-ytf9's to rule.
 	graph.TypeUUID:     "",
 	graph.TypeBytes:    "",
 	graph.TypeInt128:   "",

@@ -2,8 +2,9 @@
 
 package uuidproperty
 
-// UUID is a 128-bit UUID in the byte order RFC 9562 lays down: the
-// value, with no textual form attached. Convert it to whichever UUID
-// library this program already uses — those are [16]byte too, so the
-// conversion is direct.
-type UUID [16]byte
+import "uuid"
+
+// UUID is the standard library's uuid.UUID, so any value that package
+// makes — uuid.NewV7() among them — is one of these with no conversion.
+// It is stored as its RFC 9562 text form, lowercase.
+type UUID = uuid.UUID

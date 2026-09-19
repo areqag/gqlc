@@ -1406,13 +1406,13 @@ var driverSliceCarriers = map[string]bool{
 // LIST<DURATION> for its nullable list parameter, and the property side
 // of that declaration walks the list and asserts the element.
 //
-// dbtype.UUID is the first entry only ONE of the two majors can produce —
-// the type landed in v6.2.0 and v5.28.4 has no counterpart — and the ledger
-// has no target axis to say so on. It does not need one: the sweep is over
-// every neo4j golden at once, so a carrier is witnessed if any target's
-// emission names it, and uuid_property is a v6-only fixture for the same
-// reason. What would redden here is v6 ceasing to assert it, which is the
-// question the flag is for.
+// dbtype.UUID is the one unwitnessed entry that IS settled, and settled
+// the other way: v6's driver can produce it, so it belongs to the
+// vocabulary, and no emission asserts it because gqlc carries a UUID as
+// a string on both neo4j majors (ADR 0047) — the only targets this sweep
+// reads; Apache AGE still refuses the width. Its flag flipping to true is a
+// driver type returning to the emitted code, which is what the row is
+// kept to catch.
 var driverScalarCarriers = map[string]bool{
 	"bool":                true,
 	"int64":               true,
@@ -1422,9 +1422,9 @@ var driverScalarCarriers = map[string]bool{
 	"dbtype.Date":         true,
 	"dbtype.Duration":     true,
 	"dbtype.Relationship": true,
-	"dbtype.UUID":         true,
 
 	"map[string]any":       false,
+	"dbtype.UUID":          false,
 	"dbtype.Point2D":       false,
 	"dbtype.Point3D":       false,
 	"dbtype.LocalTime":     false,

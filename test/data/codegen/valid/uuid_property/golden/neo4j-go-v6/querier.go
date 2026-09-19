@@ -5,8 +5,9 @@ package uuidproperty
 import "context"
 
 type ReadQuerier interface {
-	AccountWhole(ctx context.Context) (Account, error)
+	AccountWhole(ctx context.Context, arg int64) (Account, error)
 	AccountColumns(ctx context.Context) ([]AccountColumnsRow, error)
+	AccountRef(ctx context.Context, arg int64) (UUID, error)
 	AccountByRef(ctx context.Context, arg UUID) ([]int64, error)
 	AccountByPrior(ctx context.Context, arg *UUID) ([]int64, error)
 	AccountByTrail(ctx context.Context, arg *[]*UUID) ([]int64, error)
@@ -14,6 +15,7 @@ type ReadQuerier interface {
 }
 
 type WriteQuerier interface {
+	OpenAccount(ctx context.Context, arg OpenAccountParams) error
 }
 
 type Querier interface {

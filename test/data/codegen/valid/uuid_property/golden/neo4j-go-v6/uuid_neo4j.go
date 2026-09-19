@@ -3,20 +3,25 @@
 package uuidproperty
 
 import (
-	"github.com/neo4j/neo4j-go-driver/v6/neo4j/dbtype"
+	"fmt"
+	"uuid"
 )
 
-// toUUID narrows the driver's UUID onto the neutral carrier. Both are
-// [16]byte holding the RFC 9562 value in wire order, so the conversion
-// is the whole of it — nothing is reinterpreted and nothing can fail.
-func toUUID(v dbtype.UUID) UUID {
-	return UUID(v)
+// toUUID parses the text a UUID property is stored as. A string that
+// is not a UUID fails the read rather than arriving as a zero UUID.
+func toUUID(v string) (UUID, error) {
+	out, err := uuid.Parse(v)
+	if err != nil {
+		return UUID{}, fmt.Errorf("value %q is not a UUID: %w", v, err)
+	}
+	return out, nil
 }
 
-// fromUUID widens the neutral carrier back to the driver's UUID, which
-// is what the packer's array arm type-switches on.
-func fromUUID(v UUID) dbtype.UUID {
-	return dbtype.UUID(v)
+// fromUUID renders a UUID as the RFC 9562 text it is stored as:
+// lowercase, hyphenated, the one spelling every writer of this package
+// produces.
+func fromUUID(v UUID) string {
+	return v.String()
 }
 
 // fromUUIDPtr binds a nullable UUID parameter: a nil pointer is the
@@ -28,9 +33,9 @@ func fromUUIDPtr(v *UUID) any {
 	return fromUUID(*v)
 }
 
-// fromUUIDList widens a list of UUID parameters element by element. The
-// driver marshals no gqlc struct, so each element converts before the
-// list reaches the wire.
+// fromUUIDList renders a list of UUID parameters element by element. The
+// driver refuses a Go array it does not know, so each element becomes the
+// text a UUID property holds before the list reaches the wire.
 func fromUUIDList(v []UUID) []any {
 	out := make([]any, len(v))
 	for i := range v {
