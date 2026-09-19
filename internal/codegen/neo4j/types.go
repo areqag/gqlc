@@ -7,17 +7,9 @@ import (
 )
 
 // typeMap is the driver's Go-type table (spec §5.1) the shared phases
-// read. Every entry is a pure function of the resolved type and of the
-// one field below, so two tables built for the same major answer alike.
-//
-// uuidCarrier is the Go type text this major spells a UUID property as,
-// or empty for a major with no carrier for it. It is the only width the
-// two majors disagree about, and it is UNEXPORTED and zero-valued at the
-// v5 answer on purpose: every caller that builds a bare typeMap{} keeps
-// the answer the table gave before dbtype.UUID existed. A major that
-// carries a width has to say so; a table that says nothing refuses,
-// which is the direction that cannot emit code the driver will not pack.
-type typeMap struct{ uuidCarrier string }
+// read. Every entry is a pure function of the resolved type, and the two
+// driver majors answer every width alike, so the table has no fields.
+type typeMap struct{}
 
 // Property maps a resolved property type to its native Go emission (spec
 // §5.1). Returns (typeText, ok): ok=false for the eight unrepresentable
@@ -48,9 +40,12 @@ type typeMap struct{ uuidCarrier string }
 // (YEAR TO MONTH) vs (DAY TO SECOND) qualifier onto a single Duration
 // carrying Months / Days / Seconds / Nanos (see ADR 0002 Consequences).
 //
+// UUID returns "UUID", an alias of the standard library's uuid.UUID
+// declared in the generated package's own uuid.go and carried on the wire
+// as its RFC 9562 text (ADR 0047).
+//
 // The per-width rows live in propertyCarriers below and this method is the
-// three container guards, the one width whose answer is the major's, and the
-// lookup. What holds the rows to internal/graph's constant set is
+// three container guards and the lookup. What holds the rows to internal/graph's constant set is
 // typescan.PropertyRows, which reads the map literal's keys by name; the
 // walk is propertyRowNames in decoder_test.go and feeds TWO obligations,
 // TestTypeMapProperty in types_test.go and TestDecoderProbeCoversTheTypeTable
@@ -113,37 +108,6 @@ func (t typeMap) Property(pt graph.PropertyType) (string, bool) {
 		// here, both widths arriving as int64.
 		return codegen.UnionCarrier(pt, t.Property, wireFamily)
 	}
-	if pt == graph.TypeUUID {
-		// The one width the two majors answer differently, and the
-		// reason this table has a field at all. dbtype.UUID landed in
-		// neo4j-go-driver v6.2.0; v5.28.4 has no counterpart — the two
-		// versions test/data/codegen/go.mod pins — so v6 returns the
-		// carrier the target names and v5 returns nothing.
-		//
-		// What v6 returns is codegen.UUIDCarrier, the gqlc-owned neutral
-		// name, and not dbtype.UUID: this is the emitted PUBLIC surface,
-		// where ADR 0033 admits no driver type. driverCarrier below is
-		// where the neutral name becomes the driver's, on the decode and
-		// encode sites where the driver belongs.
-		//
-		// The empty string is spelled as a refusal here rather than
-		// left to fall through to the eight refused rows, because the two
-		// refusals are not the same refusal and generate() has to tell
-		// them apart: a width no major carries stays
-		// ErrUnrepresentableWidth, and this one becomes
-		// ErrUnrepresentableOnDriverVersion, which says the thing that
-		// is actually true of it — the backend carries it, this driver
-		// does not. That discrimination is made in generate() off
-		// codegen.RefusedWidth rather than here, because this method's
-		// signature has no channel to carry a reason.
-		//
-		// dbtype.UUID also needs Bolt 6.1 on the wire: the v6 hydrator
-		// and packUUID both refuse an older protocol, and the server
-		// image this repository pins speaks Bolt 5.x. So the emitted
-		// code compiles and is asserted against a golden, and no live
-		// round trip is claimed for it (bd gqlc-eg4b).
-		return t.uuidCarrier, t.uuidCarrier != ""
-	}
 	// PropertyType is an open string type, so a width internal/graph gains
 	// without a row arrives here rather than failing to compile, and reads
 	// the same empty text a refused row holds: the caller routes both to
@@ -154,10 +118,7 @@ func (t typeMap) Property(pt graph.PropertyType) (string, bool) {
 // propertyCarriers is the per-width half of the type table: the Go type
 // text each scalar and temporal width emits as, or the empty text for a
 // width this driver refuses. Property consults it after the container
-// guards and the UUID row, which is the one row whose answer is the
-// major's rather than the table's (see uuidCarrier) and so cannot be a
-// literal here; its row below holds the v5 answer so the rows walk sees
-// the width decided.
+// guards.
 //
 // A MAP LITERAL KEYED BY `graph.X` SELECTORS, under this name, in this
 // file — the shape typescan.PropertyRows reads, as the Property comment
@@ -194,9 +155,7 @@ var propertyCarriers = map[graph.PropertyType]string{
 	// what the guard that does the work answers.
 	graph.TypeList:      "[]any",
 	graph.TypeAnyRecord: "map[string]any",
-	// UUID is answered in Property off the major's uuidCarrier; this row is
-	// the v5 answer, a refusal.
-	graph.TypeUUID: "",
+	graph.TypeUUID:      codegen.UUIDCarrier,
 	// The eight unrepresentable widths — no faithful Go carrier on
 	// neo4j-go-driver (v5 and v6 alike). Permanent, per §9 (spec).
 	graph.TypeInt128:   "",
@@ -429,24 +388,25 @@ func driverCarrier(goType string) string {
 		return "int64"
 	case "float32", "float64":
 		return "float64"
-	case "Date", "Time", "LocalTime", "LocalDateTime", "Duration", codegen.UUIDCarrier:
+	case codegen.UUIDCarrier:
+		// A UUID is its RFC 9562 text on the wire (ADR 0047), so it is
+		// fetched as the string it was stored as and shares STRING's wire
+		// family — which is what refuses a UNION<UUID|STRING>, the two
+		// arriving as one shape. toUUID parses it and can fail, so decode
+		// sites reach it through narrowCall; from<X> renders it back.
+		return "string"
+	case "Date", "Time", "LocalTime", "LocalDateTime", "Duration":
 		// The neutral carriers (ADR 0033). The driver still speaks dbtype
 		// on both wires, so the carrier is the dbtype counterpart — and
 		// unlike every other arm here the two are reached through the
 		// emitted to<X> / from<X> pair rather than by a Go conversion,
 		// which is what narrowExpr and widenExpr route them to.
 		//
-		// The dbtype spelling is the gqlc name verbatim for all six,
+		// The dbtype spelling is the gqlc name verbatim for all five,
 		// which is what lets one arm answer them: dbtype.Date beside
-		// Date, dbtype.UUID beside UUID. It is a fact about the driver's
-		// naming and not a rule — a seventh carrier whose counterpart is
-		// spelled differently needs its own arm.
-		//
-		// UUID is reached on the v6 target alone: v5 has no carrier for
-		// the width, so Prepare refuses the batch and nothing carrying it
-		// reaches emission. isNeutralCarrier records why it is bridged
-		// through a helper pair at all, given that UUID and dbtype.UUID
-		// are the same underlying [16]byte.
+		// Date. It is a fact about the driver's naming and not a rule — a
+		// carrier whose counterpart is spelled differently needs its own
+		// arm.
 		return "dbtype." + goType
 	default:
 		return goType

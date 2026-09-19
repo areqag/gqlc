@@ -1,14 +1,9 @@
 package codegen
 
-// UUIDCarrier is the exported name uuid.go declares: the gqlc-owned
-// neutral carrier for the UUID property width, on the same ground ADR
-// 0033 gives the five temporal carriers. Only one backend target carries
-// the width at all today (neo4j-go-v6, whose driver declares
-// dbtype.UUID), and the neutrality is owed for the same reason it was
-// owed for DATE when only neo4j carried that: a caller writing against
-// dbtype.UUID cannot swap targets without editing their program, and
-// TestGoldenExportedSurfaceIsDriverFree refuses the leak whether or not
-// a second target exists yet.
+// UUIDCarrier is the exported name uuid.go declares for the UUID property
+// width. It names no driver type, on the ground ADR 0033 gives the five
+// temporal carriers, and it is not a type of gqlc's own either: it is an
+// alias of the standard library's uuid.UUID (ADR 0047).
 //
 // A single name rather than a slice because there is one, and a slice of
 // one reads as a set that is expected to grow. uuidCarrierSet below is
@@ -19,36 +14,30 @@ const UUIDCarrier = "UUID"
 // built from the constant so the two cannot drift.
 var uuidCarrierSet = map[string]struct{}{UUIDCarrier: {}}
 
-// RenderUUID emits uuid.go: the neutral UUID carrier, byte-identical
-// across every backend (ADR 0033 "Placement").
+// RenderUUID emits uuid.go: the UUID carrier, byte-identical across
+// every backend (ADR 0033 "Placement").
 //
-// [16]byte and not a struct, which is where this parts from the five
-// temporal carriers without parting from their reasoning. Those are
-// component structs because the driver's own types smuggle dimensions
-// the width does not have — a dbtype.Date is a time.Time, so it carries
-// a clock reading and a Location that == then compares. dbtype.UUID has
-// no such residue: it is `type UUID [16]byte` (v6.2.0
-// neo4j/dbtype/uuid.go), which is the RFC 9562 value and nothing else.
-// Copying that shape costs nothing and buys the property the temporal
-// carriers needed a bridge to get — the two are conversion-compatible,
-// so narrowExpr and widenExpr route UUID through a plain Go conversion
-// and this carrier needs no uuid_<driver>.go beside it.
+// AN ALIAS, which is where this parts from the five temporal carriers.
+// Those are gqlc-owned structs because no neutral type models them; for
+// UUID the standard library has one since Go 1.27, so the carrier IS
+// that type and a caller hands uuid.NewV7() to a generated method with
+// no conversion. The alias rather than the qualified name at each site
+// keeps the "uuid" import in this one file: every other emitted file
+// spells the carrier unqualified, so none of their import walks has a
+// package to account for.
 //
-// No String method, and no constructor. The canonical text form is the
-// caller's to produce, and they almost certainly already have a library
-// that produces it: github.com/google/uuid's UUID is [16]byte too, so
-// `uuid.UUID(v)` is one conversion away, as is any other library that
-// spells the value the same way. A String gqlc emitted would be a second
-// implementation of RFC 9562 §4 in every generated package, competing
-// with the one the caller has.
+// On the wire a UUID is its RFC 9562 text form — a STRING to every
+// driver, stored as one and indexed as one. No backend's own UUID type
+// is involved, so the width is carried wherever a string is (ADR 0047).
 func RenderUUID(pkg string) []byte {
 	return []byte(Header() + `package ` + pkg + `
 
-// UUID is a 128-bit UUID in the byte order RFC 9562 lays down: the
-// value, with no textual form attached. Convert it to whichever UUID
-// library this program already uses — those are [16]byte too, so the
-// conversion is direct.
-type UUID [16]byte
+import "uuid"
+
+// UUID is the standard library's uuid.UUID, so any value that package
+// makes — uuid.NewV7() among them — is one of these with no conversion.
+// It is stored as its RFC 9562 text form, lowercase.
+type UUID = uuid.UUID
 `)
 }
 

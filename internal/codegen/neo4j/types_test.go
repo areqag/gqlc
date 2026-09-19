@@ -52,6 +52,9 @@ func TestTypeMapProperty(t *testing.T) {
 		{graph.TypeLocalTime, "LocalTime"},
 		{graph.TypeTimestamp, "time.Time"},
 		{graph.TypeDuration, "Duration"},
+		// An alias of the standard library's uuid.UUID, declared in the
+		// emitted uuid.go, and the same answer on both majors (ADR 0047).
+		{graph.TypeUUID, "UUID"},
 		// A property of no declared shape. `any` is the one answer that
 		// rides neither of the driver's constrained generics, which is
 		// what ridesADriverCarrier turns on and what routes the decode
@@ -86,21 +89,11 @@ func TestTypeMapProperty(t *testing.T) {
 	// this driver — the numeric ones the driver has no type for. Until
 	// stage 1 of gqlc-x9tg7 TypeAnyRecord sat here too, fail-closed under
 	// an unreachable arm; it now has a carrier and has moved above.
-	//
-	// graph.TypeUUID is the one row here that is not permanent, and the
-	// one row here this driver HAS a type for: dbtype.UUID exists at
-	// v6.2.0 and not at v5.28.4, the two versions
-	// test/data/codegen/go.mod pins. This table is asked of a typeMap
-	// that does not yet know which major it is answering for, so the row
-	// records what both majors answer today. It moves when stage 2 of bd
-	// gqlc-eg4b teaches the table the difference — this row going red is
-	// how that change announces itself rather than landing silently.
 	unrepresentable := []graph.PropertyType{
 		graph.TypeInt128, graph.TypeInt256,
 		graph.TypeUint128, graph.TypeUint256,
 		graph.TypeFloat16, graph.TypeFloat128, graph.TypeFloat256,
 		graph.TypeDecimal,
-		graph.TypeUUID,
 	}
 	for _, pt := range unrepresentable {
 		t.Run("unrepresentable/"+string(pt), func(t *testing.T) {
@@ -737,6 +730,9 @@ func TestDriverCarrier(t *testing.T) {
 		{"LocalTime", "dbtype.LocalTime"},
 		{"LocalDateTime", "dbtype.LocalDateTime"},
 		{"Duration", "dbtype.Duration"},
+		// A UUID is its RFC 9562 text on the wire, so it is fetched as the
+		// string it is stored as and no dbtype is involved (ADR 0047).
+		{"UUID", "string"},
 
 		// The two slice shapes neo4j.PropertyValue admits, which
 		// isSliceType excludes so each arrives as itself. Their
@@ -771,6 +767,7 @@ func TestDriverCarrier(t *testing.T) {
 		{"[]Time", "[]any"},
 		{"[]LocalTime", "[]any"},
 		{"[]Duration", "[]any"},
+		{"[]UUID", "[]any"},
 		// A list of a width that is itself a slice. Both reach the same
 		// answer, and they are here because the check is on the "[]"
 		// prefix rather than on the element: a guard written to look at
@@ -829,6 +826,7 @@ func TestDriverCarrier(t *testing.T) {
 		{"[]*Time", "[]any"},
 		{"[]*LocalTime", "[]any"},
 		{"[]*Duration", "[]any"},
+		{"[]*UUID", "[]any"},
 		{"[]*[]byte", "[]any"},
 		{"[]*[]any", "[]any"},
 		{"[]*struct {\n\tF *string\n}", "[]any"},
