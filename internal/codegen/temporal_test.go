@@ -78,18 +78,15 @@ func TestTypeTextNamesCarrier(t *testing.T) {
 // preparation refuses it first, and each trigger answering false for the
 // other family's member in one table rather than across two golden trees.
 func TestCarrierTriggersReadUnionMembers(t *testing.T) {
+	carriers := map[graph.PropertyType]string{
+		graph.TypeDate:   "Date",
+		graph.TypeUUID:   codegen.UUIDCarrier,
+		graph.TypeInt64:  "int64",
+		graph.TypeString: "string",
+	}
 	carrier := func(pt graph.PropertyType) (string, bool) {
-		switch pt {
-		case graph.TypeDate:
-			return "Date", true
-		case graph.TypeUUID:
-			return codegen.UUIDCarrier, true
-		case graph.TypeInt64:
-			return "int64", true
-		case graph.TypeString:
-			return "string", true
-		}
-		return "", false
+		text, ok := carriers[pt]
+		return text, ok
 	}
 	unionOf := func(members ...graph.PropertyType) graph.PropertyType {
 		out := make([]graph.UnionMember, 0, len(members))
