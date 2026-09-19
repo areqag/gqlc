@@ -53,8 +53,8 @@ var LiveArms = map[string]Arm{
 	"TestNeo4jRefusesAMapValuedStoredProperty":      ArmNeo4j,
 	"TestNeo4jRefusesAUint64ParameterAboveMaxInt64": ArmNeo4j,
 	// The UUID storage and round-trip measurement (bd gqlc-ybk2, ADR 0047).
-	// Its own neo4j container, both driver majors against it, no AGE half
-	// while AGE refuses the width.
+	// Its own neo4j container, both driver majors against it. The AGE
+	// half is TestAGEStoresAndRoundTripsAUUID below.
 	"TestNeo4jStoresAndRoundTripsAUUID": ArmNeo4j,
 	// The LIST<UNION<…>> storage measurement (bd gqlc-npus), beside the
 	// nested-list and map-valued rows it is modelled on. Its own neo4j
@@ -65,13 +65,16 @@ var LiveArms = map[string]Arm{
 	// IS the assertion — so it goes in the cheap half beside the uint64
 	// row above rather than paying for an AGE image it never talks to.
 	"TestAGERefusesAUnionParameterOutsideTheDeclaredMemberSet": ArmNeo4j,
-	"TestAGESessionInit":                                        ArmAGE,
-	"TestAGERefusesRelationshipTypeAlternation":                 ArmAGE,
-	"TestAGERefusesTheFunctionsItDoesNotDefine":                 ArmAGE,
-	"TestAGERefusesTheSpatialConstructor":                       ArmAGE,
-	"TestAGERefusesTheNamespaceItHasNoSchemaFor":                ArmAGE,
-	"TestAGEOffsetSidecar":                                      ArmAGE,
-	"TestAGEZonedTime":                                          ArmAGE,
+	"TestAGESessionInit":                         ArmAGE,
+	"TestAGERefusesRelationshipTypeAlternation":  ArmAGE,
+	"TestAGERefusesTheFunctionsItDoesNotDefine":  ArmAGE,
+	"TestAGERefusesTheSpatialConstructor":        ArmAGE,
+	"TestAGERefusesTheNamespaceItHasNoSchemaFor": ArmAGE,
+	"TestAGEOffsetSidecar":                       ArmAGE,
+	"TestAGEZonedTime":                           ArmAGE,
+	// The UUID storage and round-trip measurement on this store (bd
+	// gqlc-ytf9, ADR 0047), the twin of TestNeo4jStoresAndRoundTripsAUUID.
+	"TestAGEStoresAndRoundTripsAUUID":                           ArmAGE,
 	"TestAGEStoresANestedListProperty":                          ArmAGE,
 	"TestAGEStoresARecordProperty":                              ArmAGE,
 	"TestAGEMatchesATemporalListParameter":                      ArmAGE,

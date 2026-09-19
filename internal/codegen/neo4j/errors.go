@@ -22,8 +22,8 @@ import (
 // carries — the eight oversized numerics, permanent under spec §9 — so a
 // suffix would send an author looking for a target that carries INT128.
 // AGE's twin does attribute its width refusals and is right to: its
-// refused set additionally holds BYTES, UUID and the zoned-element lists,
-// which this table accepts. That premise is measured rather
+// refused set additionally holds BYTES and the zoned-element lists, which
+// this table accepts. That premise is measured rather
 // than assumed, and TestAContingentRefusalNamesItsBackend
 // (internal/cli/backends) reddens the day this table refuses a width
 // another target accepts — which is the day the question is re-opened

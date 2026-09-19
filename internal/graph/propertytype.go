@@ -369,9 +369,8 @@ const (
 	//
 	// It is not an ISO 39075 value type. The GQL grammar's <predefined type>
 	// has no UUID alternative and neither does Cypher 25; the bare keyword is
-	// gqlc's own (GQL.g4 uuidType). Its target support is likewise partial
-	// rather than universal: both neo4j majors carry it, as the standard
-	// library's uuid.UUID over its RFC 9562 text, and Apache AGE refuses it
+	// gqlc's own (GQL.g4 uuidType). The three enrolled targets all carry
+	// it, as the standard library's uuid.UUID over its RFC 9562 text
 	// (ADR 0047).
 	TypeUUID PropertyType = "UUID"
 
