@@ -34,6 +34,12 @@ const (
 	goDuration  = "Duration"
 )
 
+// goUUID is the carrier uuid.go declares in the generated package: an
+// alias of the standard library's uuid.UUID (ADR 0047), so it too is
+// unqualified at every site that names it. The "uuid" import it costs is
+// models.go's alone, for the parse in agtypeUUID.
+const goUUID = codegen.UUIDCarrier
+
 // goAnyRecord is the carrier RECORD<ANY> is emitted as — Go's
 // unconstrained string-keyed product, which is what a record whose fields
 // are undeclared maps to (types.go, spec §3).
@@ -161,6 +167,7 @@ type helpers struct {
 	offset bool
 
 	date      bool // agtypeDate — something decodes a stored DATE
+	uuid      bool // agtypeUUID — something decodes a stored UUID
 	localTime bool // agtypeLocalTime — something decodes a stored LOCAL TIME
 	zonedTime bool // agtypeTime / agtypeTimeAt — something decodes a stored TIME
 	timeZone  bool // agtypeTimeZone — one of those is an entity property
@@ -540,6 +547,11 @@ func (h *helpers) needTemporalCarrier(carrier string) {
 		// The date rides the string scalar, which every emission
 		// declares, so there is no second helper to mark here.
 		h.date = true
+	case goUUID:
+		// Not a temporal, and here because this is the switch over the
+		// carriers that decode through a helper of their own. It rides
+		// the string scalar too.
+		h.uuid = true
 	case goLocalTime:
 		h.localTime = true
 		h.integer = true
@@ -933,6 +945,9 @@ func writeModelsPreamble(b *strings.Builder, pkg string, h helpers) {
 	if h.importsTime() {
 		b.WriteString("\t\"time\"\n")
 	}
+	if h.uuid {
+		b.WriteString("\t\"uuid\"\n")
+	}
 	b.WriteString(")\n")
 }
 
@@ -1174,6 +1189,31 @@ func agtypeDate(raw []byte) (Date, error) {
 		return Date{}, fmt.Errorf("gqlc: %q is outside the year 1 to year 9999 range this encoding admits", text)
 	}
 	return Date{Year: at.Year(), Month: int(at.Month()), Day: at.Day()}, nil
+}
+`)
+	}
+	if h.uuid {
+		b.WriteString(`
+// agtypeUUID decodes a stored UUID. agtype has no 128-bit value, so gqlc
+// stores one as the string scalar in its RFC 9562 text. The slot is an
+// ordinary agtype string on a vertex any writer can touch, so what is
+// read back is whatever the graph holds: text that is not a UUID fails
+// the read rather than arriving as the zero UUID.
+//
+// There is no encoder beside this. A UUID parameter crosses through the
+// JSON encoder every argument does, and uuid.UUID marshals itself as the
+// lowercase hyphenated text this reads — bare, behind a pointer, and as
+// a list element alike.
+func agtypeUUID(raw []byte) (UUID, error) {
+	text, err := agtypeString(raw)
+	if err != nil {
+		return UUID{}, err
+	}
+	id, err := uuid.Parse(text)
+	if err != nil {
+		return UUID{}, fmt.Errorf("gqlc: %q is not a UUID: %w", text, err)
+	}
+	return id, nil
 }
 `)
 	}

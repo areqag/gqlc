@@ -985,13 +985,6 @@ func TestStorageRefusalReachesTheCallerAsItsOwnSentinel(t *testing.T) {
 // Apache AGE emission declares.
 var ageOnlyTargets = []string{"apache-age-pgx-v5"}
 
-// neo4jOnlyTargets is the golden target set for the one name only the
-// neo4j emission declares, on both of its majors. It is ageOnlyTargets'
-// mirror image: the split is by backend, and it stands because Apache
-// AGE still refuses the UUID width rather than because it could not
-// carry a string (ADR 0047).
-var neo4jOnlyTargets = []string{"neo4j-go-v5", "neo4j-go-v6"}
-
 // reservedIdentifierRows is the reserved set written out longhand, with
 // the scope each name's emitted declaration occupies and the golden
 // targets that declare it. Both columns are read off the committed
@@ -1010,13 +1003,10 @@ var neo4jOnlyTargets = []string{"neo4j-go-v5", "neo4j-go-v6"}
 // declares Time while still refusing a zoned TIME column (gqlc-oeqi):
 // what reserves the name is the emission, not the admission.
 //
-// UUID is the sixth carrier and it IS asymmetric, a case of the
-// uniformity cost above rather than an exception to it: uuid.go is
-// declared by two targets of three, so reserving the name refuses
-// `NODE TYPE UUID` on the one target whose emission leaves it free. The
-// rule that made the temporal five symmetric does not reach here — they
-// are declared as a block by a file five widths can trigger, and UUID
-// has a file of its own with one trigger.
+// UUID is the sixth carrier and is symmetric too, for a plainer reason
+// than the five: all three targets carry the width (ADR 0047), so each
+// declares uuid.go when the surface names it. It was asymmetric while
+// Apache AGE refused the width (bd gqlc-ytf9).
 var reservedIdentifierRows = []struct {
 	name       string
 	scope      codegen.IdentifierScope
@@ -1044,7 +1034,7 @@ var reservedIdentifierRows = []struct {
 	{"LocalTime", codegen.ScopePackage, nil},
 	{"LocalDateTime", codegen.ScopePackage, nil},
 	{"Duration", codegen.ScopePackage, nil},
-	{"UUID", codegen.ScopePackage, neo4jOnlyTargets},
+	{"UUID", codegen.ScopePackage, nil},
 }
 
 // TestReservedIdentifiersAreUniformAcrossBackends pins the reserved set

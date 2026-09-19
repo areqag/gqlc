@@ -289,9 +289,10 @@ func zeroLiteral(goType string) string {
 		return "false"
 	case "any", goAnyRecord:
 		return "nil"
-	case goInstant, goDate, goLocalTime, goTime, goDuration:
-		// The instant and the neutral carriers are all structs, so their
-		// zero is the composite literal and not a numeric one.
+	case goInstant, goDate, goLocalTime, goTime, goDuration, goUUID:
+		// The instant and the neutral carriers are all structs, and a
+		// UUID is an array, so their zero is the composite literal and
+		// not a numeric one.
 		return goType + "{}"
 	default:
 		return "0"
@@ -1052,14 +1053,18 @@ func carrierDecodeFunc(goType, carrier string) (string, bool) {
 	return temporalDecodeFunc(carrier)
 }
 
-// temporalDecodeFunc names the decoder for one temporal carrier, with
-// ok=false for any other text.
+// temporalDecodeFunc names the decoder for one carrier that decodes
+// through a helper of its own — the five temporal ones and UUID, which is
+// not a temporal and shares their shape of answer — with ok=false for any
+// other text.
 func temporalDecodeFunc(carrier string) (string, bool) {
 	switch carrier {
 	case goInstant:
 		return "agtypeInstant", true
 	case goDate:
 		return "agtypeDate", true
+	case goUUID:
+		return "agtypeUUID", true
 	case goLocalTime:
 		return "agtypeLocalTime", true
 	case goTime:

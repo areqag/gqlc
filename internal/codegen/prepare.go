@@ -50,9 +50,8 @@ const (
 // DBTX / SessionInit / EnsureGraph / DropGraph in batches targeting a
 // backend with neither a connection seam nor a graph lifecycle, and the
 // five temporal carriers (ADR 0033) in batches whose surface names no
-// temporal width and so emits no temporal.go. UUID is a case of the
-// same rule: apache-age-pgx-v5 refuses the width, so on that target the
-// name is reserved against a declaration that cannot appear. Reserved
+// temporal width and so emits no temporal.go, and UUID likewise in
+// batches whose surface names no UUID and so emits no uuid.go. Reserved
 // anyway, by D2 Resolved: a schema that
 // generates under one target and is refused under another is the
 // renaming scheme that ruling declined. A rename that works in one

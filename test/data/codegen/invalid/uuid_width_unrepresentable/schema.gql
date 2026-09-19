@@ -1,3 +1,0 @@
-CREATE PROPERTY GRAPH TYPE UuidWidthUnrepresentable AS {
-    (:Account { id :: UUID NOT NULL })
-}

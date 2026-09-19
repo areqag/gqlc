@@ -38,6 +38,9 @@ func TestTypeMapAdmitsAWireDistinctUnion(t *testing.T) {
 		// is not where an integer width lands, so the pair is distinct
 		// here even though DATE|STRING is not.
 		graph.UnionOf([]graph.UnionMember{{Type: graph.TypeDate}, {Type: graph.TypeInt32}}),
+		// A UUID rides the string too (ADR 0047), so it is distinct from an
+		// integer on the same terms and collides where DATE collides.
+		graph.UnionOf([]graph.UnionMember{{Type: graph.TypeUUID}, {Type: graph.TypeInt64}}),
 		// A LOCALTIME is an integer on this wire, so it sits beside a
 		// string without colliding — while LOCALTIME|DURATION does.
 		graph.UnionOf([]graph.UnionMember{{Type: graph.TypeLocalTime}, {Type: graph.TypeString}}),
@@ -100,6 +103,12 @@ func TestTypeMapRefusesAUnionWhoseMembersShareAWireFamily(t *testing.T) {
 		// The spec §8 falsifier cell: refused HERE, admitted on neo4j.
 		"a DATE is ISO text and so shares the string family": graph.UnionOf([]graph.UnionMember{
 			{Type: graph.TypeDate}, {Type: graph.TypeString},
+		}),
+		"a UUID is RFC 9562 text and so shares it too": graph.UnionOf([]graph.UnionMember{
+			{Type: graph.TypeUUID}, {Type: graph.TypeString},
+		}),
+		"a UUID and a DATE are both text, which neo4j tells apart and this wire cannot": graph.UnionOf([]graph.UnionMember{
+			{Type: graph.TypeUUID}, {Type: graph.TypeDate},
 		}),
 		"a DURATION is an integer count and so collides with one": graph.UnionOf([]graph.UnionMember{
 			{Type: graph.TypeDuration}, {Type: graph.TypeInt64},

@@ -37,6 +37,10 @@ func TestTypeMapAdmitsAWireDistinctUnion(t *testing.T) {
 		graph.UnionOf([]graph.UnionMember{{Type: graph.TypeBool}, {Type: graph.TypeInt64}}),
 		// The spec §8 falsifier cell: admitted HERE, refused on AGE.
 		graph.UnionOf([]graph.UnionMember{{Type: graph.TypeDate}, {Type: graph.TypeString}}),
+		// A UUID arrives as a string (ADR 0047) and a DATE as its own
+		// dbtype, so the pair is distinct HERE and refused on AGE, where
+		// both are text.
+		graph.UnionOf([]graph.UnionMember{{Type: graph.TypeUUID}, {Type: graph.TypeDate}}),
 		// Two temporal widths, each its own dbtype on this wire.
 		graph.UnionOf([]graph.UnionMember{{Type: graph.TypeDate}, {Type: graph.TypeTimestamp}}),
 		// A zoned member: dbtype.OffsetTime carries its own zone, so this
@@ -92,6 +96,9 @@ func TestTypeMapRefusesAUnionWhoseMembersShareAWireFamily(t *testing.T) {
 		}),
 		"float widths all widen to float64": graph.UnionOf([]graph.UnionMember{
 			{Type: graph.TypeFloat32}, {Type: graph.TypeFloat64},
+		}),
+		"a UUID is carried as its RFC 9562 text and so arrives as a string": graph.UnionOf([]graph.UnionMember{
+			{Type: graph.TypeUUID}, {Type: graph.TypeString},
 		}),
 		"every list arrives as []any whatever its elements": graph.UnionOf([]graph.UnionMember{
 			{Type: graph.ListOf(graph.TypeInt32, false)}, {Type: graph.ListOf(graph.TypeString, false)},

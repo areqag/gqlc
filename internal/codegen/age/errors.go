@@ -226,7 +226,7 @@ func rejectOffsetSidecarCollisions(entities []codegen.Entity) error {
 // backend answers the same declaration differently, because attribution
 // implicates contingency — naming a backend tells the author "this is
 // this backend's answer, and another may differ". This table's refused
-// set has two parts and only one of them is contingent. BYTES, UUID and a
+// set has two parts and only one of them is contingent. BYTES and a
 // list whose element carries a zone are refusals neo4j does not share, and
 // the name is owed and load-bearing there. The eight oversized numerics are
 // permanently out on every target under spec §9, so the suffix would
@@ -287,14 +287,12 @@ func carriedByNoBackend(pt graph.PropertyType) bool {
 // this backend's name.
 //
 // It is oversizedNumerics and nothing else. It held graph.TypeUUID too
-// until neo4j gained a carrier for the width — both majors carry it
-// today (ADR 0047); the entry was removed in the change that first gave
-// one of them a carrier, because it had gone from true to false and a
-// stale one is AGE withholding a name it owes. UUID now divides the roster, so this
-// table's refusal of it is contingent and carries the AGE name like
-// BYTES does. That was not left to be noticed later: the composition
-// root reds on it (TestAContingentRefusalNamesItsBackend), which is what
-// made the two halves one change.
+// until neo4j gained a carrier for the width; the entry was removed in
+// that same change, because it had gone from true to false and a stale
+// one is AGE withholding a name it owes — the composition root reds on
+// exactly that (TestAContingentRefusalNamesItsBackend). This table
+// carries UUID itself since bd gqlc-ytf9, so the width is no longer a
+// refusal of anyone's and has no place on either list.
 //
 // The remaining eight are of a different durability, which is why the
 // two were separate lists while there were two: they are permanent under

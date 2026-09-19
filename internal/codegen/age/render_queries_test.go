@@ -411,8 +411,10 @@ func TestDecodeFuncHasAnArmForEveryCarrierTheTypeTableProduces(t *testing.T) {
 	// 21 until RECORD<ANY> began to carry. It is the twenty-second, and
 	// it is a literal rather than a member of the record FAMILY: a record
 	// whose fields are undeclared has no struct to build, so that arm
-	// returns map[string]any outright and the census can hold it.
-	require.Len(t, byMethod["Property"], 22, "typeMap.Property named %v", byMethod["Property"])
+	// returns map[string]any outright and the census can hold it. UUID is
+	// the twenty-third, a row in propertyCarriers like the temporal ones
+	// (ADR 0047, bd gqlc-ytf9).
+	require.Len(t, byMethod["Property"], 23, "typeMap.Property named %v", byMethod["Property"])
 	require.Len(t, byMethod["Scalar"], 6, "typeMap.Scalar named %v", byMethod["Scalar"])
 	require.Empty(t, byMethod["Temporal"], "typeMap.Temporal named %v, so this backend now carries a temporal "+
 		"width: read it against decodeFunc before moving this number", byMethod["Temporal"])

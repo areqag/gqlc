@@ -249,23 +249,16 @@ var propertyCarriers = map[graph.PropertyType]string{
 	graph.TypeLocalTime: "LocalTime",
 	graph.TypeTime:      "Time",
 	graph.TypeDuration:  "Duration",
-	// agtype's value vocabulary is boolean / integer / float /
-	// string / list / map and nothing else, so there is no shape a
-	// 128-bit identifier comes back from the server as itself in. A
-	// string carrier would round-trip the SPELLING and drop the
-	// declared type, which is the silent widening §5.1 exists to
-	// refuse.
-	//
-	// The refusal NAMES this backend, because both neo4j majors carry
-	// the width (ADR 0047), so this is AGE's answer rather than the
-	// declaration's obstacle and an author reading it has somewhere
-	// to go. The name follows from UUID's absence from
-	// uncarriedEverywhere rather than from anything written here.
-	//
-	// ADR 0047 carries it there as exactly the string this comment
-	// declines, on the ground that a CHECKED decode does not drop the
-	// declared type. Whether AGE follows is bd gqlc-ytf9's to rule.
-	graph.TypeUUID:     "",
+	// UUID rides the string scalar as its RFC 9562 text, the arrangement
+	// DATE has one row up and the one the neo4j targets use for this
+	// width (ADR 0047). agtype has no 128-bit value of its own, and this
+	// row refused the width on that ground until bd gqlc-ytf9: a string
+	// carrier was read as round-tripping the SPELLING and dropping the
+	// declared type, the silent widening §5.1 exists to refuse. What
+	// answers that is the decode. The Go surface says uuid.UUID and not
+	// string, and agtypeUUID parses, so a stored string that is not a
+	// UUID fails the read rather than arriving widened.
+	graph.TypeUUID:     "UUID",
 	graph.TypeBytes:    "",
 	graph.TypeInt128:   "",
 	graph.TypeInt256:   "",
@@ -294,8 +287,8 @@ var propertyCarriers = map[graph.PropertyType]string{
 // Derived from agtypeCarrier and then folded onto the scalar each carrier
 // actually rides, rather than restated from the Property table, so the
 // families cannot drift from the encodings this package emits. The fold is
-// decodeFunc's own dispatch read one level further out: agtypeDate reads
-// its value through agtypeString, and agtypeLocalTime, agtypeDuration,
+// decodeFunc's own dispatch read one level further out: agtypeDate and
+// agtypeUUID read their values through agtypeString, and agtypeLocalTime, agtypeDuration,
 // agtypeInstant and agtypeTime all read theirs through agtypeInt64.
 //
 // goInstant and goTime answer integer for completeness and are never asked
@@ -336,7 +329,7 @@ func wireFamily(goType string) string {
 		return "integer"
 	case "float64":
 		return "float"
-	case "string", goDate:
+	case "string", goDate, goUUID:
 		return "string"
 	}
 	return codegen.WireFamilyIndistinct
