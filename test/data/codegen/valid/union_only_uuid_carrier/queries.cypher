@@ -10,15 +10,19 @@
 // tree also says the other family's file is absent: no temporal.go here, no
 // uuid.go there.
 //
-// The two neo4j majors and not AGE, which still refuses the UUID width
-// (test/data/codegen/invalid/uuid_width_unrepresentable).
+// All three targets. On the two neo4j majors the file that names the carrier
+// is union_neo4j.go; on AGE it is models.go, whose union helpers spell UUID in
+// the encode arm and in the decode dispatch. AGE has carried the width since
+// PR #2934, and on origin/master ab4ca4a9 this batch failed there on
+// `undefined: UUID` as it did on neo4j.
 //
 // INT64 is the other member for uuid_property's reason: a UUID is a string on
 // the wire, so ANY<UUID | STRING> is a refusal
 // (test/data/codegen/invalid/uuid_union_string_collision).
 //
 // The three reads reach toUUID twice and fromUUID once, so uuid_neo4j.go emits
-// both directions and each has a caller.
+// both directions and each has a caller. AGE emits no conversions file and no
+// encoder for the width; agtypeUUID in models.go is its whole half.
 
 // name: AccountWhole :one
 MATCH (a:Account) WHERE a.id = $id RETURN a
