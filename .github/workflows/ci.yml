@@ -267,6 +267,11 @@ jobs:
           esac
       - name: the bd-prime guard's own rows
         run: just test-bd-prime-guard
+      # The rows for the assertion ./.github/actions/setup-go makes about its own
+      # provisioning (bd gqlc-ma1l). The action cannot test itself: by the time
+      # a job reads it, it has already run.
+      - name: the setup-go toolchain assertion's own rows
+        run: just test-setup-go-assertion
       # bd gqlc-v2p: fails when a PR's `.beads/issues.jsonl` drops or reopens
       # an issue vs its base. Fetch only the base commit (depth 1) so cost is
       # O(1) in history size, not O(N). Skip on master push — the tip IS the
