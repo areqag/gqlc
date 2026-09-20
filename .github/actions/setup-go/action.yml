@@ -226,10 +226,12 @@ runs:
         # again, under the GOTOOLCHAIN just written to $GITHUB_ENV, rather than
         # reading $resolved: that capture folds stderr in, and a cold cache's
         # "go: downloading go<version>" notice names the wanted version whatever
-        # was provisioned. The 2>&1 here feeds the failure message alone; the
-        # verdict is the exit status. The reason is the script's LAST line, the
-        # go command's own stderr coming ahead of it, and it is passed alone
-        # because a workflow command ends at the first newline.
+        # was provisioned. The 2>&1 here feeds the log alone, never the
+        # verdict, which is the exit status: the capture is echoed whole on
+        # both outcomes, so an accepted cold run logs the notice ahead of the
+        # version line. On a refusal the reason is the script's LAST line, the
+        # go command's own stderr coming ahead of it, and it is passed to the
+        # annotation alone because a workflow command ends at the first newline.
         if ! provisioned="$(GOTOOLCHAIN="$toolchain" ./.github/scripts/assert-go-toolchain.sh "$GO_VERSION" "$go_cmd" 2>&1)"; then
             echo "$provisioned"
             infra_fail "${provisioned##*$'\n'}"

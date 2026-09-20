@@ -91,7 +91,7 @@ refuses() {
 
 # --- allow rows -----------------------------------------------------------
 # Written first on purpose: an assertion that refuses the honest cold-cache run
-# reds every job in the repository the first time a toolchain bump lands.
+# reds every job that uses setup-go the first time a toolchain bump lands.
 
 accepts warm-cache-right-version "" "go version go${want} linux/amd64"
 accepts cold-cache-right-version "${notice}" "go version go${want} linux/amd64"
@@ -115,6 +115,11 @@ refuses distribution-suffix "" "go version go${want}-X:nodwarf5 linux/amd64"
 refuses version-not-in-token-field "" "go version devel go${want} linux/amd64"
 refuses notice-on-stdout-only "" "${notice}"
 refuses empty-stdout "" ""
+# Stderr is not a second place to look when stdout is empty. A script that
+# re-reads with 2>&1 in that case reports the notice, and the reason compared
+# whole is what catches it: the prefix check still refuses that script, so rc
+# alone cannot tell it from this one.
+refuses notice-on-stderr-empty-stdout "${notice}" ""
 
 # A go command that exits non-zero is refused whatever it printed, and says so
 # rather than reporting a version mismatch nobody measured.
@@ -124,6 +129,37 @@ if [ "${rc}" -eq 1 ] && [ -z "${out}" ] && [ "${reason}" != "${reason#*would not
 else
     row go-exits-nonzero FAIL "rc=${rc}, expected 1 with empty stdout and a 'would not run' reason; stdout: ${out}; reason: ${reason}"
 fi
+
+# The go command's stderr reaches the script's stderr whole. setup-go echoes
+# that capture into the step log and hands only its last line to the annotation,
+# so when the toolchain fetch dies this is the one place the go command's own
+# account of why can be read. Both outcomes are pinned: the refusal is where it
+# matters, the acceptance is what setup-go's comment on its 2>&1 says of the log.
+#
+# go_stderr_passes NAME LINE RC: on a refusal LINE is looked for AHEAD of the
+# last line, so the reason cannot stand in for it and the order setup-go's
+# `##*$'\n'` relies on is held. An acceptance adds no line of its own.
+go_stderr_passes() {
+    local name="$1" line="$2" want_rc="$3" carried
+    if [ "${want_rc}" -eq 0 ]; then
+        carried="$(cat "${scratch}/err")"
+    else
+        carried="$(sed '$d' "${scratch}/err")"
+    fi
+    if [ "${rc}" -eq "${want_rc}" ] && printf '%s\n' "${carried}" | command grep -Fxq -- "${line}"; then
+        row "${name}" PASS "rc=${rc}, the stub's stderr line is on the script's stderr"
+    else
+        row "${name}" FAIL "rc=${rc}, expected ${want_rc} with '${line}' on stderr; stderr: $(tr '\n' '|' <"${scratch}/err")"
+    fi
+}
+# The shape is the go command's own, measured 2026-09-20 with go1.27.1 over an
+# empty GOMODCACHE under `unshare -rn`: the notice, then this line less its
+# resolver address, exit 1.
+fetch_error="go: download go${want}: golang.org/toolchain@v0.0.1-go${want}.linux-amd64: Get \"https://proxy.golang.org/golang.org/toolchain/@v/v0.0.1-go${want}.linux-amd64.zip\": dial tcp: lookup proxy.golang.org: connect: network is unreachable"
+STUB_STDERR="${notice}"$'\n'"${fetch_error}" STUB_RC=1 run_assert "${want}" "${stub}"
+go_stderr_passes go-stderr-passes-when-refused "${fetch_error}" 1
+STUB_STDERR="${notice}" STUB_STDOUT="go version go${want} linux/amd64" run_assert "${want}" "${stub}"
+go_stderr_passes go-stderr-passes-when-accepted "${notice}" 0
 
 # An empty version must not reach the comparison: `go` alone is a prefix of
 # every line the go command prints.
