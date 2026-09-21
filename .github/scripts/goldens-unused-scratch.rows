@@ -528,6 +528,45 @@ exported() {
 exported exported-names-are-not-read-as-paths "${scratch}/proc.exported-names-are-not-read-as-paths"
 exported exported-names-are-not-read-as-numbers 1
 
+# The list above is read by the SHAPE of an assignment, and an edit can take a
+# shape it does not know: `printf -v grace '%s' "${grace:-0}"` and
+# `: "${grace:=0}"` each passed every row above (the reviewer of PR #2967, bd
+# gqlc-32z1). So the rule is also held as written. Outside its comment lines
+# the script holds no expansion that gives a NAME a value where it has none —
+# `${name:-`, `${name:=`, `${name-`, `${name=`, an array element's included —
+# and none of the words that assign without an `=`. A positional's default,
+# `${1:-}`, is how the script reads an argument that may be absent, and
+# arguments are not inherited. `${name:?}`, `${name:+}`, `${#name}` and the
+# trimming forms are left alone ON PURPOSE: they read a name and never give it
+# a value, and what reads a name assigned unconditionally cannot see the
+# environment. NOT HELD: a read of a name the script never assigned at all.
+#
+# What is read is BYTES, strings included, so a message spelling one of these
+# reddens this too. The shapes are tried against the pattern first: a pattern
+# that matches nothing finds nothing in any script.
+default_of_a_name='\$\{[A-Za-z_][A-Za-z0-9_]*(\[[^]]*\])?:?[-=]'
+unlisted_assignment='(^|[^A-Za-z0-9_-])(printf[[:space:]]+-v|mapfile|readarray|declare|typeset)([^A-Za-z0-9_-]|$)'
+forbidden() { command grep -E -- "${default_of_a_name}|${unlisted_assignment}"; }
+blind=""
+# shellcheck disable=SC2016 # these are the texts looked for, not expansions
+for shape in '"${grace:-0}"' ': "${grace:=0}"' '${grace-0}' '${grace=0}' '${a[0]:-0}' '${a[@]:=0}' \
+    "printf -v grace '%s' 0" '    mapfile -t a' 'readarray a' 'declare -i grace=0' 'typeset grace'; do
+    printf '%s\n' "${shape}" | forbidden >/dev/null || blind="${blind} [${shape}] is not seen;"
+done
+# shellcheck disable=SC2016 # as above
+for shape in '"${1:-}"' '${20:-}' '${#2}' '${stat##*) }' '${dir##*/}' '${grace:?unset}' '${grace:+set}' \
+    '"${prefix}-${record}"' 'stale_minutes=90' "printf '%s\n' -v" 'undeclared'; do
+    ! printf '%s\n' "${shape}" | forbidden >/dev/null || blind="${blind} [${shape}] is taken for one;"
+done
+found="$(command grep -nv '^[[:space:]]*#' "${tool}" | forbidden)"
+if [ -n "${blind}" ]; then
+    row no-name-is-given-a-default FAIL "the pattern does not read the shapes it is for:${blind}"
+elif [ -n "${found}" ]; then
+    row no-name-is-given-a-default FAIL "${tool} gives a name a value it may have inherited, or assigns one where the exported list cannot see it: ${found}"
+else
+    row no-name-is-given-a-default PASS "no default of a name, and no printf -v, mapfile, readarray, declare or typeset"
+fi
+
 # --- the real recipe, SIGKILLed -------------------------------------------
 # The defect as filed. The recipe runs in a session of its own so that the
 # whole process group can be killed the way a watchdog kills one, and is killed
