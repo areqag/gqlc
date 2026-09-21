@@ -22,8 +22,11 @@
 # about a record the script could not have written have to write one.
 #
 # A row that cannot run here says SKIP and is counted in the last line, and
-# never reads as a pass: masking /proc needs `unshare -rm`, and a removal that
-# fails needs a user rm can be refused to.
+# never reads as a pass. There is one: a removal that fails needs a user rm can
+# be refused to. The rows about a host with no /proc were two more until bd
+# gqlc-qbah, because they masked /proc with `unshare -rm`, and CI's runner —
+# the one place a merge is gated — does not allow that. They now hand the
+# script a directory to read instead of /proc, which runs anywhere.
 set -uo pipefail
 
 tool_arg="${1:?usage: goldens-unused-scratch.rows <script> <justfile>}"
@@ -332,34 +335,138 @@ else
     fi
 fi
 
-# --- a host with no /proc -------------------------------------------------
-# /proc masked by a tmpfs inside a user namespace. `new` must write a tick that
-# reads as alive — and the row checks that it is not a number, or a mask that
-# did nothing would pass it — and `sweep` must remove nothing, over a copy the
-# unmasked sweep then does remove.
-masked() { unshare -rm sh -c 'mount -t tmpfs none /proc && exec "$@"' sh "$@"; }
-if ! masked true 2>/dev/null; then
-    row no-proc-new-writes-no-tick SKIP "unshare -rm cannot mask /proc here"
-    row no-proc-sweep-removes-nothing SKIP "unshare -rm cannot mask /proc here"
+# --- a claim that finds its name taken ------------------------------------
+# The sweeper claims a copy by renaming it to a name ending in its own pid. A
+# NON-EMPTY directory already under that name is somebody's, and a rename that
+# moved the copy INTO it would go on to empty it. The shell that plants it execs
+# the script, so the pid it spelled is the sweeper's.
+new_root taken
+live_owner; new_copy; kill_owner "${owner}"; age "${copy}" '3 hours ago'
+# shellcheck disable=SC2016 # expanded by the inner shell, whose $$ is the point
+out="$(bash -c 'mkdir "${1}.reap$$" && : >"${1}.reap$$/precious" && exec "${2}" sweep "${3}"' \
+    bash "${copy}" "${tool}" "${root}" 2>"${scratch}/err")"; rc=$?
+precious="$(find "${root}" -mindepth 2 -maxdepth 2 -name precious)"
+if [ -z "${precious}" ]; then
+    row claim-name-taken-is-left-alone FAIL "the file in the directory that held the claim's name is gone; rc=${rc}; stdout: ${out}; left: $(ls -A "${root}")"
+elif [ -e "$(dirname "${precious}")/$(basename "${copy}")" ]; then
+    row claim-name-taken-is-left-alone FAIL "the copy was moved inside the directory that held the claim's name; left there: $(ls -A "$(dirname "${precious}")")"
 else
-    new_root noprocnew
-    live_owner
-    copy="$(masked "${tool}" new "${root}" "${owner}")" || copy=""
-    tick="$([ -z "${copy}" ] || find "${copy}" -maxdepth 1 -type f -exec awk '{print $2}' {} +)"
-    case "${tick}" in
-        "" | *[0-9]*) row no-proc-new-writes-no-tick FAIL "the tick written was '${tick}', expected something that is there and is not a number" ;;
-        *)  mkdir "${copy}/sub" && : >"${copy}/sub/a" && : >"${copy}/sub/b"
+    kept claim-name-taken-is-left-alone
+fi
+
+# --- a proc root that is not /proc ------------------------------------------
+# `--test-proc-root <dir>` has the script read <dir>/<pid>/stat. It says so on
+# stderr each time, in one line, and `noticed` is that line and nothing else.
+fake=""
+new_fake() { fake="${scratch}/proc.${1}"; mkdir -p "${fake}"; }
+noticed() {
+    [ "$(cat "${scratch}/err")" = "goldens-unused scratch: TEST ONLY: process start ticks are read from ${fake} and not from /proc (bd gqlc-qbah)" ]
+}
+
+# A host with no /proc is an empty one. `new` must write a tick that reads as
+# alive — and the row checks that it is not a number, or a proc root that was
+# not read would pass it — and `sweep` must remove nothing, over a copy the
+# sweep that reads /proc then does remove.
+new_root noprocnew; new_fake empty
+live_owner
+copy="$("${tool}" --test-proc-root "${fake}" new "${root}" "${owner}" 2>"${scratch}/err")" || copy=""
+tick="$([ -z "${copy}" ] || find "${copy}" -maxdepth 1 -type f -exec awk '{print $2}' {} +)"
+case "${tick}" in
+    "" | *[0-9]*) row no-proc-new-writes-no-tick FAIL "the tick written was '${tick}', expected something that is there and is not a number; stderr: $(cat "${scratch}/err")" ;;
+    *)  if ! noticed; then
+            row no-proc-new-writes-no-tick FAIL "expected the one TEST ONLY line on stderr, got: $(cat "${scratch}/err")"
+        else
+            mkdir "${copy}/sub" && : >"${copy}/sub/a" && : >"${copy}/sub/b"
             age "${copy}" '3 hours ago'
             sweep
-            kept no-proc-new-writes-no-tick ;;
-    esac
+            kept no-proc-new-writes-no-tick
+        fi ;;
+esac
 
-    new_root noprocsweep
-    live_owner; new_copy; kill_owner "${owner}"; age "${copy}" '3 hours ago'
-    out="$(masked "${tool}" sweep "${root}" 2>"${scratch}/err")"; rc=$?
+new_root noprocsweep
+live_owner; new_copy; kill_owner "${owner}"; age "${copy}" '3 hours ago'
+out="$("${tool}" --test-proc-root "${fake}" sweep "${root}" 2>"${scratch}/err")"; rc=$?
+if noticed; then
     kept no-proc-sweep-removes-nothing
-    sweep
-    removed no-proc-control-unmasked-sweep-removes 1 5
+else
+    row no-proc-sweep-removes-nothing FAIL "expected the one TEST ONLY line on stderr, got: $(cat "${scratch}/err")"
+fi
+sweep
+removed no-proc-control-real-proc-removes 1 5
+
+# A stat line as the kernel writes one: the pid, the command name in
+# parentheses, then fields 3 to 52, the tick being field 22. Every other field
+# is a number of its own, so a count begun in the wrong place reads a wrong tick
+# and never the right one by luck.
+stat_line() {
+    local n fields=""
+    for n in $(seq 3 52); do
+        if [ "${n}" -eq 22 ]; then fields="${fields} ${3}"; else fields="${fields} $((1000 + n))"; fi
+    done
+    printf '%s (%s)%s\n' "${1}" "${2}" "${fields}"
+}
+# Sweeps ${root} reading ${fake}. A sweeper that cannot read its OWN tick judges
+# nothing, so its stat has to be there, under a pid nobody knows yet: the shell
+# that writes it execs the script.
+fake_sweep() {
+    # shellcheck disable=SC2016 # expanded by the inner shell, whose $$ is the point
+    out="$(bash -c 'mkdir "${1}/$$" && printf "%s\n" "${2}" >"${1}/$$/stat" && exec "${3}" --test-proc-root "${1}" sweep "${4}"' \
+        bash "${fake}" "$(stat_line 1 sweeper 5)" "${tool}" "${root}" 2>"${scratch}/err")"; rc=$?
+}
+# fake_owner NAME STAT: an old copy whose record says `<owner> 777777`, the owner
+# a LIVE process whose real tick is another, swept against a proc root holding
+# STAT for it. What is kept here was kept on the word of the directory.
+fake_owner() {
+    new_root "${1}"; new_fake "${1}"
+    live_owner; new_copy
+    rewrite 's/ [0-9]+$/ 777777/'
+    age "${copy}" '3 hours ago'
+    mkdir "${fake}/${owner}"
+    printf '%s' "${2}" >"${fake}/${owner}/stat"
+    fake_sweep
+}
+fake_owner fakeright "$(stat_line 1 sleep 777777)"
+kept fake-proc-right-tick-is-kept
+# The control for every `kept` in this section: the same sweep DOES remove, so
+# none of them was a sweeper stopped at its own tick.
+fake_owner fakewrong "$(stat_line 1 sleep 777778)"
+removed fake-proc-wrong-tick-is-removed 1 5
+# A command name is whatever its process set, parentheses and spaces included.
+fake_owner fakecomm "$(stat_line 1 'a) 1 2 3 (b' 777777)"
+kept comm-holding-parentheses-is-read-past
+# A stat file that is there and holds no tick says a process has the pid and
+# nothing about which one.
+fake_owner fakeempty ""
+kept empty-stat-is-kept
+fake_owner fakeshort "1 (sleep) S 1 2"
+kept truncated-stat-is-kept
+fake_owner fakegarbled "$(stat_line 1 sleep -)"
+kept garbled-stat-tick-is-kept
+
+# A proc root that is not an absolute path to a directory is refused by both
+# halves, with nothing swept and nothing made. `rel` IS a directory, and empty:
+# honoured, it is a host with no /proc.
+new_root badproc
+live_owner; new_copy; kill_owner "${owner}"; age "${copy}" '3 hours ago'
+mkdir "${scratch}/rel"; : >"${scratch}/file"
+bad=""
+for d in "" rel "${scratch}/absent" "${scratch}/file"; do
+    before="$(find "${root}" | wc -l)"
+    out="$(cd "${scratch}" && "${tool}" --test-proc-root "${d}" sweep "${root}" 2>"${scratch}/err")"; rc=$?
+    if [ "${rc}" -ne 2 ] || [ -n "${out}" ] || ! command grep -Fq -- "--test-proc-root '${d}' is not an absolute path to a directory" "${scratch}/err"; then
+        bad="${bad} sweep '${d}' (rc=${rc}, stdout: ${out}, stderr: $(cat "${scratch}/err"))"
+    fi
+    out="$(cd "${scratch}" && "${tool}" --test-proc-root "${d}" new "${root}" "${owners[0]}" 2>"${scratch}/err")"; rc=$?
+    if [ "${rc}" -ne 2 ] || [ -n "${out}" ] || [ "$(find "${root}" | wc -l)" -ne "${before}" ]; then
+        bad="${bad} new '${d}' (rc=${rc}, stdout: ${out})"
+    fi
+done
+out="$("${tool}" --test-proc-root 2>"${scratch}/err")"; rc=$?
+[ "${rc}" -eq 2 ] || bad="${bad} no directory at all (rc=${rc})"
+if [ -z "${bad}" ] && [ -f "${copy}/sub/a" ]; then
+    row bad-proc-root-is-refused PASS "rc=2, nothing swept and nothing made, four shapes and none"
+else
+    row bad-proc-root-is-refused FAIL "expected rc=2, empty stdout, the reason, and the root as it was; got:${bad}; left: $(ls -A "${root}")"
 fi
 
 # --- the real recipe, SIGKILLed -------------------------------------------
@@ -371,6 +478,13 @@ fi
 # run is the recipe and not the script, because what ties the two together is a
 # line in the recipe's body that nothing else holds: the sweep being called at
 # all, and `new` being what makes the directory.
+#
+# That second run is also the one run of the script these rows do not start
+# themselves, so it is where a proc root arriving by the ENVIRONMENT is tried:
+# exported at an empty directory, under the name a shortcut would give it,
+# beside an old copy whose owner is alive. The script takes a proc root as an
+# argument and reads none from the environment, so the killed copy is reaped all
+# the same — an empty proc root reaps nothing — and the live one is whole.
 real_just="$(command -v just)" || real_just=""
 if [ -z "${real_just}" ] || ! command -v setsid >/dev/null 2>&1; then
     row killed-run-is-reaped-by-the-next FAIL "no just or no setsid on PATH, so the recipe cannot be run and killed"
@@ -401,14 +515,25 @@ else
     else
         row killed-run-leaves-its-copy PASS "${left} inodes survived the SIGKILL"
         age "${copy}" '3 hours ago'
-        out="$(cd "${tree}" && "${recipe[@]}" 2>"${scratch}/err")"
+        killed_copy="${copy}"
+        live_owner; new_copy; age "${copy}" '3 hours ago'
+        new_fake inherited
+        out="$(cd "${tree}" && env GQLC_GOLDENS_UNUSED_PROC_ROOT="${fake}" "${recipe[@]}" 2>"${scratch}/err")"
         rc=$?
         expect="goldens-unused scratch: removed 1 stale copies a killed run left under ${root}, freeing ${left} inodes (bd gqlc-7hyt)"
-        if [ "${rc}" -eq 0 ] && printf '%s\n' "${out}" | command grep -Fxq -- "${expect}" \
-            && [ -z "$(ls -A "${root}")" ]; then
-            row killed-run-is-reaped-by-the-next PASS "the next run passed, left nothing, and said: ${expect#goldens-unused scratch: }"
+        reaped=no
+        ! printf '%s\n' "${out}" | command grep -Fxq -- "${expect}" || reaped=yes
+        if [ "${rc}" -eq 0 ] && [ "${reaped}" = yes ] && [ ! -e "${killed_copy}" ] \
+            && [ "$(ls -A "${root}")" = "$(basename "${copy}")" ]; then
+            row killed-run-is-reaped-by-the-next PASS "the next run passed, left only the live run's copy, and said: ${expect#goldens-unused scratch: }"
         else
-            row killed-run-is-reaped-by-the-next FAIL "rc=${rc}, expected 0, an empty root and the line '${expect}'; stdout: ${out}; stderr: $(tail -n 5 "${scratch}/err"); left: $(ls -A "${root}")"
+            row killed-run-is-reaped-by-the-next FAIL "rc=${rc}, expected 0, a root holding the live run's copy alone and the line '${expect}'; stdout: ${out}; stderr: $(tail -n 5 "${scratch}/err"); left: $(ls -A "${root}")"
+        fi
+        if [ "${reaped}" = yes ] && [ -f "${copy}/sub/a" ] && [ -f "${copy}/sub/b" ] \
+            && ! command grep -Fq -- "TEST ONLY" "${scratch}/err"; then
+            row exported-proc-root-is-not-read PASS "the recipe read /proc: the dead owner's copy reaped, the live owner's whole"
+        else
+            row exported-proc-root-is-not-read FAIL "with GQLC_GOLDENS_UNUSED_PROC_ROOT exported at an empty directory, expected the killed copy reaped, the live owner's copy whole and no TEST ONLY line; reaped: ${reaped}; stderr: $(command grep -F -- "TEST ONLY" "${scratch}/err"); left: $(ls -A "${root}")"
         fi
     fi
 fi
