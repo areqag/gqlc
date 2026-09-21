@@ -36,8 +36,10 @@ func TestAnEntityDecoderIsReadByShape(t *testing.T) {
 		{"age vertex", person + "func decodePerson(raw []byte) (Person, error) { return Person{}, nil }", []string{"decodePerson"}},
 		{"an entity with no properties", "type Knows struct{}\nfunc decodeKnows(rel dbtype.Relationship) (Knows, error) { return Knows{}, nil }", []string{"decodeKnows"}},
 		{"sorted", person + "type Blob struct{}\nfunc decodePerson(raw []byte) (Person, error) { return Person{}, nil }\nfunc decodeBlob(raw []byte) (Blob, error) { return Blob{}, nil }", []string{"decodeBlob", "decodePerson"}},
+		{"an entity named as a record decoder is spelled", "type Recordaaaaaaaa struct{ Name string }\nfunc decodeRecordaaaaaaaa(raw []byte) (Recordaaaaaaaa, error) { return Recordaaaaaaaa{}, nil }", []string{"decodeRecordaaaaaaaa"}},
 
 		{"a record decoder answers an unexported alias", "type record4329c440 = struct{ Zip int32 }\nfunc decodeRecord4329c440(raw []byte) (record4329c440, error) { return record4329c440{}, nil }", nil},
+		{"the same name answering an unexported alias", "type recordaaaaaaaa = struct{ Name string }\nfunc decodeRecordaaaaaaaa(raw []byte) (recordaaaaaaaa, error) { return recordaaaaaaaa{}, nil }", nil},
 		{"a record decoder beside an entity", person + "type record4329c440 = struct{}\nfunc decodeRecord4329c440(v map[string]any) (record4329c440, error) { return record4329c440{}, nil }", nil},
 		{"a union decoder answers any", person + "func decodeUnionbd73dd3d(raw []byte) (any, error) { return nil, nil }", nil},
 		{"the struct is defined elsewhere or nowhere", "func decodePerson(raw []byte) (Person, error) { return Person{}, nil }", nil},
