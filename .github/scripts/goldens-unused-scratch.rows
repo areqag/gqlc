@@ -4,12 +4,11 @@
 #
 # What is under test: the sweep removes the scratch copy a killed `just
 # check-goldens-unused` left behind, and removes nothing else — above all not
-# the copy a live run is linting. Every rule the script's head comment lists has
-# a row that fails when the rule is dropped, and the last row is the whole
-# failure end to end: the real recipe, SIGKILLed, and the next run reaping it.
+# the copy a live run is linting. The last rows are the whole failure end to
+# end: the real recipe, SIGKILLed, and the next run reaping it.
 #
 # $1 is the script under test and $2 the justfile whose check-goldens-unused the
-# last row runs. They are parameters so that a mutation run can point these rows
+# last rows run. They are parameters so that a mutation run can point these rows
 # at a mutated copy of the tree.
 #
 # NOTHING HERE TOUCHES THE HOST'S /tmp BY NAME. Every root swept is a directory
@@ -19,8 +18,12 @@
 # Every fixture is made by the script's own `new`, so these rows spell neither
 # the copy's name nor its record's. "The record" is, to them, whatever regular
 # file `new` left at the top of the copy; ageing a copy means back-dating that.
-# One row rewrites the record's last field, which is the one thing they know
-# about its contents.
+# What they do know is its shape, `<pid> <tick>` on one line, because the rows
+# about a record the script could not have written have to write one.
+#
+# A row that cannot run here says SKIP and is counted in the last line, and
+# never reads as a pass: masking /proc needs `unshare -rm`, and a removal that
+# fails needs a user rm can be refused to.
 set -uo pipefail
 
 tool_arg="${1:?usage: goldens-unused-scratch.rows <script> <justfile>}"
@@ -46,11 +49,15 @@ mkdir -p "${TMPDIR}"
 
 pass=0
 fail=0
+skip=0
 row() {
     local name="$1" verdict="$2" detail="$3"
     if [ "${verdict}" = PASS ]; then
         pass=$((pass + 1))
         printf '  PASS  %-40s %s\n' "${name}" "${detail}"
+    elif [ "${verdict}" = SKIP ]; then
+        skip=$((skip + 1))
+        printf '  SKIP  %-40s %s\n' "${name}" "${detail}"
     else
         fail=$((fail + 1))
         printf '  FAIL  %-40s %s\n' "${name}" "${detail}" >&2
@@ -76,6 +83,8 @@ new_copy() {
     [ -n "${copy}" ] && mkdir "${copy}/sub" && : >"${copy}/sub/a" && : >"${copy}/sub/b"
 }
 age() { find "${1}" -maxdepth 1 -type f -exec touch -d "${2}" {} +; }
+# Rewrites the record of ${copy} with a sed expression.
+rewrite() { find "${copy}" -maxdepth 1 -type f -exec sed -i -E "${1}" {} +; }
 
 rc=0; out=""
 sweep() { out="$("${tool}" sweep "${root}" 2>"${scratch}/err")"; rc=$?; }
@@ -159,13 +168,49 @@ age "${copy}" '3 hours ago'
 sweep
 removed reused-pid-is-not-the-owner 1 5
 
-# A record nobody can read an owner out of says nothing about death.
+# A record the script could not have written says nothing about a death. Every
+# one of these is old and is KEPT; each but the first names a LIVE owner, so
+# that the copy a wrong answer deletes is a live run's. `-` for the tick is what
+# `new` itself writes where it cannot read /proc.
+unwritable_record() {
+    new_root "${1}"
+    live_owner; new_copy
+    rewrite "${2}"
+    age "${copy}" '3 hours ago'
+    sweep
+    kept "${1}"
+}
 new_root unparsed
 live_owner; new_copy; kill_owner "${owner}"
 find "${copy}" -maxdepth 1 -type f -exec truncate -s 0 {} +
 age "${copy}" '3 hours ago'
 sweep
 kept unparsed-record-is-kept
+unwritable_record empty-tick-is-kept 's/ [0-9]+$/ /'
+unwritable_record garbled-tick-is-kept 's/ [0-9]+$/ -/'
+unwritable_record leading-zero-tick-is-kept 's/ ([0-9]+)$/ 0\1/'
+unwritable_record overlong-tick-is-kept 's/ [0-9]+$/ 111111111111111111111/'
+unwritable_record garbled-pid-is-kept 's/^[0-9]+/-/'
+unwritable_record pid-zero-is-kept 's/^[0-9]+/0/'
+unwritable_record leading-zero-pid-right-tick-is-kept 's/^/0/'
+unwritable_record overlong-pid-is-kept 's/^[0-9]+/11111111111111111111111/'
+
+# And `new` does not write one: a pid it would not read back is refused, with
+# nothing made.
+new_root badpid
+live_owner
+bad=""
+for pid in "" 0 "0${owner}" 11111111111111111111111 -; do
+    out="$("${tool}" new "${root}" "${pid}" 2>"${scratch}/err")"; rc=$?
+    if [ "${rc}" -ne 2 ] || [ -n "${out}" ] || [ -n "$(ls -A "${root}")" ]; then
+        bad="${bad} '${pid}' (rc=${rc}, stdout: ${out}, left: $(ls -A "${root}"))"
+    fi
+done
+if [ -z "${bad}" ]; then
+    row new-refuses-a-pid-it-would-not-read PASS "rc=2 and nothing made, five shapes"
+else
+    row new-refuses-a-pid-it-would-not-read FAIL "expected rc=2, empty stdout and an empty root for each; got:${bad}"
+fi
 
 # Somebody else's directory under this name: old, no record.
 new_root unmarked
@@ -191,6 +236,139 @@ fi
 root="${elsewhere}"
 sweep
 removed symlink-target-was-stale-in-place 1 5
+
+# A directory that is stale by every rule but its NAME, which is not the
+# template's.
+new_root othername
+live_owner; new_copy; kill_owner "${owner}"; age "${copy}" '3 hours ago'
+mv "${copy}" "${root}/somebody-elses"; copy="${root}/somebody-elses"
+sweep
+kept name-outside-the-template-is-kept
+
+# The record itself a symlink, to an old record outside the copy that names a
+# dead owner. The sweeper writes the record of a copy it takes, so what is held
+# here is the link's TARGET as well as the copy.
+new_root recordlink
+live_owner; new_copy; kill_owner "${owner}"
+record="$(find "${copy}" -maxdepth 1 -type f)"
+mv "${record}" "${scratch}/record.moved"
+cp "${scratch}/record.moved" "${scratch}/record.was"
+ln -s "${scratch}/record.moved" "${record}"
+touch -d '3 hours ago' "${scratch}/record.moved"
+touch -h -d '3 hours ago' "${record}"
+sweep
+if cmp -s "${scratch}/record.moved" "${scratch}/record.was"; then
+    kept symlinked-record-is-kept
+else
+    row symlinked-record-is-kept FAIL "the sweep wrote through the link: $(cat "${scratch}/record.moved")"
+fi
+
+# A root that is not absolute is refused by both halves, loudly, and what is
+# under it stays. `-rel` is the shape that mattered: find reads it as an option.
+new_root relative
+root="${root}/-rel"; mkdir "${root}"
+live_owner; new_copy; kill_owner "${owner}"; age "${copy}" '3 hours ago'
+out="$(cd "${root}/.." && "${tool}" sweep -rel 2>"${scratch}/err")"; rc=$?
+if [ "${rc}" -eq 2 ] && [ -z "${out}" ] && [ -f "${copy}/sub/a" ] && command grep -Fq -- "'-rel' is not an absolute path" "${scratch}/err"; then
+    row relative-root-is-refused-by-sweep PASS "rc=2, and the reason names it"
+else
+    row relative-root-is-refused-by-sweep FAIL "rc=${rc}, expected 2, silence on stdout, the copy whole and a reason naming '-rel'; stdout: ${out}; stderr: $(cat "${scratch}/err")"
+fi
+bad=""
+for r in -rel ""; do
+    before="$(find "${root}/.." | wc -l)"
+    out="$(cd "${root}/.." && "${tool}" new "${r}" "${owners[0]}" 2>"${scratch}/err")"; rc=$?
+    if [ "${rc}" -ne 2 ] || [ -n "${out}" ] || [ "$(find "${root}/.." | wc -l)" -ne "${before}" ]; then
+        bad="${bad} '${r}' (rc=${rc}, stdout: ${out})"
+    fi
+    out="$(cd "${root}/.." && "${tool}" sweep "${r}" 2>"${scratch}/err")"; rc=$?
+    [ "${rc}" -eq 2 ] || bad="${bad} sweep '${r}' (rc=${rc})"
+done
+if [ -z "${bad}" ]; then
+    row relative-or-empty-root-is-refused PASS "rc=2 and nothing made"
+else
+    row relative-or-empty-root-is-refused FAIL "expected rc=2, empty stdout and nothing made; got:${bad}"
+fi
+
+# --- one sweeper per copy, and a removal cut short -------------------------
+# Three sweepers at once over five copies big enough that a removal takes a
+# while. Each copy must be reported by exactly one of them, so the lines SUM to
+# what was there. Before the claim each of three reported all five (measured by
+# the reviewer of PR #2963, 3 trials of 3).
+new_root race
+for _ in 1 2 3 4 5; do
+    live_owner; new_copy; kill_owner "${owner}"
+    (cd "${copy}/sub" && seq 1 400 | xargs touch)
+    age "${copy}" '3 hours ago'
+done
+there="$(find "${root}" -mindepth 1 | wc -l)"
+for n in 1 2 3; do
+    "${tool}" sweep "${root}" >"${scratch}/race.${n}" 2>&1 &
+    racers[n]=$!
+done
+wait "${racers[@]}"
+copies=0; inodes=0
+while read -r c i; do
+    copies=$((copies + c)); inodes=$((inodes + i))
+done < <(sed -n -E 's/^goldens-unused scratch: removed ([0-9]+) stale copies .* freeing ([0-9]+) inodes .*/\1 \2/p' "${scratch}"/race.[123])
+if [ "${copies}" -eq 5 ] && [ "${inodes}" -eq "${there}" ] && [ -z "$(ls -A "${root}")" ]; then
+    row racing-sweepers-sum-to-the-truth PASS "three sweepers reported 5 copies and ${there} inodes between them"
+else
+    row racing-sweepers-sum-to-the-truth FAIL "three sweepers reported ${copies} copies and ${inodes} inodes between them, over 5 and ${there}; left: $(ls -A "${root}"); said: $(cat "${scratch}"/race.[123])"
+fi
+
+# A removal that fails part-way — here rm is refused inside a read-only
+# directory — must leave something the NEXT sweep can still take: inside the
+# template, and with its record. The sweeper that failed says nothing; the
+# remnant's record is then the failed sweeper's, so it is aged again.
+if [ "$(id -u)" -eq 0 ]; then
+    row failed-removal-is-finished-later SKIP "running as root, which rm is not refused to"
+else
+    new_root remnant
+    live_owner; new_copy; kill_owner "${owner}"; age "${copy}" '3 hours ago'
+    chmod 555 "${copy}/sub"
+    sweep
+    remnant="$(find "${root}" -mindepth 1 -maxdepth 1)"
+    chmod -R u+w "${root}"
+    if [ "${rc}" -ne 0 ] || [ -n "${out}" ] || [ -z "${remnant}" ] || [ ! -f "${remnant}/sub/a" ]; then
+        row failed-removal-is-finished-later FAIL "the refused sweep: rc=${rc}, expected 0, silence and a remnant holding sub/a; stdout: ${out}; left: ${remnant}"
+    else
+        age "${remnant}" '3 hours ago'
+        copy="${remnant}"
+        sweep
+        removed failed-removal-is-finished-later 1 5
+    fi
+fi
+
+# --- a host with no /proc -------------------------------------------------
+# /proc masked by a tmpfs inside a user namespace. `new` must write a tick that
+# reads as alive — and the row checks that it is not a number, or a mask that
+# did nothing would pass it — and `sweep` must remove nothing, over a copy the
+# unmasked sweep then does remove.
+masked() { unshare -rm sh -c 'mount -t tmpfs none /proc && exec "$@"' sh "$@"; }
+if ! masked true 2>/dev/null; then
+    row no-proc-new-writes-no-tick SKIP "unshare -rm cannot mask /proc here"
+    row no-proc-sweep-removes-nothing SKIP "unshare -rm cannot mask /proc here"
+else
+    new_root noprocnew
+    live_owner
+    copy="$(masked "${tool}" new "${root}" "${owner}")" || copy=""
+    tick="$([ -z "${copy}" ] || find "${copy}" -maxdepth 1 -type f -exec awk '{print $2}' {} +)"
+    case "${tick}" in
+        "" | *[0-9]*) row no-proc-new-writes-no-tick FAIL "the tick written was '${tick}', expected something that is there and is not a number" ;;
+        *)  mkdir "${copy}/sub" && : >"${copy}/sub/a" && : >"${copy}/sub/b"
+            age "${copy}" '3 hours ago'
+            sweep
+            kept no-proc-new-writes-no-tick ;;
+    esac
+
+    new_root noprocsweep
+    live_owner; new_copy; kill_owner "${owner}"; age "${copy}" '3 hours ago'
+    out="$(masked "${tool}" sweep "${root}" 2>"${scratch}/err")"; rc=$?
+    kept no-proc-sweep-removes-nothing
+    sweep
+    removed no-proc-control-unmasked-sweep-removes 1 5
+fi
 
 # --- the real recipe, SIGKILLed -------------------------------------------
 # The defect as filed. The recipe runs in a session of its own so that the
@@ -243,5 +421,5 @@ else
     fi
 fi
 
-echo "goldens-unused-scratch: ${pass} passed, ${fail} failed"
+echo "goldens-unused-scratch: ${pass} passed, ${fail} failed, ${skip} skipped"
 [ "${fail}" -eq 0 ]

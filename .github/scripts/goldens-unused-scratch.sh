@@ -23,12 +23,20 @@
 #     symlink: one of that name is neither removed nor read through;
 #   - it holds the owner record, so a directory someone else made under that
 #     name is left alone. No line below asks that on its own: a copy with no
-#     record has no age to read and no owner to call dead, and either keeps it;
+#     record has no age to read and no owner to call dead, and either keeps it.
+#     A record that is a symlink is asked about, because the sweeper WRITES the
+#     record of a copy it takes and would write through one;
 #   - its owner is DEAD: no process has that pid, or the one that has it was not
 #     started at the recorded tick (field 22 of /proc/<pid>/stat), which is what
-#     tells a reused pid from the owner. A record that does not parse, and a
-#     host with no /proc at all, read as alive. So does an owner that is a
-#     zombie, until its parent reaps it;
+#     tells a reused pid from the owner. A record is `<pid> <tick>`, each a
+#     decimal number written the one way the kernel writes it: no leading zero,
+#     a pid that is not 0 and no longer than pid_max's hard limit (4194304,
+#     seven digits), a tick no longer than a u64. ANYTHING ELSE READS AS ALIVE —
+#     an empty or garbled field, `0<pid>` beside that pid's right tick — because
+#     a record this script cannot have written says nothing about a death. So
+#     does an owner that is a zombie, until its parent reaps it, and so does
+#     every owner on a host with no /proc: there `new` writes `-` for the tick,
+#     and `sweep` removes nothing at all;
 #   - the record is OLDER than stale_minutes. The owner test reads this host's
 #     process table, so it calls dead an owner it cannot see: one in another pid
 #     namespace sharing <root>, or on another host sharing it. Age is what is
@@ -37,14 +45,27 @@
 #     whole budget, 755 s at its ceiling: 50 minutes of waiting, against ~3 s of
 #     work on the dev host. 90 is that with room.
 #
+# <root> must be absolute, and both halves refuse one that is not: a relative
+# root beginning with `-` reads to find as an option, and the sweep would go
+# quiet over it rather than wrong.
+#
+# ONE SWEEPER REMOVES A COPY, AND A REMOVAL CUT SHORT IS FINISHED LATER. Before
+# it removes anything the sweeper writes ITSELF into the record and renames the
+# copy, still inside the template. The rename is what arbitrates: of sweepers
+# that meet over a copy one wins it, and only the winner counts it. The record
+# is what keeps a claimed copy from being claimed again — it is young and its
+# owner runs — and what hands it on if the sweeper dies: then it is a copy with
+# a dead owner like any other, and the record is the last thing unlinked so
+# that it stays one.
+#
 # WHAT STILL LEAKS, neither measured: a run killed between `new`'s mktemp and
 # its write of the record leaves one empty directory, and a sweeper killed
-# part-way through a removal may already have unlinked the record from what is
-# left. Both are then unmarked, which the second rule protects.
+# between unlinking the record and the rmdir after it leaves another. Both are
+# unmarked, which the second rule protects.
 #
-# A removal that races another sweeper is not an error, and nothing arbitrates
-# one: two sweeps that meet over the same copy may both report it, so under
-# that race the line's numbers overstate. Not measured.
+# NOT RUN ANYWHERE: a host that really has no /proc (darwin). What the rows run
+# is this host with /proc masked inside a user namespace, where `unshare -rm`
+# is allowed, and they say SKIP where it is not.
 set -euo pipefail
 
 prefix="gqlc-goldens-unused"
@@ -64,33 +85,62 @@ proc_start() {
     printf '%s\n' "${20}"
 }
 
+# A decimal number of at most ${1} digits, written the way the kernel writes one.
+canonical() {
+    case "${2}" in "" | 0?* | *[!0-9]*) return 1 ;; esac
+    [ "${#2}" -le "${1}" ]
+}
+is_pid() { canonical 7 "${1}" && [ "${1}" != 0 ]; }
+
+absolute() {
+    case "${1}" in
+        /*) ;;
+        *)
+            echo "error: the scratch root '${1}' is not an absolute path, so it is not swept and nothing is made under it (bd gqlc-7hyt)." >&2
+            exit 2
+            ;;
+    esac
+}
+
 owner_alive() {
     local pid="" start="" now
     read -r pid start <"${1}" 2>/dev/null || true
-    case "${pid}" in "" | *[!0-9]*) return 0 ;; esac
-    case "${start}" in "" | *[!0-9]*) return 0 ;; esac
+    is_pid "${pid}" || return 0
+    canonical 20 "${start}" || return 0
     now="$(proc_start "${pid}")" || return 1
     [ "${now}" = "${start}" ]
 }
 
 new() {
     local root="${1}" pid="${2}" start dir
-    start="$(proc_start "${pid}")" || start=""
+    absolute "${root}"
+    if ! is_pid "${pid}"; then
+        echo "error: '${pid}' is not a pid, so no copy is made whose record would name it (bd gqlc-7hyt)." >&2
+        exit 2
+    fi
+    start="$(proc_start "${pid}")" || start="-"
     dir="$(mktemp -d "${root}/${prefix}-XXXXXX")"
     printf '%s %s\n' "${pid}" "${start}" >"${dir}/${record}"
     printf '%s\n' "${dir}"
 }
 
 sweep() {
-    local root="${1}" removed=0 freed=0 dir inodes
-    proc_start "$$" >/dev/null || return 0
+    local root="${1}" removed=0 freed=0 dir claimed inodes mine
+    absolute "${root}"
+    mine="$(proc_start "$$")" || return 0
     for dir in "${root}/${prefix}"-*; do
         [ ! -L "${dir}" ] || continue
         [ -n "$(find "${dir}/${record}" -maxdepth 0 -mmin "+${stale_minutes}" 2>/dev/null)" ] || continue
         ! owner_alive "${dir}/${record}" || continue
-        inodes="$(find "${dir}" 2>/dev/null | wc -l)" || true
-        rm -rf -- "${dir}" 2>/dev/null || true
-        [ ! -e "${dir}" ] || continue
+        [ ! -L "${dir}/${record}" ] || continue
+        claimed="${dir}.reap$$"
+        { printf '%s %s\n' "$$" "${mine}" >"${dir}/${record}"; } 2>/dev/null || continue
+        mv -T -- "${dir}" "${claimed}" 2>/dev/null || continue
+        inodes="$(find "${claimed}" 2>/dev/null | wc -l)" || true
+        find "${claimed}" -mindepth 1 -maxdepth 1 ! -name "${record}" -exec rm -rf -- {} + 2>/dev/null || true
+        [ -z "$(find "${claimed}" -mindepth 1 -maxdepth 1 ! -name "${record}" 2>/dev/null)" ] || continue
+        rm -rf -- "${claimed}" 2>/dev/null || true
+        [ ! -e "${claimed}" ] || continue
         removed=$((removed + 1))
         freed=$((freed + inodes))
     done
@@ -98,11 +148,12 @@ sweep() {
         echo "goldens-unused scratch: removed ${removed} stale copies a killed run left under ${root}, freeing ${freed} inodes (bd gqlc-7hyt)"
 }
 
+usage="usage: goldens-unused-scratch.sh new <root> <owner-pid> | sweep <root>"
 case "${1:-}" in
-    new) new "${2:?usage: goldens-unused-scratch.sh new <root> <owner-pid>}" "${3:?usage: goldens-unused-scratch.sh new <root> <owner-pid>}" ;;
-    sweep) sweep "${2:?usage: goldens-unused-scratch.sh sweep <root>}" ;;
+    new) new "${2:-}" "${3:-}" ;;
+    sweep) sweep "${2:-}" ;;
     *)
-        echo "usage: goldens-unused-scratch.sh new <root> <owner-pid> | sweep <root>" >&2
+        echo "${usage}" >&2
         exit 2
         ;;
 esac
