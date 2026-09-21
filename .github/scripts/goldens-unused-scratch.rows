@@ -1,0 +1,247 @@
+#!/usr/bin/env bash
+# Rows for .github/scripts/goldens-unused-scratch.sh, run by `just
+# test-goldens-unused-scratch` (bd gqlc-7hyt).
+#
+# What is under test: the sweep removes the scratch copy a killed `just
+# check-goldens-unused` left behind, and removes nothing else — above all not
+# the copy a live run is linting. Every rule the script's head comment lists has
+# a row that fails when the rule is dropped, and the last row is the whole
+# failure end to end: the real recipe, SIGKILLed, and the next run reaping it.
+#
+# $1 is the script under test and $2 the justfile whose check-goldens-unused the
+# last row runs. They are parameters so that a mutation run can point these rows
+# at a mutated copy of the tree.
+#
+# NOTHING HERE TOUCHES THE HOST'S /tmp BY NAME. Every root swept is a directory
+# under this file's own mktemp, and the recipe is run with scratch_root pointed
+# at one.
+#
+# Every fixture is made by the script's own `new`, so these rows spell neither
+# the copy's name nor its record's. "The record" is, to them, whatever regular
+# file `new` left at the top of the copy; ageing a copy means back-dating that.
+# One row rewrites the record's last field, which is the one thing they know
+# about its contents.
+set -uo pipefail
+
+tool_arg="${1:?usage: goldens-unused-scratch.rows <script> <justfile>}"
+justfile_arg="${2:?usage: goldens-unused-scratch.rows <script> <justfile>}"
+[ -f "${tool_arg}" ] || { echo "error: ${tool_arg} is not a file" >&2; exit 1; }
+[ -f "${justfile_arg}" ] || { echo "error: ${justfile_arg} is not a file" >&2; exit 1; }
+tool="$(cd "$(dirname "${tool_arg}")" && pwd)/$(basename "${tool_arg}")"
+tree="$(cd "$(dirname "${justfile_arg}")" && pwd)"
+justfile="${tree}/$(basename "${justfile_arg}")"
+
+scratch="$(mktemp -d)"
+owners=()
+recipe_pgid=""
+cleanup() {
+    [ -z "${recipe_pgid}" ] || kill -9 -- "-${recipe_pgid}" 2>/dev/null
+    [ "${#owners[@]}" -eq 0 ] || kill -9 "${owners[@]}" 2>/dev/null
+    rm -rf "${scratch}"
+}
+trap cleanup EXIT
+# just writes each shebang recipe body to a temp file before running it.
+export TMPDIR="${scratch}/tmp"
+mkdir -p "${TMPDIR}"
+
+pass=0
+fail=0
+row() {
+    local name="$1" verdict="$2" detail="$3"
+    if [ "${verdict}" = PASS ]; then
+        pass=$((pass + 1))
+        printf '  PASS  %-40s %s\n' "${name}" "${detail}"
+    else
+        fail=$((fail + 1))
+        printf '  FAIL  %-40s %s\n' "${name}" "${detail}" >&2
+    fi
+}
+
+# A fresh root per row, so a row's verdict is about its own fixture.
+root=""
+new_root() { root="${scratch}/root.${1}"; mkdir -p "${root}"; }
+
+# A process these rows own, to stand as a copy's owner. `live_owner` leaves it
+# running until cleanup; `kill_owner` kills AND REAPS it, because a zombie still
+# has its /proc entry and the script reads one as alive.
+owner=""
+live_owner() { sleep 600 >/dev/null 2>&1 & owner=$!; owners+=("${owner}"); }
+kill_owner() { kill -9 "${1}" 2>/dev/null; wait "${1}" 2>/dev/null; }
+
+# A copy under ${root} owned by ${owner}, holding three entries besides its
+# record: five inodes with the directory itself. Leaves its path in copy.
+copy=""
+new_copy() {
+    copy="$("${tool}" new "${root}" "${owner}")" || copy=""
+    [ -n "${copy}" ] && mkdir "${copy}/sub" && : >"${copy}/sub/a" && : >"${copy}/sub/b"
+}
+age() { find "${1}" -maxdepth 1 -type f -exec touch -d "${2}" {} +; }
+
+rc=0; out=""
+sweep() { out="$("${tool}" sweep "${root}" 2>"${scratch}/err")"; rc=$?; }
+
+# kept NAME: the copy is whole and the sweep was silent. removed NAME N INODES:
+# the copy is gone and the ONE line says so, whole.
+kept() {
+    if [ "${rc}" -eq 0 ] && [ -z "${out}" ] && [ -f "${copy}/sub/a" ] && [ -f "${copy}/sub/b" ]; then
+        row "${1}" PASS "kept, and the sweep said nothing"
+    else
+        row "${1}" FAIL "rc=${rc}, expected 0, silence and the copy whole; stdout: ${out}; stderr: $(cat "${scratch}/err"); left: $(ls -A "${root}")"
+    fi
+}
+removed() {
+    local expect="goldens-unused scratch: removed ${2} stale copies a killed run left under ${root}, freeing ${3} inodes (bd gqlc-7hyt)"
+    if [ "${rc}" -eq 0 ] && [ "${out}" = "${expect}" ] && [ ! -e "${copy}" ]; then
+        row "${1}" PASS "${out#goldens-unused scratch: }"
+    else
+        row "${1}" FAIL "rc=${rc}, expected 0 and '${expect}'; stdout: ${out}; stderr: $(cat "${scratch}/err"); left: $(ls -A "${root}")"
+    fi
+}
+
+# --- the script alone -----------------------------------------------------
+new_root empty
+sweep
+if [ "${rc}" -eq 0 ] && [ -z "${out}" ]; then
+    row empty-root-is-silent PASS "rc=0"
+else
+    row empty-root-is-silent FAIL "rc=${rc}, expected 0 and silence; stdout: ${out}; stderr: $(cat "${scratch}/err")"
+fi
+
+# The positive: old, and its owner gone. A live run's young copy sits beside it
+# and must still be there, so the line's count is a count and not a glob's.
+new_root stale
+live_owner; new_copy; beside="${copy}"
+live_owner; new_copy; kill_owner "${owner}"; age "${copy}" '3 hours ago'
+sweep
+if [ -f "${beside}/sub/a" ]; then
+    removed stale-and-dead-is-removed 1 5
+else
+    row stale-and-dead-is-removed FAIL "the live young copy beside it went too; stdout: ${out}"
+fi
+
+new_root two
+live_owner; new_copy; kill_owner "${owner}"; age "${copy}" '3 hours ago'; first="${copy}"
+live_owner; new_copy; kill_owner "${owner}"; age "${copy}" '3 hours ago'
+sweep
+if [ ! -e "${first}" ]; then
+    removed two-stale-are-counted-once-each 2 10
+else
+    row two-stale-are-counted-once-each FAIL "the first copy is still there; stdout: ${out}"
+fi
+
+# The row this file exists for: however old, a copy whose owner runs is a gate
+# in progress. A lock wait alone can hold one for most of an hour.
+new_root alive
+live_owner; new_copy; age "${copy}" '3 hours ago'
+sweep
+kept old-but-owner-alive-is-kept
+
+# Age on its own account: the owner test reads this host's process table, so an
+# owner it cannot see reads as dead, and age is all that protects that copy.
+new_root young
+live_owner; new_copy; kill_owner "${owner}"
+sweep
+kept young-but-owner-dead-is-kept
+
+# The threshold is held above the four lock waits a live run can spend (50
+# minutes), not merely above zero.
+new_root hour
+live_owner; new_copy; kill_owner "${owner}"; age "${copy}" '60 minutes ago'
+sweep
+kept an-hour-old-and-owner-dead-is-kept
+
+# A pid is reused; the start tick is what says the process holding it is not
+# the owner. Old, the pid alive, the tick another's.
+new_root reused
+live_owner; new_copy
+find "${copy}" -maxdepth 1 -type f -exec sed -i -E 's/ [0-9]+$/ 1/' {} +
+age "${copy}" '3 hours ago'
+sweep
+removed reused-pid-is-not-the-owner 1 5
+
+# A record nobody can read an owner out of says nothing about death.
+new_root unparsed
+live_owner; new_copy; kill_owner "${owner}"
+find "${copy}" -maxdepth 1 -type f -exec truncate -s 0 {} +
+age "${copy}" '3 hours ago'
+sweep
+kept unparsed-record-is-kept
+
+# Somebody else's directory under this name: old, no record.
+new_root unmarked
+live_owner; new_copy; kill_owner "${owner}"
+find "${copy}" -maxdepth 1 -type f -delete
+touch -d '3 hours ago' "${copy}"
+sweep
+kept unmarked-directory-is-kept
+
+# A symlink under this name, to a copy that is stale by every other rule. The
+# link stays and the sweep does not reach through it.
+new_root elsewhere; elsewhere="${root}"
+live_owner; new_copy; kill_owner "${owner}"; age "${copy}" '3 hours ago'
+new_root symlink
+ln -s "${copy}" "${root}/$(basename "${copy}")"
+sweep
+if [ -L "${root}/$(basename "${copy}")" ]; then
+    kept symlink-is-not-followed
+else
+    row symlink-is-not-followed FAIL "the link itself was removed; stdout: ${out}"
+fi
+# The control for the row above: the same target IS stale where it really is.
+root="${elsewhere}"
+sweep
+removed symlink-target-was-stale-in-place 1 5
+
+# --- the real recipe, SIGKILLed -------------------------------------------
+# The defect as filed. The recipe runs in a session of its own so that the
+# whole process group can be killed the way a watchdog kills one, and is killed
+# once the module copy has started landing. Its copy must still be there —
+# otherwise this row measured nothing — and the NEXT run of the recipe must
+# remove it, say so, pass, and leave the root empty behind itself. That second
+# run is the recipe and not the script, because what ties the two together is a
+# line in the recipe's body that nothing else holds: the sweep being called at
+# all, and `new` being what makes the directory.
+real_just="$(command -v just)" || real_just=""
+if [ -z "${real_just}" ] || ! command -v setsid >/dev/null 2>&1; then
+    row killed-run-is-reaped-by-the-next FAIL "no just or no setsid on PATH, so the recipe cannot be run and killed"
+else
+    new_root recipe
+    recipe=("${real_just}" --justfile "${justfile}" --tempdir "${TMPDIR}"
+        scratch_root="${root}" check-goldens-unused)
+    # One subshell and an exec, so that $! is the session leader's own pid.
+    (cd "${tree}" && exec setsid "${recipe[@]}") >"${scratch}/killed.log" 2>&1 &
+    recipe_pgid=$!
+    landed=0
+    for _ in $(seq 1 3600); do
+        kill -0 "${recipe_pgid}" 2>/dev/null || break
+        landed="$(find "${root}" -mindepth 1 2>/dev/null | wc -l)"
+        [ "${landed}" -lt 100 ] || break
+        sleep 0.05
+    done
+    killed=no
+    ! kill -9 -- "-${recipe_pgid}" 2>/dev/null || killed=yes
+    wait "${recipe_pgid}" 2>/dev/null
+    recipe_pgid=""
+    left="$(find "${root}" -mindepth 1 | wc -l)"
+    copy="$(find "${root}" -mindepth 1 -maxdepth 1 -type d)"
+    if [ "${killed}" = no ]; then
+        row killed-run-leaves-its-copy FAIL "there was no process group to SIGKILL, so the recipe ended on its own and this row measured nothing; its output: $(tail -n 5 "${scratch}/killed.log")"
+    elif [ "${left}" -lt 100 ] || [ "$(printf '%s\n' "${copy}" | wc -l)" -ne 1 ]; then
+        row killed-run-leaves-its-copy FAIL "the killed run left ${left} entries under its root, expected one copy of 100 or more, so there is nothing for the next run to reap; its output: $(tail -n 5 "${scratch}/killed.log")"
+    else
+        row killed-run-leaves-its-copy PASS "${left} inodes survived the SIGKILL"
+        age "${copy}" '3 hours ago'
+        out="$(cd "${tree}" && "${recipe[@]}" 2>"${scratch}/err")"
+        rc=$?
+        expect="goldens-unused scratch: removed 1 stale copies a killed run left under ${root}, freeing ${left} inodes (bd gqlc-7hyt)"
+        if [ "${rc}" -eq 0 ] && printf '%s\n' "${out}" | command grep -Fxq -- "${expect}" \
+            && [ -z "$(ls -A "${root}")" ]; then
+            row killed-run-is-reaped-by-the-next PASS "the next run passed, left nothing, and said: ${expect#goldens-unused scratch: }"
+        else
+            row killed-run-is-reaped-by-the-next FAIL "rc=${rc}, expected 0, an empty root and the line '${expect}'; stdout: ${out}; stderr: $(tail -n 5 "${scratch}/err"); left: $(ls -A "${root}")"
+        fi
+    fi
+fi
+
+echo "goldens-unused-scratch: ${pass} passed, ${fail} failed"
+[ "${fail}" -eq 0 ]

@@ -1287,6 +1287,21 @@ test-gates-justfile-format:
 test-complexity-exit-code: sweep-discovery-probes ensure-golangci
     @.githooks/complexity-exit-code.rows justfile
 
+# The rows for .github/scripts/goldens-unused-scratch.sh, which makes the scratch
+# copy check-goldens-unused lints and reaps the ones a SIGKILLed run left (bd
+# gqlc-7hyt). ~4.5s on the dev host: the script's rows are milliseconds, and the
+# last one runs the real recipe twice — once to be killed, once to be seen
+# reaping what that left — because the call from the recipe into the script is
+# what no row against the script alone can hold.
+#
+# ENROLLED IN `just gates` AND IN ci.yml's codegen-fence job, the way
+# test-complexity-exit-code above rides `lint`: that job already provides Go,
+# just and the pinned golangci-lint, which the last row's recipe needs, and it is the
+# context the recipe under test belongs to. Every root these rows sweep is under
+# their own mktemp, so they never touch a copy that is somebody's.
+test-goldens-unused-scratch:
+    @.github/scripts/goldens-unused-scratch.rows .github/scripts/goldens-unused-scratch.sh justfile
+
 # health check for local dev environment; extend as new drift modes emerge
 doctor: check-hooks check-worktree-upstream check-shared-config check-beads-export check-push-keepalive
     @echo "ok"
@@ -2766,6 +2781,9 @@ gates:
     # sorts and prints beside it and cannot be mistaken for it (bd gqlc-lw1j8).
     run 'live-smoke[docker-free]' just test-codegen
     run codegen-fence  just test-codegen-fence
+    # The rows for the scratch copy that recipe makes and reaps (bd gqlc-7hyt).
+    # ci.yml's codegen-fence job runs the same command.
+    run codegen-fence  just test-goldens-unused-scratch
     run actionlint     just actionlint
     run tidy           just tidy-check
     run_under_pinned_just tidy just check-justfile-format
@@ -3179,6 +3197,18 @@ test-codegen-fence: sweep-discovery-probes ensure-golangci check-codegen-externa
 # cache sits under the copy too: every run's paths are new, so entries written
 # to this checkout's cache would never be read again.
 #
+# A TRAP DOES NOT RUN UNDER SIGKILL, which is how a session on the dev host ends
+# at a quota wall (bd gqlc-7hyt). Measured 2026-09-20: killed mid-lint, by its
+# shell or by its process group, the copy stayed, 2644 and 2639 inodes of a
+# tmpfs capped at 1048576; no child outlived either kill by a second. So the
+# directory is made by .github/scripts/goldens-unused-scratch.sh, which records
+# this shell's pid and start tick in it, and every run first removes the copies
+# under scratch_root whose record is over 90 minutes old AND whose owner is
+# dead. That file has the rule and what still leaks; its rows are `just
+# test-goldens-unused-scratch`. Measured the same day on the dev host: the sweep
+# takes ~2 ms over a scratch_root holding none, and 0.16-0.19 s to remove five
+# whole copies (10715 inodes).
+#
 # The whole recipe adds ~2 s to the fence on the dev host (2026-09-20), most of
 # it the one full-module run; the witness and lock rows read two packages each.
 [private]
@@ -3191,7 +3221,12 @@ check-goldens-unused: sweep-discovery-probes ensure-golangci
     declared_raw="$(scope declared)" || exit 1
     taglist="$(printf '%s\n' "${declared_raw}" | sed '/^$/d' | paste -sd,)"
 
-    scratch="$(mktemp -d "{{ scratch_root }}/gqlc-goldens-unused-XXXXXX")"
+    # The copies a killed run left go first, and a sweep that breaks is said
+    # and not fatal: what it guards is the host's inode budget, not a golden.
+    copy_tool=.github/scripts/goldens-unused-scratch.sh
+    "${copy_tool}" sweep {{ quote(scratch_root) }} \
+        || echo "warning: ${copy_tool} sweep exited $? over {{ scratch_root }}; nothing was reaped (bd gqlc-7hyt)" >&2
+    scratch="$("${copy_tool}" new {{ quote(scratch_root) }} "$$")"
     trap 'rm -rf "${scratch}"' EXIT
 
     # The tags are the root config's own, read by the reader
