@@ -2625,17 +2625,20 @@ fmt-check: ensure-golangci
 #                required context this recipe does not cover rather than a
 #                nightly whose red arrives later. It carries -count=1, so it
 #                is the slower of the two to re-run.
-#   tidy (part)  three of that job's ten steps read state that does not exist
+#   tidy (part)  three of that job's steps read state that does not exist
 #                before the PR: check-pr-closes.py wants the body,
 #                check-pr-authors.sh the commit list, check-cron-freshness.sh
 #                the Actions API. Unrunnable here by construction, not by
-#                choice. The other seven DO run — tidy-check and
+#                choice. These DO run — tidy-check and
 #                check-doc-ordinals.py and
 #                check-open-pr-ordinals.py --self-test and
 #                next-doc-ordinal.py --self-test and
-#                bd-export-monotonic-local and check-label-lengths.py as their
+#                bd-export-monotonic-local and check-label-lengths.py and
+#                test-bd-prime-guard and test-setup-go-assertion as their
 #                own arms, and `just lint-hooks .github/scripts` because `just
-#                lint` already depends on it.
+#                lint` already depends on it. One step is runnable here and
+#                is not an arm: `just --fmt --check --unstable` (read
+#                2026-09-20 against ci.yml's tidy job; bd gqlc-i2lw).
 #
 # `just fmt-check` is an arm but is NOT a CI job: no workflow calls it. It is
 # here because it prints a diff where `golangci-lint run` prints issues, and it
