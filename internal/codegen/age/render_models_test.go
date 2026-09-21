@@ -410,9 +410,9 @@ func TestTheRecordFieldHelperIsDeclaredOnlyWhereARecordReadsAField(t *testing.T)
 			require.Equal(t, row.calls, called,
 				"the row's own premise is off: a decoded %s was expected to call %s %t", row.width, helper, row.calls)
 			require.Equal(t, called, declared,
-				"a read-only batch of one %s property declares %s = %t and calls it = %t; declared with no "+
+				"a read-only batch of one %s property declares %s = %t and calls it = %t. Declared with no "+
 					"caller is an unexported function nothing reaches, which compiles and which only the "+
-					"golden would record",
+					"golden would record; called with no declaration does not compile",
 				row.width, helper, declared, called)
 		})
 	}
