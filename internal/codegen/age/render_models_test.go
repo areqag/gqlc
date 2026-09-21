@@ -13,6 +13,7 @@ import (
 	"github.com/areqag/gqlc/internal/codegen"
 	"github.com/areqag/gqlc/internal/codegen/age"
 	"github.com/areqag/gqlc/internal/graph"
+	"github.com/areqag/gqlc/internal/queryfile"
 )
 
 // propertyCarriers is every Go type text the property table names, read
@@ -502,6 +503,230 @@ func helperDeclaredAndCalled(t *testing.T, src []byte, name string) (declared, c
 			}
 			return true
 		})
+	}
+	return declared, called
+}
+
+// TestEveryBoundRecordsEncoderIsDeclaredAndEveryDeclaredOneIsCalled is
+// TestTheRecordFieldHelperIsDeclaredOnlyWhereARecordReadsAField turned to
+// the ENCODE direction, where the helper is not one name behind one bool
+// but one name PER RECORD behind a set: for each of
+// encodeRecord<h> and decodeRecord<h>, the names the emission calls are
+// the names models.go declares, record by record and counted.
+//
+// The call sites are in two files. A bound parameter's encoder is named
+// in the query file and a record field's in the encoder of the record it
+// sits in, so the batch is rendered whole and both files are walked; the
+// closure sweep above reads models.go alone and cannot see the first.
+//
+// What each row holds, each measured as a mutant of the mark (bd
+// gqlc-oqvz):
+//
+//   - two different records bound in one batch. A mark taken only for the
+//     first record bound (`len(h.recordEncoders) == 0`) leaves the second
+//     one's encoder called and undeclared, and the whole age and
+//     conformance packages passed it: no fixture binds two. The mirror
+//     image, the set REPLACED at each mark so that only the last record
+//     bound is in it, fails this same row on the first record. The check
+//     is per record, so both of those fail under any row binding two;
+//   - the same two in the other order, because an ORDER-DEPENDENT mark
+//     needs both orders and the row above is one. A record marked only
+//     if its encoding sorts after every one already marked passes every
+//     other row binding two except the field-less row and the
+//     one-Go-type row, which happen to descend as well: recordWidth's
+//     encoding sorts before small's. Its mirror fails on the row above
+//     and passes here;
+//   - a field-less record between two others. A mark that RESETS the set
+//     when the record has no field drops the one bound before it, and no
+//     other row binds one. It descends from its first bind to its second,
+//     so it fails under the ascending-only mark too;
+//   - one record bound twice declares ONE encoder. The walk keeps repeats,
+//     so a record planned once per bind shows as one name declared twice,
+//     which parses and does not compile. It takes BOTH dedupes gone to
+//     show here — needRecordEncode's early return and markRecord's
+//     Contains — because for a repeated bind each covers for the other;
+//   - one record read and bound is where markRecord's Contains shows
+//     alone, since the two directions reach it past two different early
+//     returns. It also holds an encode mark that returns early on the
+//     shared h.records list rather than on its own direction's set: that
+//     one sees the read, marks nothing, and the bind calls an undeclared
+//     encoder;
+//   - read only and bind only are the two leaks. An encoder marked on a
+//     READ is declared with no caller, and so is a decoder marked on a
+//     bind. Marked bare, either one names a field helper nothing declares
+//     and the closure sweep says so; marked together with its fields'
+//     helpers it is closed and compiles, and the sweep passes it;
+//   - a record bound only as another's FIELD. Its call site is in
+//     models.go, and it fails under the first row's two mutants with one
+//     parameter and no second bind;
+//   - a record bound inside a LIST beside a different one bound NULLABLE.
+//     A mark withheld from a list's element, or from a nullable
+//     parameter, leaves that record's encoder named by the combinator
+//     around it and undeclared. No other test in the age or conformance
+//     packages failed under either, and no other row here under the
+//     second;
+//   - a list of NULLABLE records. forParam peels the element's star into
+//     a variable of its own, and a mark withheld when it is set passes the
+//     row above, whose list elements are NOT NULL;
+//   - two records of one Go type: `zip_code` and `zipCode` both carry as
+//     the same struct text and are two encodings, so two encoders. Records
+//     dedupe on the encoding today and this passes; a dedupe keyed on the
+//     Go type text, which is how the list wrappers dedupe (bd gqlc-3s7q),
+//     declares one and calls two. `zipCode` sorts before `zip_code`, so
+//     this row descends and fails under the ascending-only mark as well.
+func TestEveryBoundRecordsEncoderIsDeclaredAndEveryDeclaredOneIsCalled(t *testing.T) {
+	small := graph.RecordOf([]graph.RecordField{{Name: "x", Type: graph.TypeInt32, NotNull: true}})
+	around := graph.RecordOf([]graph.RecordField{{Name: "inner", Type: small, NotNull: true}})
+	empty := graph.RecordOf(nil)
+	snake := graph.RecordOf([]graph.RecordField{{Name: "zip_code", Type: graph.TypeInt32, NotNull: true}})
+	camel := graph.RecordOf([]graph.RecordField{{Name: "zipCode", Type: graph.TypeInt32, NotNull: true}})
+	snakeTy, _ := age.TypeMap{}.Property(snake)
+	camelTy, _ := age.TypeMap{}.Property(camel)
+	require.Equal(t, snakeTy, camelTy,
+		"the two field names no longer mangle to one Go field, so the row binding both is two records of two Go types")
+
+	for _, row := range []struct {
+		name     string
+		reads    []graph.PropertyType
+		binds    []boundWidth
+		encoders []graph.PropertyType
+		decoders []graph.PropertyType
+	}{
+		{
+			name: "two records bound", binds: []boundWidth{{width: recordWidth}, {width: small}},
+			encoders: []graph.PropertyType{recordWidth, small},
+		},
+		{
+			name: "the same two in the other order", binds: []boundWidth{{width: small}, {width: recordWidth}},
+			encoders: []graph.PropertyType{recordWidth, small},
+		},
+		{
+			name: "a field-less record between two others", binds: []boundWidth{{width: recordWidth}, {width: empty}, {width: small}},
+			encoders: []graph.PropertyType{recordWidth, empty, small},
+		},
+		{
+			name: "one record bound twice", binds: []boundWidth{{width: small}, {width: small}},
+			encoders: []graph.PropertyType{small},
+		},
+		{
+			name: "one record read and bound", reads: []graph.PropertyType{recordWidth}, binds: []boundWidth{{width: recordWidth}},
+			encoders: []graph.PropertyType{recordWidth}, decoders: []graph.PropertyType{recordWidth},
+		},
+		{
+			name: "read only", reads: []graph.PropertyType{recordWidth},
+			decoders: []graph.PropertyType{recordWidth},
+		},
+		{
+			name: "bind only", binds: []boundWidth{{width: recordWidth}},
+			encoders: []graph.PropertyType{recordWidth},
+		},
+		{
+			name: "a record bound as a field", binds: []boundWidth{{width: around}},
+			encoders: []graph.PropertyType{around, small},
+		},
+		{
+			name: "a list of one and a nullable other", binds: []boundWidth{{width: graph.ListOf(recordWidth, true)}, {width: small, nullable: true}},
+			encoders: []graph.PropertyType{recordWidth, small},
+		},
+		{
+			name: "a list of nullable records", binds: []boundWidth{{width: graph.ListOf(recordWidth, false)}},
+			encoders: []graph.PropertyType{recordWidth},
+		},
+		{
+			name: "two records of one Go type", binds: []boundWidth{{width: snake}, {width: camel}},
+			encoders: []graph.PropertyType{snake, camel},
+		},
+	} {
+		t.Run(row.name, func(t *testing.T) {
+			files := renderRecordBatch(t, row.reads, row.binds)
+			for _, family := range []struct {
+				prefix string
+				want   []graph.PropertyType
+			}{{"encode", row.encoders}, {"decode", row.decoders}} {
+				want := make([]string, len(family.want))
+				for i, w := range family.want {
+					want[i] = family.prefix + codegen.RecordHelperSuffix(w)
+				}
+				declared, called := recordHelpersDeclaredAndCalled(t, family.prefix+"Record", files)
+				require.ElementsMatch(t, want, called,
+					"these are not the %sRecord helpers the batch calls. Either the row's own premise is off, or "+
+						"one that calls another is itself undeclared and its call sites went with it: models.go declares %v",
+					family.prefix, declared)
+				require.ElementsMatch(t, called, declared,
+					"the batch calls the %sRecord helpers %v and models.go declares %v. Declared with no caller "+
+						"compiles and only a golden would record it; called with no declaration, or declared "+
+						"twice, does not compile",
+					family.prefix, called, declared)
+			}
+		})
+	}
+}
+
+// boundWidth is one bound parameter of a row above.
+type boundWidth struct {
+	width    graph.PropertyType
+	nullable bool
+}
+
+// renderRecordBatch renders models.go and the query file for one entity
+// reading the given widths and one query binding the given parameters,
+// both in the order given. The helpers are marked the way generate marks
+// them: the entities first, then the query's parameters.
+func renderRecordBatch(t *testing.T, reads []graph.PropertyType, binds []boundWidth) [][]byte {
+	t.Helper()
+
+	var entities []age.WiredEntity
+	if len(reads) > 0 {
+		entities = entityOfWidths(t, reads)
+	}
+	params := make([]codegen.Param, len(binds))
+	for i, b := range binds {
+		goType, ok := age.TypeMap{}.Property(b.width)
+		require.True(t, ok, "this backend no longer carries %s, so the row is stale", b.width)
+		params[i] = codegen.Param{
+			RawName: "p" + strconv.Itoa(i), Field: "P" + strconv.Itoa(i), GoType: goType, Width: b.width, Nullable: b.nullable,
+		}
+	}
+	q := codegen.Query{
+		NamedQuery:  codegen.NamedQuery{Name: "Q", SourceText: "MATCH (e:E) RETURN e.id", Cardinality: queryfile.CardinalityExec},
+		MethodName:  "Q",
+		Bare:        "q",
+		ParamFields: params,
+	}
+
+	var h age.Helpers
+	h.ForEntities(entities)
+	age.HelpersForParams(&h, params)
+	return [][]byte{age.RenderModels("models", entities, h), age.RenderCypherFile("models", []codegen.Query{q})}
+}
+
+// recordHelpersDeclaredAndCalled parses one emitted package and returns
+// the top-level funcs it declares under a name prefix, REPEATS KEPT, and
+// the distinct names under that prefix its func bodies spell.
+func recordHelpersDeclaredAndCalled(t *testing.T, prefix string, files [][]byte) (declared, called []string) {
+	t.Helper()
+
+	seen := map[string]bool{}
+	for _, src := range files {
+		file, err := parser.ParseFile(token.NewFileSet(), "emitted.go", src, parser.SkipObjectResolution)
+		require.NoError(t, err, "the emitted file does not parse:\n%s", src)
+
+		for _, d := range file.Decls {
+			fn, ok := d.(*ast.FuncDecl)
+			if !ok || fn.Body == nil {
+				continue
+			}
+			if fn.Recv == nil && strings.HasPrefix(fn.Name.Name, prefix) {
+				declared = append(declared, fn.Name.Name)
+			}
+			ast.Inspect(fn.Body, func(n ast.Node) bool {
+				if id, ok := n.(*ast.Ident); ok && strings.HasPrefix(id.Name, prefix) && !seen[id.Name] {
+					seen[id.Name] = true
+					called = append(called, id.Name)
+				}
+				return true
+			})
+		}
 	}
 	return declared, called
 }
