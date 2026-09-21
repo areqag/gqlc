@@ -75,11 +75,11 @@ func TestTemporalUsesAccumulatesListPtrRegardlessOfParameterOrder(t *testing.T) 
 //
 // Disjointness is the claim, not merely that the new bits are reachable. The
 // two helpers have incompatible parameter types — []*Date and []Date — so
-// whichever one paramBindExpr names, the other one is not called by anything;
-// and an unexported function nothing calls fails the emitted package's own lint
-// fence, reddening the fixture rather than emitting a dead line. Marking both
-// would therefore break every batch that binds either shape, which is a wider
-// failure than the one this bead is about.
+// whichever one paramBindExpr names, the other one is not called by anything.
+// Marking both would therefore leave a dead unexported helper in every batch
+// that binds either shape, and nothing downstream would say so: it compiles,
+// and the fence's linter skips every generated file, so the next regenerate
+// records it (bd gqlc-nv8e). These rows are what would.
 //
 // The rows are held apart by carrier, not just by row, because conversionUses
 // folds into one map keyed by carrier name: two Date rows in one Prepared would

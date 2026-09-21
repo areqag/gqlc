@@ -140,9 +140,10 @@ type helpers struct {
 	// The checked narrowings, each emitted only where a width narrower
 	// than its carrier decodes. They are separate marks rather than one,
 	// because an emission that declares only integer widths would
-	// otherwise carry agtypeFloat32 and the math import it alone names,
-	// and an unexported function nothing calls fails the golden lint
-	// fence (bd gqlc-awtb).
+	// otherwise carry agtypeFloat32 and the math import it alone names
+	// (bd gqlc-awtb). The unused IMPORT is what a gate catches — it does
+	// not compile. The unused function alone compiles and no lint reads
+	// it: the fence's linter skips every generated file (bd gqlc-nv8e).
 	intAs       bool // agtypeIntAs — an integer width narrower than int64 decodes
 	narrowFloat bool // agtypeFloat32 — a FLOAT32 decodes
 
@@ -899,10 +900,11 @@ func renderModels(pkg string, entities []wiredEntity, h helpers) []byte {
 	for _, goType := range h.listHelpers() {
 		writeListHelper(&b, goType)
 	}
-	// The field helper is gated on a record having a field to read, not on
-	// a record existing: a record of no fields declares no call site, and
-	// an emitted helper nothing calls is a compile error in the generated
-	// package.
+	// The field helper is gated on a record DECODING (needRecord), which
+	// is wider than a record having a field to read: a record of no
+	// fields declares no call site and still marks it, so
+	// record_any_and_empty's golden carries the helper with no caller
+	// (bd gqlc-vvxn). That compiles, and no gate reports it (bd gqlc-nv8e).
 	if h.recordField {
 		writeRecordFieldHelper(&b)
 	}

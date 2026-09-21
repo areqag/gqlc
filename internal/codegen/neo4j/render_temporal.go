@@ -321,9 +321,8 @@ func isTemporalCarrier(goType string) bool {
 // Stopping at a star would hand narrowsANumericWidth a leaf of
 // `*[]*int32`, which is neither its own driver carrier nor a temporal
 // carrier nor "float32", so the gate would claim narrowInt is called
-// where it is not — and an unexported helper nothing calls fails the
-// emitted package's own lint fence, reddening the fixture rather than
-// merely emitting a dead line.
+// where it is not. That is a dead helper in the emitted package and no
+// gate reports it: see narrowsANumericWidth.
 func leafType(goType string) string {
 	for {
 		elem := strings.TrimPrefix(strings.TrimPrefix(goType, "*"), "[]")
@@ -440,9 +439,15 @@ func narrowCall(goType string, width graph.PropertyType, src string) string {
 //
 // Separately, because they are gated separately: a schema that narrows
 // only integers must not be handed narrowFloat32, and the `math` import
-// rides on the float helper alone. An unexported function nothing calls
-// fails the emitted package's own lint fence, so an over-broad gate
-// reds the fixture rather than merely emitting a dead line.
+// rides on the float helper alone.
+//
+// An over-broad answer is NOT caught downstream. An unexported function
+// nothing calls compiles, go vet is silent about it, and the fence's
+// golangci-lint skips every file carrying the generated header — which
+// is every golden — so the dead helper is simply recorded by the next
+// regenerate (measured, bd gqlc-nv8e; the gate is bd gqlc-ukzq). The
+// rows of TestNarrowsANumericWidthIgnoresRecords are what hold this
+// function, and they are the record shape and its two controls only.
 func narrowsANumericWidth(entities []codegen.Entity, prepared []codegen.Query, tm typeMap) (ints, floats bool) {
 	var n numericNarrowing
 	for _, e := range entities {
@@ -488,7 +493,8 @@ func (n *numericNarrowing) markWidth(goType string, width graph.PropertyType, tm
 		// reaches this far — but its narrowing is its own emitted
 		// helper, not narrowInt. Without this arm every schema
 		// declaring a record would be handed narrowInt with no
-		// caller, which the emitted package's lint fence fails.
+		// caller. TestNarrowsANumericWidthIgnoresRecords holds it;
+		// no lint does (see narrowsANumericWidth).
 		return
 	}
 	if leaf == "float32" {

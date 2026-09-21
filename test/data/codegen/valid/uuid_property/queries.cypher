@@ -69,10 +69,10 @@
 // OpenAccount is the write the live half drives, and binds every property so
 // the node it creates is one AccountWhole can decode.
 //
-// Between them these reach every helper renderUUIDConversions can emit, and
-// that is deliberate rather than thorough: an unexported function nothing
-// calls fails the emitted package's own lint fence, so a helper emitted for
-// no call site is a red fixture rather than a dead line.
+// Between them these reach every helper renderUUIDConversions can emit, so
+// each one's body is compiled and vetted by the fence here. That is coverage
+// of the helpers, not a guard on over-emission: a helper emitted for no call
+// site compiles, and the fence's linter skips generated files (bd gqlc-nv8e).
 
 // name: AccountWhole :one
 MATCH (a:Account) WHERE a.id = $id RETURN a

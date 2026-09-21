@@ -132,11 +132,12 @@ func TestRecordUseAnswersForExactlyTheSharedEncodingSet(t *testing.T) {
 		"conversionUses must answer for exactly the encodings RecordEncodings names — both are sorted, so this compares order too")
 }
 
-// TestRecordHelpersAreEmittedOnlyWhereCalled pins the gating. An
-// unexported function nothing calls fails the emitted package's own lint
-// fence, so a helper emitted for a direction the batch never reaches is
-// not a harmless spare — it is a red fixture. The reverse is the build
-// failure the invariant above describes.
+// TestRecordHelpersAreEmittedOnlyWhereCalled pins the gating. A helper
+// emitted for a direction the batch never reaches is an unexported
+// function nothing calls: it compiles, and the fence's linter skips every
+// generated file, so a regenerated golden records it and no lint reports
+// it (bd gqlc-nv8e). The reverse is the build failure the invariant above
+// describes.
 //
 // The imports are asserted with the same rows because they are gated on
 // the same reading: an encode-only file names fmt nowhere, since only a

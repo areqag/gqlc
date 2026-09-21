@@ -262,9 +262,10 @@ func methodDecl(t *testing.T, src, name string) *ast.FuncDecl {
 // test every arm of this gate uses to recognise an integer that needs
 // checking. But a record's narrowing is its own emitted helper, so a
 // schema whose only wide width is a record must be handed neither
-// numeric helper. This is not a cosmetic over-emission: an unexported
-// function nothing calls fails the emitted package's own lint fence, so
-// the wrong answer reds a fixture rather than adding a dead line.
+// numeric helper. Nothing downstream reports the wrong answer: a dead
+// unexported helper compiles, and the fence's linter skips every
+// generated file, so a regenerated golden records it (bd gqlc-nv8e).
+// This test is the guard, not a second opinion on one.
 //
 // The controls are the whole test. A gate that had stopped answering
 // yes to anything would pass the record rows alone, so int32 and
