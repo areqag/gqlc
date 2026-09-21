@@ -274,23 +274,6 @@ func agtypeList[T any](raw []byte, decode func([]byte) (T, error)) ([]T, error) 
 	return out, nil
 }
 
-// agtypeRecordField reads one member of a record's map. An absent key and
-// an explicit null are the same thing — no value here — and both answer
-// nil, because a record spells "this field has no value" both ways and a
-// reader that told them apart would report a difference the schema does
-// not declare.
-func agtypeRecordField[T any](fields map[string][]byte, key string, decode func([]byte) (T, error)) (*T, error) {
-	raw, ok := fields[key]
-	if !ok || string(bytes.TrimSpace(raw)) == "null" {
-		return nil, nil
-	}
-	out, err := decode(raw)
-	if err != nil {
-		return nil, fmt.Errorf("gqlc: field %q: %w", key, err)
-	}
-	return &out, nil
-}
-
 // decodeRecordd25fb0e0 checks an agtype map into a recordd25fb0e0.
 func decodeRecordd25fb0e0(raw []byte) (recordd25fb0e0, error) {
 	var out recordd25fb0e0
