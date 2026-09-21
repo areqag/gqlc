@@ -74,9 +74,9 @@ func run(args []string, out io.Writer) error {
 			"read no emitted package or the emitters stopped spelling decode<Entity> the way "+
 			"entityDecoders reads it", args[0])
 	}
-	fmt.Fprintf(out, "rooted %d entity decoders in %d packages, %d of them named by nothing else in "+
+	_, err = fmt.Fprintf(out, "rooted %d entity decoders in %d packages, %d of them named by nothing else in "+
 		"their package (bd gqlc-m1dk)\n", tally.decoders, tally.packages, tally.uncalled)
-	return nil
+	return err
 }
 
 // tally is what one run rooted. uncalled counts the decoders whose name appears

@@ -94,7 +94,10 @@ func TestNoPerUseDecoderInTheGoldensIsRooted(t *testing.T) {
 		if strings.Contains(filepath.Base(path), "age") {
 			driver = "age"
 		}
-		files, _ := filepath.Glob(filepath.Join(path, "*.go"))
+		files, err := filepath.Glob(filepath.Join(path, "*.go"))
+		if err != nil {
+			return err
+		}
 		for _, file := range files {
 			src, err := os.ReadFile(file)
 			if err != nil {
