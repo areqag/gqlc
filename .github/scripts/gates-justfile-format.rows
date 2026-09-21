@@ -1,0 +1,259 @@
+#!/usr/bin/env bash
+# Rows for the `gates` recipe's justfile-format arm, run by
+# `just test-gates-justfile-format` (bd gqlc-i2lw).
+#
+# What is under test: ci.yml's tidy job runs `just --fmt --check --unstable`
+# under the just that setup-just pins. `gates` runs the same check when the just
+# on PATH IS that pin, and otherwise SKIPS it — visibly, because the formatter is
+# --unstable and another just's verdict is not CI's in either direction. So a
+# pinned host must go red over an unformatted justfile, an unpinned host must
+# not, and the unpinned run must be impossible to read as a pass.
+#
+# $1 is the justfile under test. It is a parameter so that a mutation run can
+# point these rows at a mutated copy of the tree; what is read beside it is
+# listed at `tree` below.
+#
+# THE REAL `gates` BODY RUNS, under the real just, from a scratch copy of the
+# files it reads. Every arm in it is spelled `just <recipe>` or `python3 ...`
+# and resolved on PATH, so a PATH whose first directory holds a stub `just` and
+# a stub `python3` answers every OTHER arm green in milliseconds and leaves the
+# arm under test the only thing deciding. The stub hands two recipes back to the
+# real just — check-justfile-format and check-just-version — because their
+# bodies are under test too, and the remedy a row reads must be the recipe's
+# own words rather than the stub's.
+#
+# The stub encodes two beliefs about just: that `--version` prints `just X.Y.Z`,
+# and that `--fmt --check --unstable` exits non-zero over an unformatted file
+# and zero over a formatted one. The real-just rows at the bottom are the
+# witness for both.
+set -uo pipefail
+
+justfile_arg="${1:?usage: gates-justfile-format.rows <justfile>}"
+[ -f "${justfile_arg}" ] || { echo "error: ${justfile_arg} is not a file" >&2; exit 1; }
+src="$(cd "$(dirname "${justfile_arg}")" && pwd)"
+justfile_src="${src}/$(basename "${justfile_arg}")"
+
+real_just="$(command -v just)" || { echo "error: no just on PATH to run the recipes with" >&2; exit 1; }
+
+scratch="$(mktemp -d)"
+trap 'rm -rf "${scratch}"' EXIT
+# just writes each shebang recipe body to a temp file before running it.
+export TMPDIR="${scratch}/tmp"
+mkdir -p "${TMPDIR}"
+
+# The scratch tree: the justfile, the pin, and the comparison both recipes read.
+# A copy, so the pin-unreadable row can break the pin without touching the
+# checkout. The comparison is copied only if it exists, so that these rows can
+# be pointed at a justfile from before the arm and report RED row by row rather
+# than refusing to start.
+tree="${scratch}/tree"
+pin_rel=".github/actions/setup-just/just-version"
+cmp_rel=".github/scripts/just-version-vs-pin.sh"
+mkdir -p "${tree}/$(dirname "${pin_rel}")" "${tree}/$(dirname "${cmp_rel}")"
+cp "${justfile_src}" "${tree}/justfile"
+cp "${src}/${pin_rel}" "${tree}/${pin_rel}" || { echo "error: no pin at ${src}/${pin_rel}" >&2; exit 1; }
+[ ! -f "${src}/${cmp_rel}" ] || cp -p "${src}/${cmp_rel}" "${tree}/${cmp_rel}"
+pin_file="${tree}/${pin_rel}"
+pin="$(tr -d '[:space:]' <"${pin_file}")"
+# Any version that is not the pin. Not derived from the pin: a derived one that
+# came out equal to it would turn every mismatch row into a match row in silence.
+other=0.0.1
+[ "${pin}" != "${other}" ] || { echo "error: the pin is ${other}, which these rows use as the mismatch" >&2; exit 1; }
+
+stubs="${scratch}/stubs"
+log="${scratch}/just-calls.log"
+mkdir -p "${stubs}"
+cat >"${stubs}/just" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"${STUB_LOG}"
+case "$*" in
+    --version)
+        echo "just ${STUB_JUST_VERSION}" ;;
+    "--fmt --check --unstable")
+        [ "${STUB_FORMATTED}" = yes ] && exit 0
+        echo "stub: the formatter would change this justfile" >&2
+        exit 1 ;;
+    check-justfile-format | check-just-version)
+        exec "${STUB_REAL_JUST}" --justfile "${STUB_TREE}/justfile" "$@" ;;
+    *)
+        exit 0 ;;
+esac
+EOF
+printf '#!/usr/bin/env bash\nexit 0\n' >"${stubs}/python3"
+chmod +x "${stubs}/just" "${stubs}/python3"
+
+pass=0
+fail=0
+row() {
+    local name="$1" verdict="$2" detail="$3"
+    if [ "${verdict}" = PASS ]; then
+        pass=$((pass + 1))
+        printf '  PASS  %-36s %s\n' "${name}" "${detail}"
+    else
+        fail=$((fail + 1))
+        printf '  FAIL  %-36s %s\n' "${name}" "${detail}" >&2
+    fi
+}
+
+# Runs RECIPE from the scratch tree with VERSION on PATH and the formatter
+# answering FORMATTED (yes|no). Leaves rc, stdout in out, stderr in err, and
+# whether the formatter was invoked at all in fmt_ran.
+rc=0; out=""; err=""; fmt_ran=no
+run_recipe() {
+    local recipe="$1" version="$2" formatted="$3"
+    : >"${log}"
+    out="$(cd "${tree}" && PATH="${stubs}:${PATH}" STUB_LOG="${log}" \
+        STUB_JUST_VERSION="${version}" STUB_FORMATTED="${formatted}" \
+        STUB_REAL_JUST="${real_just}" STUB_TREE="${tree}" \
+        "${real_just}" --justfile "${tree}/justfile" "${recipe}" 2>"${scratch}/err")"
+    rc=$?
+    err="$(cat "${scratch}/err")"
+    fmt_ran=no
+    ! command grep -Fxq -- "--fmt --check --unstable" "${log}" || fmt_ran=yes
+}
+
+has_line() { printf '%s\n' "$1" | command grep -Fxq -- "$2"; }
+# The arm count out of a summary's closing line, or empty.
+graded() { printf '%s\n' "$1" | sed -n -E 's/^gates: all ([0-9]+) (graded arm\(s\) )?passed.*/\1/p'; }
+
+# What a skipped run must say, whole. The in-band line sits under the arm's own
+# header; the summary line sits in the NOT-covered list; the closing line
+# replaces "all N passed.", which a skipped run must never print.
+skip_inband() { echo "SKIPPED: just $1 is on PATH and CI pins ${pin}, so this arm did not run. ci.yml's tidy job runs it under the pin."; }
+skip_summary() { echo "       tidy (SKIPPED)    just check-justfile-format — just $1 is on PATH and CI pins ${pin}."; }
+skip_closing='^gates: all [0-9]+ graded arm\(s\) passed; 1 SKIPPED, which is not a pass \(NOT covered, above\)\.$'
+remedy="error: the justfile is not formatted as \`just --fmt --unstable\` would write it. Repair: just --fmt --unstable"
+
+# --- the pinned host --------------------------------------------------------
+
+run_recipe gates "${pin}" yes
+pinned_graded="$(graded "${out}")"
+if [ "${rc}" -eq 0 ] && [ "${fmt_ran}" = yes ] && [ -n "${pinned_graded}" ] \
+    && has_line "${out}" "gates: all ${pinned_graded} passed." \
+    && ! printf '%s\n%s\n' "${out}" "${err}" | command grep -q "SKIPPED"; then
+    row pinned-formatted-passes PASS "rc=0, formatter ran, ${pinned_graded} arms, nothing skipped"
+else
+    row pinned-formatted-passes FAIL "rc=${rc} fmt_ran=${fmt_ran} graded='${pinned_graded}', expected rc=0, the formatter run, 'gates: all N passed.' and no SKIPPED; tail: $(printf '%s\n' "${out}" | tail -n 3 | tr '\n' '|')"
+fi
+
+# THE BEAD'S CASE: before the arm, this run was green.
+run_recipe gates "${pin}" no
+if [ "${rc}" -eq 1 ] && [ "${fmt_ran}" = yes ] && has_line "${err}" "${remedy}" \
+    && has_line "${err}" "  just check-justfile-format"; then
+    row pinned-unformatted-fails PASS "rc=1, the arm is in the FAILED list, the remedy is named"
+else
+    row pinned-unformatted-fails FAIL "rc=${rc} fmt_ran=${fmt_ran}, expected rc=1 with the arm in the FAILED list and the line '${remedy}'; stderr tail: $(printf '%s\n' "${err}" | tail -n 4 | tr '\n' '|')"
+fi
+
+# --- the unpinned host ------------------------------------------------------
+
+# skips NAME VERSION FORMATTED: gates must not be red, must not have run the
+# formatter, and must say SKIPPED in all three places, naming both versions.
+skips() {
+    local name="$1" version="$2" formatted="$3" why=""
+    run_recipe gates "${version}" "${formatted}"
+    [ "${rc}" -eq 0 ] || why+=" rc=${rc}, expected 0;"
+    [ "${fmt_ran}" = no ] || why+=" the formatter RAN;"
+    has_line "${out}" "$(skip_inband "${version}")" || why+=" no in-band SKIPPED line;"
+    has_line "${out}" "$(skip_summary "${version}")" || why+=" no SKIPPED entry under NOT covered;"
+    printf '%s\n' "${out}" | command grep -Eq -- "${skip_closing}" || why+=" closing line does not say SKIPPED;"
+    ! printf '%s\n' "${out}" | command grep -Eq '^gates: all [0-9]+ passed\.$' || why+=" closing line claims all passed;"
+    if [ -z "${why}" ]; then
+        row "${name}" PASS "rc=0, formatter not run, SKIPPED in band, in the summary and on the closing line"
+    else
+        row "${name}" FAIL "${why} tail: $(printf '%s\n' "${out}" | tail -n 3 | tr '\n' '|')"
+    fi
+}
+
+skips unpinned-unformatted-skips "${other}" no
+# A skip must not depend on the file: the same answer over a formatted one.
+skips unpinned-formatted-skips "${other}" yes
+unpinned_graded="$(graded "${out}")"
+# The version is compared WHOLE: the pin is a proper prefix of this one.
+skips longer-patch-number-skips "${pin}0" no
+
+# A skipped arm is not a graded one. Counted, the closing line's N would claim
+# an arm that never ran.
+if [ -n "${pinned_graded}" ] && [ -n "${unpinned_graded}" ] \
+    && [ "$((pinned_graded - 1))" -eq "${unpinned_graded}" ]; then
+    row skipped-arm-is-not-counted PASS "${pinned_graded} graded when pinned, ${unpinned_graded} when skipped"
+else
+    row skipped-arm-is-not-counted FAIL "pinned run graded '${pinned_graded}', skipped run '${unpinned_graded}', expected one fewer"
+fi
+
+# --- check-just-version, the other reader of the comparison -----------------
+# Its answers are pinned whole, stdout and stderr both: it shares the comparison
+# with the arm above and keeps its own refusal. just's own `error: Recipe ...
+# failed` trailer is dropped before comparing; it is just's line, not the
+# recipe's — and its capital moved between releases (`Recipe` became `recipe`
+# somewhere before 1.58.0), so neither spelling is relied on.
+recipe_err() { printf '%s\n' "${err}" | command grep -v '^error: [Rr]ecipe `' || true; }
+
+run_recipe check-just-version "${pin}" yes
+if [ "${rc}" -eq 0 ] && [ "${out}" = "just ${pin} matches the pin (${pin_file})" ] && [ -z "$(recipe_err)" ]; then
+    row check-just-version-match PASS "rc=0, one line on stdout, nothing on stderr"
+else
+    row check-just-version-match FAIL "rc=${rc} stdout='${out}' stderr='$(recipe_err | tr '\n' '|')'"
+fi
+
+refusal="error: just ${other} is on PATH and this tree pins ${pin} (${pin_file}).
+       Install the pin:
+         curl --proto '=https' --tlsv1.2 -sSfL https://just.systems/install.sh \\
+           | bash -s -- --tag ${pin} --to \"\$HOME/.local/bin\""
+run_recipe check-just-version "${other}" yes
+if [ "${rc}" -eq 1 ] && [ -z "${out}" ] && [ "$(recipe_err)" = "${refusal}" ]; then
+    row check-just-version-mismatch PASS "rc=1, refusal names both versions and the install remedy"
+else
+    row check-just-version-mismatch FAIL "rc=${rc} stdout='${out}' stderr='$(recipe_err | tr '\n' '|')'"
+fi
+
+# --- a pin that cannot be read ----------------------------------------------
+# LAST among the stubbed rows, because it breaks the scratch tree's pin. "Could
+# not tell" is neither a match nor a mismatch: check-just-version refuses, and
+# gates goes RED rather than skipping — a skip here would be an arm that stops
+# grading on every host the day the pin file moves.
+printf 'not-a-version\n' >"${pin_file}"
+unreadable="error: ${pin_file} does not hold a just version (got 'not-a-version')."
+
+run_recipe check-just-version "${pin}" yes
+if [ "${rc}" -eq 1 ] && [ -z "${out}" ] && [ "$(recipe_err)" = "${unreadable}" ]; then
+    row check-just-version-unreadable-pin PASS "rc=1, reason names the file and what it held"
+else
+    row check-just-version-unreadable-pin FAIL "rc=${rc} stdout='${out}' stderr='$(recipe_err | tr '\n' '|')'"
+fi
+
+# gates names the pin relative to the tree it runs from.
+unreadable="error: ${pin_rel} does not hold a just version (got 'not-a-version')."
+run_recipe gates "${pin}" yes
+if [ "${rc}" -eq 1 ] && [ "${fmt_ran}" = no ] && has_line "${err}" "${unreadable}" \
+    && has_line "${err}" "  just check-justfile-format" \
+    && ! printf '%s\n' "${out}" | command grep -q "SKIPPED"; then
+    row unreadable-pin-fails-not-skips PASS "rc=1, the arm is in the FAILED list, nothing says SKIPPED"
+else
+    row unreadable-pin-fails-not-skips FAIL "rc=${rc} fmt_ran=${fmt_ran}, expected rc=1 with '${unreadable}', the arm in the FAILED list and no SKIPPED; stderr tail: $(printf '%s\n' "${err}" | tail -n 4 | tr '\n' '|')"
+fi
+
+# --- the real just ----------------------------------------------------------
+# The two beliefs the stub encodes, asked of the just on PATH whatever its
+# version: these are the formatter's exit statuses and the shape of --version,
+# not its opinion of any particular layout.
+tiny="${scratch}/tiny"
+mkdir -p "${tiny}"
+printf 'a:\n    echo hi\n' >"${tiny}/formatted.just"
+printf 'a:\n\techo hi\n\n\n\nb:\n  echo x\n' >"${tiny}/unformatted.just"
+"${real_just}" --justfile "${tiny}/formatted.just" --fmt --check --unstable >/dev/null 2>&1; good_rc=$?
+"${real_just}" --justfile "${tiny}/unformatted.just" --fmt --check --unstable >/dev/null 2>&1; bad_rc=$?
+if [ "${good_rc}" -eq 0 ] && [ "${bad_rc}" -ne 0 ]; then
+    row real-just-fmt-check-exit-status PASS "formatted rc=0, unformatted rc=${bad_rc}"
+else
+    row real-just-fmt-check-exit-status FAIL "formatted rc=${good_rc} (expected 0), unformatted rc=${bad_rc} (expected non-zero)"
+fi
+real_version="$("${real_just}" --version)"
+if printf '%s\n' "${real_version}" | command grep -Eq '^just [0-9]+\.[0-9]+\.[0-9]+$'; then
+    row real-just-version-shape PASS "${real_version}"
+else
+    row real-just-version-shape FAIL "'${real_version}' is not 'just X.Y.Z', which is the shape the comparison reads"
+fi
+
+echo "gates-justfile-format: ${pass} passed, ${fail} failed"
+[ "${fail}" -eq 0 ]
