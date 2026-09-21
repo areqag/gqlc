@@ -23,9 +23,7 @@
 #     symlink: one of that name is neither removed nor read through;
 #   - it holds the owner record, so a directory someone else made under that
 #     name is left alone. No line below asks that on its own: a copy with no
-#     record has no age to read and no owner to call dead, and either keeps it.
-#     A record that is a symlink is asked about, because the sweeper WRITES the
-#     record of a copy it takes and would write through one;
+#     record has no age to read and no owner to call dead, and either keeps it;
 #   - its owner is DEAD: no process has that pid, or the one that has it was not
 #     started at the recorded tick (field 22 of /proc/<pid>/stat), which is what
 #     tells a reused pid from the owner. A record is `<pid> <tick>`, each a
@@ -50,13 +48,13 @@
 # quiet over it rather than wrong.
 #
 # ONE SWEEPER REMOVES A COPY, AND A REMOVAL CUT SHORT IS FINISHED LATER. Before
-# it removes anything the sweeper writes ITSELF into the record and renames the
+# it removes anything the sweeper makes the record young again and renames the
 # copy, still inside the template. The rename is what arbitrates: of sweepers
-# that meet over a copy one wins it, and only the winner counts it. The record
-# is what keeps a claimed copy from being claimed again — it is young and its
-# owner runs — and what hands it on if the sweeper dies: then it is a copy with
-# a dead owner like any other, and the record is the last thing unlinked so
-# that it stays one.
+# that meet over a copy one wins it, and only the winner counts it. The young
+# record is what keeps a claimed copy from being claimed a second time while it
+# is being removed, and the record is the last thing unlinked, so that a
+# removal that dies part-way leaves a copy the rule above still reads — 90
+# minutes later, when the record is old again.
 #
 # WHAT STILL LEAKS, neither measured: a run killed between `new`'s mktemp and
 # its write of the record leaves one empty directory, and a sweeper killed
@@ -125,16 +123,15 @@ new() {
 }
 
 sweep() {
-    local root="${1}" removed=0 freed=0 dir claimed inodes mine
+    local root="${1}" removed=0 freed=0 dir claimed inodes
     absolute "${root}"
-    mine="$(proc_start "$$")" || return 0
+    proc_start "$$" >/dev/null || return 0
     for dir in "${root}/${prefix}"-*; do
         [ ! -L "${dir}" ] || continue
         [ -n "$(find "${dir}/${record}" -maxdepth 0 -mmin "+${stale_minutes}" 2>/dev/null)" ] || continue
         ! owner_alive "${dir}/${record}" || continue
-        [ ! -L "${dir}/${record}" ] || continue
         claimed="${dir}.reap$$"
-        { printf '%s %s\n' "$$" "${mine}" >"${dir}/${record}"; } 2>/dev/null || continue
+        touch -c -h "${dir}/${record}" 2>/dev/null || continue
         mv -T -- "${dir}" "${claimed}" 2>/dev/null || continue
         inodes="$(find "${claimed}" 2>/dev/null | wc -l)" || true
         find "${claimed}" -mindepth 1 -maxdepth 1 ! -name "${record}" -exec rm -rf -- {} + 2>/dev/null || true

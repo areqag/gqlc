@@ -193,6 +193,10 @@ unwritable_record overlong-tick-is-kept 's/ [0-9]+$/ 111111111111111111111/'
 unwritable_record garbled-pid-is-kept 's/^[0-9]+/-/'
 unwritable_record pid-zero-is-kept 's/^[0-9]+/0/'
 unwritable_record leading-zero-pid-right-tick-is-kept 's/^/0/'
+# The same clause from a pid short enough that the length rule is not what
+# answers: on this host a live pid has seven digits, and eight are too many
+# whatever they begin with.
+unwritable_record short-leading-zero-pid-is-kept 's/^[0-9]+/01/'
 unwritable_record overlong-pid-is-kept 's/^[0-9]+/11111111111111111111111/'
 
 # And `new` does not write one: a pid it would not read back is refused, with
@@ -200,14 +204,14 @@ unwritable_record overlong-pid-is-kept 's/^[0-9]+/11111111111111111111111/'
 new_root badpid
 live_owner
 bad=""
-for pid in "" 0 "0${owner}" 11111111111111111111111 -; do
+for pid in "" 0 01 "0${owner}" 11111111111111111111111 -; do
     out="$("${tool}" new "${root}" "${pid}" 2>"${scratch}/err")"; rc=$?
     if [ "${rc}" -ne 2 ] || [ -n "${out}" ] || [ -n "$(ls -A "${root}")" ]; then
         bad="${bad} '${pid}' (rc=${rc}, stdout: ${out}, left: $(ls -A "${root}"))"
     fi
 done
 if [ -z "${bad}" ]; then
-    row new-refuses-a-pid-it-would-not-read PASS "rc=2 and nothing made, five shapes"
+    row new-refuses-a-pid-it-would-not-read PASS "rc=2 and nothing made, six shapes"
 else
     row new-refuses-a-pid-it-would-not-read FAIL "expected rc=2, empty stdout and an empty root for each; got:${bad}"
 fi
@@ -244,24 +248,6 @@ live_owner; new_copy; kill_owner "${owner}"; age "${copy}" '3 hours ago'
 mv "${copy}" "${root}/somebody-elses"; copy="${root}/somebody-elses"
 sweep
 kept name-outside-the-template-is-kept
-
-# The record itself a symlink, to an old record outside the copy that names a
-# dead owner. The sweeper writes the record of a copy it takes, so what is held
-# here is the link's TARGET as well as the copy.
-new_root recordlink
-live_owner; new_copy; kill_owner "${owner}"
-record="$(find "${copy}" -maxdepth 1 -type f)"
-mv "${record}" "${scratch}/record.moved"
-cp "${scratch}/record.moved" "${scratch}/record.was"
-ln -s "${scratch}/record.moved" "${record}"
-touch -d '3 hours ago' "${scratch}/record.moved"
-touch -h -d '3 hours ago' "${record}"
-sweep
-if cmp -s "${scratch}/record.moved" "${scratch}/record.was"; then
-    kept symlinked-record-is-kept
-else
-    row symlinked-record-is-kept FAIL "the sweep wrote through the link: $(cat "${scratch}/record.moved")"
-fi
 
 # A root that is not absolute is refused by both halves, loudly, and what is
 # under it stays. `-rel` is the shape that mattered: find reads it as an option.
@@ -318,9 +304,11 @@ else
 fi
 
 # A removal that fails part-way — here rm is refused inside a read-only
-# directory — must leave something the NEXT sweep can still take: inside the
-# template, and with its record. The sweeper that failed says nothing; the
-# remnant's record is then the failed sweeper's, so it is aged again.
+# directory — must leave something a LATER sweep can still take: inside the
+# template, and with its record. The sweeper that failed says nothing. What it
+# leaves is young, which is what stops a second sweeper claiming a copy the
+# first is still removing, so a sweep straight afterwards keeps it and only one
+# after it has aged again removes it.
 if [ "$(id -u)" -eq 0 ]; then
     row failed-removal-is-finished-later SKIP "running as root, which rm is not refused to"
 else
@@ -328,10 +316,14 @@ else
     live_owner; new_copy; kill_owner "${owner}"; age "${copy}" '3 hours ago'
     chmod 555 "${copy}/sub"
     sweep
+    first_rc="${rc}"; first_out="${out}"
     remnant="$(find "${root}" -mindepth 1 -maxdepth 1)"
     chmod -R u+w "${root}"
-    if [ "${rc}" -ne 0 ] || [ -n "${out}" ] || [ -z "${remnant}" ] || [ ! -f "${remnant}/sub/a" ]; then
-        row failed-removal-is-finished-later FAIL "the refused sweep: rc=${rc}, expected 0, silence and a remnant holding sub/a; stdout: ${out}; left: ${remnant}"
+    sweep
+    if [ "${first_rc}" -ne 0 ] || [ -n "${first_out}" ] || [ -z "${remnant}" ] || [ ! -f "${remnant}/sub/a" ]; then
+        row failed-removal-is-finished-later FAIL "the refused sweep: rc=${first_rc}, expected 0, silence and a remnant holding sub/a; stdout: ${first_out}; left: $(ls -A "${root}")"
+    elif [ "${rc}" -ne 0 ] || [ -n "${out}" ]; then
+        row failed-removal-is-finished-later FAIL "the sweep straight after took the claimed remnant, which a second sweeper would do to a copy still being removed; rc=${rc}; stdout: ${out}"
     else
         age "${remnant}" '3 hours ago'
         copy="${remnant}"
