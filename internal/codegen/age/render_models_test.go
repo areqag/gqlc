@@ -367,6 +367,84 @@ func isEmittedHelper(name string) bool {
 	return false
 }
 
+// TestTheRecordFieldHelperIsDeclaredOnlyWhereARecordReadsAField is the
+// converse of the closure sweep above, for the one helper whose mark sat
+// on the wrong evidence (bd gqlc-vvxn): agtypeRecordField declared means
+// agtypeRecordField called.
+//
+// The closure sweep cannot see this direction. A helper declared with no
+// caller is Go, so the package compiles, and the only other thing holding
+// it was the golden that recorded it. needRecord marked the helper for
+// every record that decodes; the call sites are one per FIELD, so
+// `RECORD { }` marked it and called nothing.
+//
+// The record with fields is the control: a fix that stopped emitting the
+// helper altogether passes the field-less rows and fails there, on the
+// closure sweep as well.
+func TestTheRecordFieldHelperIsDeclaredOnlyWhereARecordReadsAField(t *testing.T) {
+	const helper = "agtypeRecordField"
+	empty := graph.RecordOf(nil)
+
+	for _, row := range []struct {
+		width graph.PropertyType
+		calls bool
+	}{
+		{empty, false},
+		{graph.ListOf(empty, true), false},
+		{recordWidth, true},
+		{graph.ListOf(recordWidth, true), true},
+	} {
+		t.Run(string(row.width), func(t *testing.T) {
+			goType, ok := age.TypeMap{}.Property(row.width)
+			require.True(t, ok, "this backend no longer carries %s, so the row is stale", row.width)
+
+			entities := []age.WiredEntity{age.WiredEntity{Entity: codegen.Entity{
+				Name:   "E",
+				Kind:   codegen.EntityNode,
+				Fields: []codegen.EntityField{{PropName: "p", Field: "P", GoType: goType, Width: row.width}},
+			}}.WithLabels("E", age.VertexAnnotation)}
+			var h age.Helpers
+			h.ForEntities(entities)
+
+			declared, called := helperDeclaredAndCalled(t, age.RenderModels("models", entities, h), helper)
+			require.Equal(t, row.calls, called,
+				"the row's own premise is off: a decoded %s was expected to call %s %t", row.width, helper, row.calls)
+			require.Equal(t, called, declared,
+				"a read-only batch of one %s property declares %s = %t and calls it = %t; declared with no "+
+					"caller is an unexported function nothing reaches, which compiles and which only the "+
+					"golden would record",
+				row.width, helper, declared, called)
+		})
+	}
+}
+
+// helperDeclaredAndCalled parses one emitted models.go and reports whether
+// it declares the named func and whether any OTHER func's body names it.
+func helperDeclaredAndCalled(t *testing.T, src []byte, name string) (declared, called bool) {
+	t.Helper()
+
+	file, err := parser.ParseFile(token.NewFileSet(), "models.go", src, parser.SkipObjectResolution)
+	require.NoError(t, err, "the emitted models.go does not parse:\n%s", src)
+
+	for _, d := range file.Decls {
+		fn, ok := d.(*ast.FuncDecl)
+		if !ok || fn.Body == nil {
+			continue
+		}
+		if fn.Recv == nil && fn.Name.Name == name {
+			declared = true
+			continue
+		}
+		ast.Inspect(fn.Body, func(n ast.Node) bool {
+			if id, ok := n.(*ast.Ident); ok && id.Name == name {
+				called = true
+			}
+			return true
+		})
+	}
+	return declared, called
+}
+
 // TestEveryAdmittedListCarrierDerivesAGoIdentifier holds the property
 // listHelperName rests on and nothing measured until bd gqlc-9xiz: the
 // wrapper name derived for a list carrier the table ADMITS is a Go
