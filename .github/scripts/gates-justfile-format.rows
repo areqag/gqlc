@@ -185,8 +185,8 @@ fi
 # Its answers are pinned whole, stdout and stderr both: it shares the comparison
 # with the arm above and keeps its own refusal. just's own `error: Recipe ...
 # failed` trailer is dropped before comparing; it is just's line, not the
-# recipe's — and its capital moved between releases (`Recipe` became `recipe`
-# somewhere before 1.58.0), so neither spelling is relied on.
+# recipe's. Measured as lowercase `recipe` under just 1.55.1 and 1.58.0; the
+# capital is accepted too because nothing here should turn on it.
 recipe_err() { printf '%s\n' "${err}" | command grep -v '^error: [Rr]ecipe `' || true; }
 
 run_recipe check-just-version "${pin}" yes
