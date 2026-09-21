@@ -25,8 +25,8 @@
 // The three reads are union_property's three, for its reason — the models
 // struct, the column position and the parameter — and they matter here for a
 // second one. The two decode positions reach toDate and the parameter reaches
-// fromDate, so the neo4j bridge emits both directions and each has a caller.
-// No gate checks that last part: the fence's linter skips generated files.
+// fromDate, so the neo4j bridge emits both directions and each has a caller;
+// one emitted with none reds the fence's `unused` run over the goldens.
 
 // name: AccountWhole :one
 MATCH (a:Account) WHERE a.id = $id RETURN a

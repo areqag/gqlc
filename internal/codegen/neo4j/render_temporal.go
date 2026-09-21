@@ -321,8 +321,8 @@ func isTemporalCarrier(goType string) bool {
 // Stopping at a star would hand narrowsANumericWidth a leaf of
 // `*[]*int32`, which is neither its own driver carrier nor a temporal
 // carrier nor "float32", so the gate would claim narrowInt is called
-// where it is not. That is a dead helper in the emitted package and no
-// gate reports it: see narrowsANumericWidth.
+// where it is not. That is a dead helper in the emitted package: see
+// narrowsANumericWidth for what reports one.
 func leafType(goType string) string {
 	for {
 		elem := strings.TrimPrefix(strings.TrimPrefix(goType, "*"), "[]")
@@ -441,13 +441,16 @@ func narrowCall(goType string, width graph.PropertyType, src string) string {
 // only integers must not be handed narrowFloat32, and the `math` import
 // rides on the float helper alone.
 //
-// An over-broad answer is NOT caught downstream. An unexported function
-// nothing calls compiles, go vet is silent about it, and the fence's
-// golangci-lint skips every file carrying the generated header — which
-// is every golden — so the dead helper is simply recorded by the next
-// regenerate (measured, bd gqlc-nv8e; the gate is bd gqlc-ukzq). The
-// rows of TestNarrowsANumericWidthIgnoresRecords are what hold this
-// function, and they are the record shape and its two controls only.
+// An over-broad answer compiles and go vet is silent about it. What
+// reports it is `unused` over the goldens with generated files visible
+// (`just check-goldens-unused`, part of the required fence, bd
+// gqlc-ukzq): a narrowInt or narrowFloat32 emitted into a golden package
+// that never calls it reds that check by name. Two limits. It reads the
+// shapes the fixtures have, and none declaring a record targets this
+// driver, so the record arm is held by
+// TestNarrowsANumericWidthIgnoresRecords alone. And entity decoders are
+// rooted there (bd gqlc-m1dk), so a helper only a dead decoder calls
+// counts as called.
 func narrowsANumericWidth(entities []codegen.Entity, prepared []codegen.Query, tm typeMap) (ints, floats bool) {
 	var n numericNarrowing
 	for _, e := range entities {
@@ -494,7 +497,7 @@ func (n *numericNarrowing) markWidth(goType string, width graph.PropertyType, tm
 		// helper, not narrowInt. Without this arm every schema
 		// declaring a record would be handed narrowInt with no
 		// caller. TestNarrowsANumericWidthIgnoresRecords holds it;
-		// no lint does (see narrowsANumericWidth).
+		// no golden can (see narrowsANumericWidth).
 		return
 	}
 	if leaf == "float32" {

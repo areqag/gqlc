@@ -262,9 +262,10 @@ func methodDecl(t *testing.T, src, name string) *ast.FuncDecl {
 // test every arm of this gate uses to recognise an integer that needs
 // checking. But a record's narrowing is its own emitted helper, so a
 // schema whose only wide width is a record must be handed neither
-// numeric helper. Nothing downstream reports the wrong answer: a dead
-// unexported helper compiles, and the fence's linter skips every
-// generated file, so a regenerated golden records it (bd gqlc-nv8e).
+// numeric helper. Nothing downstream reports the wrong answer for a
+// RECORD: `unused` over the goldens (`just check-goldens-unused`, bd
+// gqlc-ukzq) does report a narrowInt nothing calls, but no fixture
+// declaring a record targets this driver, so no golden has the shape.
 // This test is the guard, not a second opinion on one.
 //
 // The controls are the whole test. A gate that had stopped answering

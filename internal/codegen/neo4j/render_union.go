@@ -16,9 +16,9 @@ import (
 // encodings is codegen.UnionEncodings' answer, so the file's order is the
 // canonical-encoding order both backends share and is byte-stable across
 // runs. uses is conversionUses' union half, so a helper is emitted exactly
-// where something calls it. No gate downstream enforces that: a helper
-// nothing calls compiles and the fence's linter skips generated files, so
-// a regenerated golden records it (bd gqlc-nv8e, gqlc-ukzq).
+// where something calls it. A helper nothing calls compiles, and is
+// reported over the union fixtures' goldens by `unused` with generated
+// files visible (`just check-goldens-unused`, bd gqlc-ukzq).
 //
 // No carrier alias, which is the one thing the record file has that this
 // one does not: a union carries as `any` (spec §4), a predeclared name

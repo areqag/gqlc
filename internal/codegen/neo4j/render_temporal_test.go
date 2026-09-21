@@ -77,9 +77,9 @@ func TestTemporalUsesAccumulatesListPtrRegardlessOfParameterOrder(t *testing.T) 
 // two helpers have incompatible parameter types — []*Date and []Date — so
 // whichever one paramBindExpr names, the other one is not called by anything.
 // Marking both would therefore leave a dead unexported helper in every batch
-// that binds either shape, and nothing downstream would say so: it compiles,
-// and the fence's linter skips every generated file, so the next regenerate
-// records it (bd gqlc-nv8e). These rows are what would.
+// that binds either shape. That compiles; `unused` over the goldens reports it
+// (`just check-goldens-unused`, bd gqlc-ukzq) for the fixtures that bind one,
+// and these rows say which mark was wrong.
 //
 // The rows are held apart by carrier, not just by row, because conversionUses
 // folds into one map keyed by carrier name: two Date rows in one Prepared would
