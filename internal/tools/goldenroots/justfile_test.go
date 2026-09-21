@@ -1,4 +1,7 @@
-package main
+// An external test package: it reads ci.yml through a third-party YAML
+// package, and govulncheck discards an in-package test variant together with
+// what only it imports (`just vuln-root-residual`, bd gqlc-m5rc).
+package main_test
 
 import (
 	"bytes"
