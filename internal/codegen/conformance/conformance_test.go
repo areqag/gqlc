@@ -1915,7 +1915,7 @@ func (e carrierEmission) breach() string {
 	if e.referencedBy != "" {
 		switch {
 		case !e.carriers:
-			return fmt.Sprintf("names %s at %s and emits no %s, so the package does not compile", e.family.subject, e.referencedBy, e.family.file)
+			return e.family.undeclared(e.referencedBy)
 		case len(e.bridges) == 0:
 			return noCarrierBridge
 		}
@@ -1925,6 +1925,11 @@ func (e carrierEmission) breach() string {
 		return e.family.unreferenced()
 	}
 	return ""
+}
+
+// undeclared is the emit half's breach, for a carrier named at ref.
+func (f carrierFamily) undeclared(ref string) string {
+	return fmt.Sprintf("names %s at %s and emits no %s, so the package does not compile", f.subject, ref, f.file)
 }
 
 // unreferenced is the do-not-emit half's breach.
@@ -2142,8 +2147,12 @@ func sweepCarrierEmission(t *testing.T, family carrierFamily) {
 // emits, which the apache-age-pgx-v5 rows hold and which is what AGE does
 // (bd gqlc-fg0r, gqlc-mv3r).
 func TestTemporalEmissionIsReadPerTarget(t *testing.T) {
-	// The rows take the do-not-emit and unlisted-bridge texts from the
-	// family, so each is spelled once here for them to be held against.
+	// The rows take three texts from the family — the emit half's, the
+	// do-not-emit half's and the unlisted bridge's — so each is spelled
+	// once here for them to be held against.
+	require.Equal(t,
+		"names a temporal carrier at models.go:3 and emits no temporal.go, so the package does not compile",
+		temporalFamily.undeclared("models.go:3"))
 	require.Equal(t,
 		"emits temporal.go and names no carrier anywhere else, so five exported names are taken out of the caller's package for nothing",
 		temporalFamily.unreferenced())
@@ -2158,6 +2167,9 @@ func TestTemporalEmissionIsReadPerTarget(t *testing.T) {
 // package either, so these are what show TestUUIDCarrierIsEmittedExactlyWhenReferenced
 // can fire.
 func TestUUIDEmissionIsReadPerTarget(t *testing.T) {
+	require.Equal(t,
+		"names the UUID carrier at models.go:3 and emits no uuid.go, so the package does not compile",
+		uuidFamily.undeclared("models.go:3"))
 	require.Equal(t,
 		"emits uuid.go and names no carrier anywhere else, so one exported name is taken out of the caller's package for nothing",
 		uuidFamily.unreferenced())
@@ -2368,7 +2380,7 @@ func carrierEmissionRows(family carrierFamily) []carrierEmissionRow {
 				bridge:      bridgesCarriers,
 			},
 			wantRef: "models.go", wantBridges: []string{bridge},
-			wantBreach: "names " + family.subject + " at %s and emits no " + family.file + ", so the package does not compile",
+			wantBreach: family.undeclared("%s"),
 		},
 		{
 			name:  "no carrier at all",
