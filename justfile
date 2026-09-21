@@ -3176,8 +3176,8 @@ test-codegen-fence: sweep-discovery-probes ensure-golangci check-codegen-externa
 # cache sits under the copy too: every run's paths are new, so entries written
 # to this checkout's cache would never be read again.
 #
-# The whole recipe is ~3 s of the fence on the dev host, the full-module run
-# being about half of it.
+# The whole recipe adds ~2 s to the fence on the dev host (2026-09-20), most of
+# it the one full-module run; the witness and lock rows read two packages each.
 [private]
 check-goldens-unused: sweep-discovery-probes ensure-golangci
     #!/usr/bin/env bash
@@ -3221,9 +3221,12 @@ check-goldens-unused: sweep-discovery-probes ensure-golangci
     }
 
     # WITNESS targets: one emitted package per driver family, found rather than
-    # named, and refused if either family has none.
+    # named, and refused if either family has none. `sed -n 1p` and not `head`:
+    # head exits after its line, and once the path list outgrows a pipe buffer
+    # sort can die of SIGPIPE under pipefail — seen as exit 141, intermittently,
+    # with a scratch root long enough to push ~220 paths past 64 KiB.
     first_golden() {
-        find "${scratch}/${1}" -path "*/golden/${2}/models.go" | LC_ALL=C sort | head -n 1
+        find "${scratch}/${1}" -path "*/golden/${2}/models.go" | LC_ALL=C sort | sed -n 1p
     }
 
     fenced=0
