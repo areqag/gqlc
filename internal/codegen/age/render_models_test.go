@@ -518,6 +518,8 @@ func helperDeclaredAndCalled(t *testing.T, src []byte, name string) (declared, c
 // in the query file and a record field's in the encoder of the record it
 // sits in, so the batch is rendered whole and both files are walked; the
 // closure sweep above reads models.go alone and cannot see the first.
+// Each bind site is held to naming its OWN record's encoder as well,
+// because two sites that swap encoders leave both name sets as they were.
 //
 // What each row holds, each measured as a mutant of the mark (bd
 // gqlc-oqvz):
@@ -638,41 +640,247 @@ func TestEveryBoundRecordsEncoderIsDeclaredAndEveryDeclaredOneIsCalled(t *testin
 		},
 	} {
 		t.Run(row.name, func(t *testing.T) {
-			files := renderRecordBatch(t, row.reads, row.binds)
-			for _, family := range []struct {
-				prefix string
-				want   []graph.PropertyType
-			}{{"encode", row.encoders}, {"decode", row.decoders}} {
-				want := make([]string, len(family.want))
-				for i, w := range family.want {
-					want[i] = family.prefix + codegen.RecordHelperSuffix(w)
-				}
-				declared, called := recordHelpersDeclaredAndCalled(t, family.prefix+"Record", files)
-				require.ElementsMatch(t, want, called,
-					"these are not the %sRecord helpers the batch calls. Either the row's own premise is off, or "+
-						"one that calls another is itself undeclared and its call sites went with it: models.go declares %v",
-					family.prefix, declared)
-				require.ElementsMatch(t, called, declared,
-					"the batch calls the %sRecord helpers %v and models.go declares %v. Declared with no caller "+
-						"compiles and only a golden would record it; called with no declaration, or declared "+
-						"twice, does not compile",
-					family.prefix, called, declared)
-			}
+			files := renderBoundBatch(t, row.reads, row.binds)
+			requireEachBindSiteNamesItsOwnEncoder(t, files[1], row.binds)
+			requireDeclaredIffCalled(t, files, row.encoders, row.decoders)
 		})
 	}
 }
 
-// boundWidth is one bound parameter of a row above.
+// TestEveryBoundUnionsEncoderIsDeclaredAndEveryDeclaredOneIsCalled is the
+// test above for closed unions, whose two direction sets are the record
+// ones over again: for each of encodeUnion<h> and decodeUnion<h>, the
+// names the emission calls are the names models.go declares, union by
+// union and counted (bd gqlc-rz8m).
+//
+// One thing is not the record side over again. Every closed union carries
+// as `any`, so two unions of one Go type text is not a contrived row here
+// but every row binding two, and a mark or a bind site keyed on the Go
+// type text where it should be keyed on the encoding is the ordinary way
+// for this to go wrong — it is how the list DECODE wrappers dedupe (bd
+// gqlc-3s7q). The encode side does not have that hole: each bind site
+// composes its own closure over its own union's encoder and no named list
+// wrapper is shared. These rows are what would notice if it grew one.
+//
+// What each row holds, each measured as a mutant:
+//
+//   - two different unions bound in one batch. A mark taken only for the
+//     first union bound leaves the second one's encoder called and
+//     undeclared, and the whole age and conformance packages passed it: no
+//     fixture binds two. So did the set REPLACED at each mark, and so did
+//     an early return on any marked union of the same Go type text. All
+//     three fail every row here that reaches two unions;
+//   - the same two in the other order, because an ORDER-DEPENDENT mark
+//     needs both orders. A union marked only if its encoding sorts after
+//     every one already marked fails this row and no other, since every
+//     other row reaching two happens to ascend; its mirror fails those
+//     and passes here;
+//   - a lone-member union between two others. `ANY<INT32 NOT NULL>` is the
+//     one union whose member walk is a single step, and a mark that
+//     RESETS the set on meeting it drops the union bound before it. No
+//     other row binds one, and this one ascends throughout, so the
+//     ascending-only mark passes it;
+//   - one union bound twice declares ONE encoder. It takes both dedupes
+//     gone to show here — needUnionEncode's early return and markUnion's
+//     Contains — because for a repeated bind each covers for the other.
+//     The early return alone removed fails nothing anywhere: the map
+//     write is idempotent and the list still dedupes;
+//   - one union read and bound is where markUnion's Contains shows alone,
+//     and it holds an encode mark that returns early on the shared
+//     h.unions list rather than on its own direction's set;
+//   - read only and bind only are the two leaks: an encoder marked on a
+//     READ and a decoder marked on a bind are each declared with no
+//     caller, which compiles. The decoder leak, marked together with its
+//     members' helpers, failed nothing else in either package;
+//   - a union bound only as a FIELD of a bound record. It is the only
+//     union in its batch, so the first-only family passes it; what it
+//     holds is the record's field walk stepping over a union, which the
+//     two rows after it fail under too;
+//   - the same union two records deep. A field walk that steps over a
+//     union only BELOW the first record level passes the row above, and
+//     nothing else in either package failed under it. It is a record row
+//     and a union row at once: both records' encoders and the union's;
+//   - a union bound under a RECORD MEMBER of another. A member walk that
+//     does not descend into a record member leaves that record's encoder
+//     named by the union's body and undeclared, and the union beneath it
+//     unmarked; one golden, union_only_carrier_record_member, failed under
+//     it besides. It reaches two unions, ascending, so the first row's
+//     three mutants fail it as well;
+//   - a union bound only inside a LIST MEMBER of another. A member walk
+//     stepping over a list leaves the inner encoder named by the outer
+//     one's body and undeclared, and nothing else in either package
+//     failed under it;
+//   - a union bound inside a LIST beside a different one bound NULLABLE:
+//     a mark withheld from a list's element fails this row and the two
+//     other rows with a list in them, and one withheld from a nullable
+//     parameter fails no other row;
+//   - two lists of different unions, both `[]any`. A list bind site whose
+//     element encoder is remembered per Go type text names the first
+//     union's encoder at both sites, and only this row failed under it in
+//     either package.
+//
+// Two bind sites that SWAP encoders leave both name sets as they were, so
+// each site is first held to naming its own encoding's encoder. That
+// fails every row binding two different encodings, here and in the test
+// above.
+//
+// Every list here has NULLABLE elements, the only kind a schema can spell
+// for a union. `any` is never starred, so unlike a record's list this one
+// never sets forParam's nullable-element flag, and the record side's
+// `&& !nullElem` mutant put on the union arm fails nothing anywhere. The
+// assertion ahead of the rows is what that rests on: the NOT NULL-element
+// list, which only the constructor can build, carries as the same text.
+func TestEveryBoundUnionsEncoderIsDeclaredAndEveryDeclaredOneIsCalled(t *testing.T) {
+	flag := graph.UnionOf([]graph.UnionMember{{Type: graph.TypeBool}, {Type: graph.TypeFloat64}})
+	pick := graph.UnionOf([]graph.UnionMember{{Type: graph.TypeInt32}, {Type: graph.TypeString}})
+	lone := graph.UnionOf([]graph.UnionMember{{Type: graph.TypeInt32, NotNull: true}})
+	holder := graph.RecordOf([]graph.RecordField{{Name: "stamp", Type: pick, NotNull: true}})
+	outer := graph.UnionOf([]graph.UnionMember{{Type: graph.ListOf(pick, false)}, {Type: graph.TypeBool}})
+	nest := graph.RecordOf([]graph.RecordField{{Name: "held", Type: holder, NotNull: true}})
+	either := graph.UnionOf([]graph.UnionMember{{Type: holder}, {Type: graph.TypeBool}})
+	nullableElems, _ := age.TypeMap{}.Property(graph.ListOf(pick, false))
+	notNullElems, _ := age.TypeMap{}.Property(graph.ListOf(pick, true))
+	require.Equal(t, notNullElems, nullableElems,
+		"a list of nullable unions no longer carries as its constructor-only NOT NULL twin does, so the star "+
+			"is live for a union leaf and the rows' lists no longer stand for both")
+	require.Less(t, flag, lone, "the rows below are named for an order these three no longer have")
+	require.Less(t, lone, pick, "the rows below are named for an order these three no longer have")
+	require.Less(t, outer, pick, "the other-order row is no longer the only row reaching two unions that descends")
+	require.Less(t, either, pick, "the other-order row is no longer the only row reaching two unions that descends")
+
+	for _, row := range []struct {
+		name     string
+		reads    []graph.PropertyType
+		binds    []boundWidth
+		encoders []graph.PropertyType
+		decoders []graph.PropertyType
+	}{
+		{
+			name: "two unions bound", binds: []boundWidth{{width: flag}, {width: pick}},
+			encoders: []graph.PropertyType{flag, pick},
+		},
+		{
+			name: "the same two in the other order", binds: []boundWidth{{width: pick}, {width: flag}},
+			encoders: []graph.PropertyType{flag, pick},
+		},
+		{
+			name: "a lone-member union between two others", binds: []boundWidth{{width: flag}, {width: lone}, {width: pick}},
+			encoders: []graph.PropertyType{flag, lone, pick},
+		},
+		{
+			name: "one union bound twice", binds: []boundWidth{{width: pick}, {width: pick}},
+			encoders: []graph.PropertyType{pick},
+		},
+		{
+			name: "one union read and bound", reads: []graph.PropertyType{pick}, binds: []boundWidth{{width: pick}},
+			encoders: []graph.PropertyType{pick}, decoders: []graph.PropertyType{pick},
+		},
+		{
+			name: "read only", reads: []graph.PropertyType{pick},
+			decoders: []graph.PropertyType{pick},
+		},
+		{
+			name: "bind only", binds: []boundWidth{{width: pick}},
+			encoders: []graph.PropertyType{pick},
+		},
+		{
+			name: "a union bound as a field of a record", binds: []boundWidth{{width: holder}},
+			encoders: []graph.PropertyType{holder, pick},
+		},
+		{
+			name: "a union bound two records deep", binds: []boundWidth{{width: nest}},
+			encoders: []graph.PropertyType{nest, holder, pick},
+		},
+		{
+			name: "a union bound under a record member of another", binds: []boundWidth{{width: either}},
+			encoders: []graph.PropertyType{either, holder, pick},
+		},
+		{
+			name: "a union bound in a list member of another", binds: []boundWidth{{width: outer}},
+			encoders: []graph.PropertyType{outer, pick},
+		},
+		{
+			name: "a list of one and a nullable other", binds: []boundWidth{{width: graph.ListOf(flag, false)}, {width: pick, nullable: true}},
+			encoders: []graph.PropertyType{flag, pick},
+		},
+		{
+			name: "two lists of different unions", binds: []boundWidth{{width: graph.ListOf(flag, false)}, {width: graph.ListOf(pick, false)}},
+			encoders: []graph.PropertyType{flag, pick},
+		},
+	} {
+		t.Run(row.name, func(t *testing.T) {
+			files := renderBoundBatch(t, row.reads, row.binds)
+			requireEachBindSiteNamesItsOwnEncoder(t, files[1], row.binds)
+			requireDeclaredIffCalled(t, files, row.encoders, row.decoders)
+		})
+	}
+}
+
+// requireEachBindSiteNamesItsOwnEncoder reads the query file's bind
+// statements, `paramN, err := …arg.PN…`, and requires the one encoder each
+// names to be the one derived from THAT parameter's width. The name sets
+// requireDeclaredIffCalled compares cannot see two sites that swapped
+// encoders, or both naming one while something else names the other.
+//
+// A batch of one parameter has no second site to confuse it with and
+// spells its access bare, so it is left to the name sets.
+func requireEachBindSiteNamesItsOwnEncoder(t *testing.T, queryFile []byte, binds []boundWidth) {
+	t.Helper()
+	if len(binds) < 2 {
+		return
+	}
+
+	file, err := parser.ParseFile(token.NewFileSet(), "queries.go", queryFile, parser.SkipObjectResolution)
+	require.NoError(t, err, "the emitted query file does not parse:\n%s", queryFile)
+
+	named := map[string][]string{}
+	ast.Inspect(file, func(n ast.Node) bool {
+		bind, ok := n.(*ast.AssignStmt)
+		if !ok || len(bind.Rhs) != 1 {
+			return true
+		}
+		var field string
+		var encoders []string
+		ast.Inspect(bind.Rhs[0], func(n ast.Node) bool {
+			switch n := n.(type) {
+			case *ast.SelectorExpr:
+				if x, ok := n.X.(*ast.Ident); ok && x.Name == codegen.ParamArg {
+					field = n.Sel.Name
+				}
+			case *ast.Ident:
+				if strings.HasPrefix(n.Name, "encodeRecord") || strings.HasPrefix(n.Name, "encodeUnion") {
+					encoders = append(encoders, n.Name)
+				}
+			}
+			return true
+		})
+		if field != "" {
+			named[field] = encoders
+		}
+		return true
+	})
+
+	for i, b := range binds {
+		leaf := b.width
+		for leaf.Kind() == graph.KindList {
+			leaf = leaf.Elem()
+		}
+		require.Equal(t, []string{"encode" + encodingSuffix(leaf)}, named["P"+strconv.Itoa(i)],
+			"parameter %d is a %s and its bind site does not name that encoding's own encoder", i, b.width)
+	}
+}
+
+// boundWidth is one bound parameter of a row of the two tests around it.
 type boundWidth struct {
 	width    graph.PropertyType
 	nullable bool
 }
 
-// renderRecordBatch renders models.go and the query file for one entity
+// renderBoundBatch renders models.go and the query file for one entity
 // reading the given widths and one query binding the given parameters,
 // both in the order given. The helpers are marked the way generate marks
 // them: the entities first, then the query's parameters.
-func renderRecordBatch(t *testing.T, reads []graph.PropertyType, binds []boundWidth) [][]byte {
+func renderBoundBatch(t *testing.T, reads []graph.PropertyType, binds []boundWidth) [][]byte {
 	t.Helper()
 
 	var entities []age.WiredEntity
@@ -700,10 +908,58 @@ func renderRecordBatch(t *testing.T, reads []graph.PropertyType, binds []boundWi
 	return [][]byte{age.RenderModels("models", entities, h), age.RenderCypherFile("models", []codegen.Query{q})}
 }
 
-// recordHelpersDeclaredAndCalled parses one emitted package and returns
+// requireDeclaredIffCalled holds one rendered batch to the widths a row
+// says it encodes and decodes, for the four per-encoding helper families
+// at once: a record row is therefore also held to naming no union helper,
+// and a union row to naming no record one it did not list.
+//
+// The premise is asserted first, so that no family passes on two empty
+// lists it did not mean to be empty.
+func requireDeclaredIffCalled(t *testing.T, files [][]byte, encoders, decoders []graph.PropertyType) {
+	t.Helper()
+
+	for _, family := range []struct {
+		prefix string
+		kind   graph.PropertyTypeKind
+		widths []graph.PropertyType
+	}{
+		{"encodeRecord", graph.KindRecord, encoders},
+		{"decodeRecord", graph.KindRecord, decoders},
+		{"encodeUnion", graph.KindUnion, encoders},
+		{"decodeUnion", graph.KindUnion, decoders},
+	} {
+		var want []string
+		for _, w := range family.widths {
+			if w.Kind() == family.kind {
+				want = append(want, family.prefix[:len("encode")]+encodingSuffix(w))
+			}
+		}
+		declared, called := helpersDeclaredAndCalledUnder(t, family.prefix, files)
+		require.ElementsMatch(t, want, called,
+			"these are not the %s helpers the batch calls. Either the row's own premise is off, or "+
+				"one that calls another is itself undeclared and its call sites went with it: models.go declares %v",
+			family.prefix, declared)
+		require.ElementsMatch(t, called, declared,
+			"the batch calls the %s helpers %v and models.go declares %v. Declared with no caller "+
+				"compiles and only a golden would record it; called with no declaration, or declared "+
+				"twice, does not compile",
+			family.prefix, called, declared)
+	}
+}
+
+// encodingSuffix is the helper suffix of a declared record or a closed
+// union, whichever the width is.
+func encodingSuffix(width graph.PropertyType) string {
+	if width.Kind() == graph.KindRecord {
+		return codegen.RecordHelperSuffix(width)
+	}
+	return codegen.UnionHelperSuffix(width)
+}
+
+// helpersDeclaredAndCalledUnder parses one emitted package and returns
 // the top-level funcs it declares under a name prefix, REPEATS KEPT, and
 // the distinct names under that prefix its func bodies spell.
-func recordHelpersDeclaredAndCalled(t *testing.T, prefix string, files [][]byte) (declared, called []string) {
+func helpersDeclaredAndCalledUnder(t *testing.T, prefix string, files [][]byte) (declared, called []string) {
 	t.Helper()
 
 	seen := map[string]bool{}
