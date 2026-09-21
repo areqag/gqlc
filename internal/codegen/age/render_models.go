@@ -117,13 +117,14 @@ func carriesZone(goType string) bool {
 // helpers records which agtype encode / decode helpers a batch reaches
 // for. Each is emitted only when something calls it.
 //
-// Only one direction of that is gated. A helper referenced but not
-// declared fails to compile, which TestGoldenBuild and
+// Both directions of that are gated, the second with one limit. A helper
+// referenced but not declared fails to compile, which TestGoldenBuild and
 // TestEmittedHelpersAreClosedOverWhatTheyCall both catch. A helper
-// declared but not referenced is caught by nothing: .golangci.yml sets
-// generated: lax, so the linter skips the emitted goldens outright. The
-// unreferenced direction is dead weight in the output rather than a
-// defect in it, which is why it is recorded here and not gated.
+// declared into a golden package with no call site compiles, and is
+// reported by `unused` over the goldens (`just check-goldens-unused`,
+// part of the required fence, bd gqlc-ukzq) — unless its only caller is
+// an entity decoder, since those are rooted there whether or not
+// anything calls THEM (bd gqlc-m1dk).
 //
 // agtypeEntity, agtypeObject, agtypeSpan and agtypeString are not among
 // them. A graph type's element type list is one-or-more (GQL.g4
