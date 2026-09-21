@@ -3225,6 +3225,8 @@ check-goldens-unused: sweep-discovery-probes ensure-golangci
 
     # The copies a killed run left go first, and a sweep that breaks is said
     # and not fatal: what it guards is the host's inode budget, not a golden.
+    # Neither call may ever pass --test-proc-root: it is the rows', and a sweep
+    # told the wrong directory calls every owner dead (bd gqlc-qbah).
     copy_tool=.github/scripts/goldens-unused-scratch.sh
     "${copy_tool}" sweep {{ quote(scratch_root) }} \
         || echo "warning: ${copy_tool} sweep exited $? over {{ scratch_root }}; nothing was reaped (bd gqlc-7hyt)" >&2
