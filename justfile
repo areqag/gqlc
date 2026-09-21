@@ -1289,8 +1289,9 @@ test-complexity-exit-code: sweep-discovery-probes ensure-golangci
 
 # The rows for .github/scripts/goldens-unused-scratch.sh, which makes the scratch
 # copy check-goldens-unused lints and reaps the ones a SIGKILLed run left (bd
-# gqlc-7hyt). ~4.5s on the dev host: the script's rows are milliseconds, and the
-# last one runs the real recipe twice — once to be killed, once to be seen
+# gqlc-7hyt). 2.9 to 9.0 s seen on the dev host across two sessions on
+# 2026-09-20: the script's rows are milliseconds each, and the last two run the
+# real recipe twice — once to be killed, once to be seen
 # reaping what that left — because the call from the recipe into the script is
 # what no row against the script alone can hold.
 #
@@ -3205,9 +3206,10 @@ test-codegen-fence: sweep-discovery-probes ensure-golangci check-codegen-externa
 # this shell's pid and start tick in it, and every run first removes the copies
 # under scratch_root whose record is over 90 minutes old AND whose owner is
 # dead. That file has the rule and what still leaks; its rows are `just
-# test-goldens-unused-scratch`. Measured the same day on the dev host: the sweep
-# takes ~2 ms over a scratch_root holding none, and 0.16-0.19 s to remove five
-# whole copies (10715 inodes).
+# test-goldens-unused-scratch`. What the sweep costs over a scratch_root holding
+# none, on the dev host, 200 runs each: 2.2 ms at the least and 5.4 ms at the
+# median under load 1.6 (the reviewer of PR #2963), 2.7 and 3.3 ms under load 13
+# (2026-09-20). Removing five whole copies, 10715 inodes, took 0.16-0.19 s.
 #
 # The whole recipe adds ~2 s to the fence on the dev host (2026-09-20), most of
 # it the one full-module run; the witness and lock rows read two packages each.
