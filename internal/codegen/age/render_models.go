@@ -237,8 +237,8 @@ type helpers struct {
 	recordDecoders map[graph.PropertyType]bool
 	recordEncoders map[graph.PropertyType]bool
 
-	// agtypeRecordField — some record decodes, so its fields are read out
-	// of a split map. One mark and one helper for both nullabilities:
+	// agtypeRecordField — some decoded record has a field, which is read
+	// out of a split map. One mark and one helper for both nullabilities:
 	// the helper answers a pointer either way, and what a NOT NULL field
 	// does with a nil is fail naming itself and the record it is in,
 	// which is an error message the caller has and the helper does not.
@@ -600,12 +600,16 @@ func (h *helpers) needRecord(width graph.PropertyType) {
 	}
 	h.markRecord(width)
 	h.recordDecoders[width] = true
-	h.recordField = true
 	for _, f := range width.Fields() {
 		fieldTy, ok := typeMap{}.Property(f.Type)
 		if !ok {
 			continue
 		}
+		// Marked per field, because the decoder calls agtypeRecordField
+		// once per field and `RECORD { }` has none: marked per record, the
+		// helper was declared in a package that never called it (bd
+		// gqlc-vvxn).
+		h.recordField = true
 		h.need(fieldTy, f.Type)
 	}
 }
@@ -900,11 +904,10 @@ func renderModels(pkg string, entities []wiredEntity, h helpers) []byte {
 	for _, goType := range h.listHelpers() {
 		writeListHelper(&b, goType)
 	}
-	// The field helper is gated on a record DECODING (needRecord), which
-	// is wider than a record having a field to read: a record of no
-	// fields declares no call site and still marks it, so
-	// record_any_and_empty's golden carries the helper with no caller
-	// (bd gqlc-vvxn). That compiles, and no gate reports it (bd gqlc-nv8e).
+	// The field helper is gated on a decoded record having a field to
+	// read (needRecord), not on a record decoding: a record of no fields
+	// declares no call site, so record_any_and_empty's AGE golden carries
+	// no helper. It carried one with no caller until bd gqlc-vvxn.
 	if h.recordField {
 		writeRecordFieldHelper(&b)
 	}
