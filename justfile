@@ -2656,18 +2656,14 @@ check-justfile-format:
 #                required context this recipe does not cover rather than a
 #                nightly whose red arrives later. It carries -count=1, so it
 #                is the slower of the two to re-run.
-#   tidy (part)  three of that job's steps read state that does not exist
-#                before the PR: check-pr-closes.py wants the body,
-#                check-pr-authors.sh the commit list, check-cron-freshness.sh
-#                the Actions API. Unrunnable here by construction, not by
-#                choice. These DO run — tidy-check and
-#                check-doc-ordinals.py and
-#                check-open-pr-ordinals.py --self-test and
-#                next-doc-ordinal.py --self-test and
-#                bd-export-monotonic-local and check-label-lengths.py and
-#                test-bd-prime-guard and test-setup-go-assertion as their
-#                own arms, and `just lint-hooks .github/scripts` because `just
-#                lint` already depends on it.
+#   tidy (part)  some of that job's steps read state that does not exist
+#                before the PR — a body, a commit list, the Actions API.
+#                Unrunnable here by construction, not by choice. Every other
+#                step of that job is an arm below. Which is which is not
+#                restated here, where it went stale three times: it is held,
+#                step by step and with the reason for each exception, by
+#                internal/tools/gatesparity, which `just test` runs (bd
+#                gqlc-07di).
 #   tidy (SKIPPED)
 #                `just check-justfile-format`, which is that job's `just
 #                --fmt --check --unstable` step, is an arm ONLY WHEN THE JUST
@@ -2827,10 +2823,13 @@ gates:
     echo "       live-smoke-age    entirely. It is PR-blocking too (bd gqlc-ezwae) and"
     echo "                         has no Docker-free half here; all of it needs"
     echo "                         Docker: just test-codegen-live-age"
-    echo "       tidy (3 steps)    check-pr-closes.py, check-pr-authors.sh and"
+    echo "       tidy (part)       check-pr-closes.py, check-pr-authors.sh and"
     echo "                         check-cron-freshness.sh read a PR body, a PR's"
     echo "                         commit list and the Actions API. None exist here."
-    for arm in "${skipped[@]}"; do
+    # Guarded: before bash 4.4 an EMPTY array expanded bare under `set -u` is
+    # an unbound variable, and empty is this array on every run that skips
+    # nothing (measured on bash 4.3.48, bd gqlc-07di).
+    for arm in ${skipped[@]+"${skipped[@]}"}; do
         echo "       tidy (SKIPPED)    ${arm}"
         echo "                         The formatter is --unstable, so only the pin's"
         echo "                         verdict is CI's. \`just check-just-version\` has the"
