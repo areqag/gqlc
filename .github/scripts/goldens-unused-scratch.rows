@@ -469,6 +469,65 @@ else
     row bad-proc-root-is-refused FAIL "expected rc=2, empty stdout, the reason, and the root as it was; got:${bad}; left: $(ls -A "${root}")"
 fi
 
+# --- a name the script assigns, arriving by the environment -----------------
+# The script reads nothing from its environment, and what would change that is
+# one edit to any assignment: `x=value` made `x="${x:-value}"`. So every name it
+# assigns is exported at it, hostile, and the sweep must do what it does with
+# none: remove the old copy whose owner is dead, and keep the old one whose
+# owner is alive and the ten-minute-old one whose owner is dead. All three are
+# asked for because most of these names, honoured, stop a sweep removing
+# anything, and a sweep that removed nothing has kept the live copy too.
+#
+# The names are READ OUT OF THE SCRIPT each run: `name=` wherever a word begins
+# with it, the words after `local`, the variable of a `for`, the words after
+# `read`. Reading too many costs nothing. Reading none would pass every row
+# below, so the first row is that the list holds the four that decide a
+# removal.
+mapfile -t names < <(
+    command grep -v '^[[:space:]]*#' "${tool}" | sed -E 's/"[^"]*"//g' | awk '
+        { for (i = 1; i <= NF; i++) if ($i ~ /^[a-z_][a-z0-9_]*=/) { w = $i; sub(/=.*/, "", w); print w } }
+        $1 == "local" { for (i = 2; i <= NF; i++) { w = $i; sub(/=.*/, "", w); print w } }
+        $1 == "for" && $3 == "in" { print $2 }
+        { for (i = 1; i < NF; i++) if ($i == "read") for (j = i + 1; j <= NF && $j !~ /^</; j++) print $j }
+    ' | command grep -E '^[a-z_][a-z0-9_]*$' | sort -u
+)
+missing=""
+for n in proc_root root stale_minutes prefix; do
+    printf '%s\n' "${names[@]}" | command grep -Fxq -- "${n}" || missing="${missing} ${n}"
+done
+if [ -z "${missing}" ]; then
+    row assigned-names-are-read-from-the-script PASS "${#names[@]}: ${names[*]}"
+else
+    row assigned-names-are-read-from-the-script FAIL "the names read out of ${tool} do not hold:${missing}; read ${#names[@]}: ${names[*]}"
+fi
+# hostile VALUE: leaves in hostile_env every name, exported at VALUE.
+hostile_env=()
+hostile() {
+    local n
+    hostile_env=()
+    for n in "${names[@]}"; do hostile_env+=("${n}=${1}"); done
+}
+# exported NAME VALUE. The sweeper's own stat is in ${fake}, so a proc root
+# honoured there is a sweeper that judges, and calls the live owner dead.
+exported() {
+    local live young
+    new_root "${1}"; new_fake "${1}"
+    live_owner; new_copy; age "${copy}" '3 hours ago'; live="${copy}"
+    live_owner; new_copy; kill_owner "${owner}"; age "${copy}" '10 minutes ago'; young="${copy}"
+    live_owner; new_copy; kill_owner "${owner}"; age "${copy}" '3 hours ago'
+    hostile "${2}"
+    # shellcheck disable=SC2016 # expanded by the inner shell, whose $$ is the point
+    out="$(env "${hostile_env[@]}" bash -c 'mkdir "${1}/$$" && printf "%s\n" "${2}" >"${1}/$$/stat" && exec "${3}" sweep "${4}"' \
+        bash "${fake}" "$(stat_line 1 sweeper 5)" "${tool}" "${root}" 2>"${scratch}/err")"; rc=$?
+    if [ ! -f "${live}/sub/a" ] || [ ! -f "${young}/sub/a" ] || command grep -Fq -- "TEST ONLY" "${scratch}/err"; then
+        row "${1}" FAIL "with every assigned name exported as '${2}', expected the live owner's copy and the ten-minute-old one whole and no TEST ONLY line; stdout: ${out}; stderr: $(cat "${scratch}/err"); left: $(ls -A "${root}")"
+    else
+        removed "${1}" 1 5
+    fi
+}
+exported exported-names-are-not-read-as-paths "${scratch}/proc.exported-names-are-not-read-as-paths"
+exported exported-names-are-not-read-as-numbers 1
+
 # --- the real recipe, SIGKILLed -------------------------------------------
 # The defect as filed. The recipe runs in a session of its own so that the
 # whole process group can be killed the way a watchdog kills one, and is killed
@@ -480,11 +539,12 @@ fi
 # all, and `new` being what makes the directory.
 #
 # That second run is also the one run of the script these rows do not start
-# themselves, so it is where a proc root arriving by the ENVIRONMENT is tried:
-# exported at an empty directory, under the name a shortcut would give it,
-# beside an old copy whose owner is alive. The script takes a proc root as an
-# argument and reads none from the environment, so the killed copy is reaped all
-# the same — an empty proc root reaps nothing — and the live one is whole.
+# themselves, so the environment is tried there too: an empty directory,
+# exported under every name the script assigns and under the name a shortcut
+# would give a proc root, beside an old copy whose owner is alive. The script
+# takes a proc root as an argument and reads none from the environment, so the
+# killed copy is reaped all the same — an empty proc root reaps nothing — and
+# the live one is whole.
 real_just="$(command -v just)" || real_just=""
 if [ -z "${real_just}" ] || ! command -v setsid >/dev/null 2>&1; then
     row killed-run-is-reaped-by-the-next FAIL "no just or no setsid on PATH, so the recipe cannot be run and killed"
@@ -518,7 +578,8 @@ else
         killed_copy="${copy}"
         live_owner; new_copy; age "${copy}" '3 hours ago'
         new_fake inherited
-        out="$(cd "${tree}" && env GQLC_GOLDENS_UNUSED_PROC_ROOT="${fake}" "${recipe[@]}" 2>"${scratch}/err")"
+        hostile "${fake}"
+        out="$(cd "${tree}" && env "${hostile_env[@]}" GQLC_GOLDENS_UNUSED_PROC_ROOT="${fake}" "${recipe[@]}" 2>"${scratch}/err")"
         rc=$?
         expect="goldens-unused scratch: removed 1 stale copies a killed run left under ${root}, freeing ${left} inodes (bd gqlc-7hyt)"
         reaped=no
@@ -533,7 +594,7 @@ else
             && ! command grep -Fq -- "TEST ONLY" "${scratch}/err"; then
             row exported-proc-root-is-not-read PASS "the recipe read /proc: the dead owner's copy reaped, the live owner's whole"
         else
-            row exported-proc-root-is-not-read FAIL "with GQLC_GOLDENS_UNUSED_PROC_ROOT exported at an empty directory, expected the killed copy reaped, the live owner's copy whole and no TEST ONLY line; reaped: ${reaped}; stderr: $(command grep -F -- "TEST ONLY" "${scratch}/err"); left: $(ls -A "${root}")"
+            row exported-proc-root-is-not-read FAIL "with GQLC_GOLDENS_UNUSED_PROC_ROOT and every name the script assigns exported at an empty directory, expected the killed copy reaped, the live owner's copy whole and no TEST ONLY line; reaped: ${reaped}; stderr: $(command grep -F -- "TEST ONLY" "${scratch}/err"); left: $(ls -A "${root}")"
         fi
     fi
 fi

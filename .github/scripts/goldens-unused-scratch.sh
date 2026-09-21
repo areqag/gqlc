@@ -79,10 +79,14 @@
 #
 #   - it is an ARGUMENT, and nothing is read from the environment. What a real
 #     run inherits is its environment; its argument list is the two words the
-#     recipe spells. A row runs the real recipe with an empty directory
-#     exported as GQLC_GOLDENS_UNUSED_PROC_ROOT, the name a shortcut would give
-#     it, and requires the sweep to have read /proc all the same;
-#   - <dir> must be an absolute path to a directory that is there, or rc=2;
+#     recipe spells. The rows export EVERY name this file assigns, read out
+#     of it each run, and GQLC_GOLDENS_UNUSED_PROC_ROOT, the name a shortcut
+#     would give it, at the script alone and through the real recipe, and
+#     require the sweep to have read /proc and its own numbers all the same.
+#     So an assignment here stays `x=value`, never `x="${x:-value}"`;
+#   - <dir> must be an absolute path to a directory that is there, symlinks
+#     followed, or rc=2. That is ALL that is checked: `/`, a link to a
+#     directory and a path holding a space or a newline are taken;
 #   - it is said on stderr, in one line, every time it is in effect.
 #
 # NOT RUN ANYWHERE: a host that really has no /proc (darwin). What the rows run
