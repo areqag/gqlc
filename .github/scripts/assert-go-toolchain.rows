@@ -91,7 +91,7 @@ refuses() {
 
 # --- allow rows -----------------------------------------------------------
 # Written first on purpose: an assertion that refuses the honest cold-cache run
-# reds every job in the repository the first time a toolchain bump lands.
+# reds every job that uses setup-go the first time a toolchain bump lands.
 
 accepts warm-cache-right-version "" "go version go${want} linux/amd64"
 accepts cold-cache-right-version "${notice}" "go version go${want} linux/amd64"
@@ -115,6 +115,11 @@ refuses distribution-suffix "" "go version go${want}-X:nodwarf5 linux/amd64"
 refuses version-not-in-token-field "" "go version devel go${want} linux/amd64"
 refuses notice-on-stdout-only "" "${notice}"
 refuses empty-stdout "" ""
+# Stderr is not a second place to look when stdout is empty. A script that
+# re-reads with 2>&1 in that case reports the notice, and the reason compared
+# whole is what catches it: the prefix check still refuses that script, so rc
+# alone cannot tell it from this one.
+refuses notice-on-stderr-empty-stdout "${notice}" ""
 
 # A go command that exits non-zero is refused whatever it printed, and says so
 # rather than reporting a version mismatch nobody measured.
@@ -124,6 +129,51 @@ if [ "${rc}" -eq 1 ] && [ -z "${out}" ] && [ "${reason}" != "${reason#*would not
 else
     row go-exits-nonzero FAIL "rc=${rc}, expected 1 with empty stdout and a 'would not run' reason; stdout: ${out}; reason: ${reason}"
 fi
+
+# The go command's stderr reaches the script's stderr whole: every line, in
+# order, and on a refusal AHEAD of the reason. setup-go echoes that capture into
+# the step log and hands only its last line to the annotation, so when the
+# toolchain fetch dies this is the one place the go command's own account of why
+# can be read. All three exits that follow a go run are pinned.
+#
+# What these rows do NOT say is that a real cold run logs the download notice
+# through this script. Measured 2026-09-20 with go1.27.1 over an empty
+# GOMODCACHE: the notice belongs to whichever go call downloads, which in
+# setup-go is the retry loop's, and the call this script makes afterwards wrote
+# nothing to stderr. A stub repeats its stderr on every call; the go command
+# does not.
+#
+# go_stderr_passes NAME STDERR RC REASON: stderr is compared WHOLE against the
+# stub's lines followed by REASON, so a dropped line, a reordered one and a
+# reason printed ahead of them each fail it. REASON is empty on an acceptance,
+# which adds no line of its own.
+go_stderr_passes() {
+    local name="$1" expect="$2" want_rc="$3" got
+    [ -z "$4" ] || expect+=$'\n'"$4"
+    got="$(cat "${scratch}/err")"
+    if [ "${rc}" -eq "${want_rc}" ] && [ "${got}" = "${expect}" ]; then
+        row "${name}" PASS "rc=${rc}, stderr is the stub's lines in order${4:+, then the reason}"
+    else
+        row "${name}" FAIL "rc=${rc}, expected ${want_rc} with stderr '${expect//$'\n'/|}'; stderr: ${got//$'\n'/|}"
+    fi
+}
+# The shape is the go command's own, measured 2026-09-20 with go1.27.1 over an
+# empty GOMODCACHE under `unshare -rn`: the notice, then this line less its
+# resolver address, exit 1.
+fetch_error="go: download go${want}: golang.org/toolchain@v0.0.1-go${want}.linux-amd64: Get \"https://proxy.golang.org/golang.org/toolchain/@v/v0.0.1-go${want}.linux-amd64.zip\": dial tcp: lookup proxy.golang.org: connect: network is unreachable"
+STUB_STDERR="${notice}"$'\n'"${fetch_error}" STUB_RC=1 run_assert "${want}" "${stub}"
+go_stderr_passes go-stderr-passes-when-refused "${notice}"$'\n'"${fetch_error}" 1 \
+    "\`${stub} version\` would not run, so there is nothing to hold against go${want}."
+# The second line on these two is the stub's own: no go run was seen to print
+# two stderr lines and then exit 0. It is there so that "whole" has two lines to
+# be held to on every path.
+two_lines="${notice}"$'\n'"go: a second line, which only a stub prints"
+wrong="go version go1.26.6 linux/amd64"
+STUB_STDERR="${two_lines}" STUB_STDOUT="${wrong}" run_assert "${want}" "${stub}"
+go_stderr_passes go-stderr-passes-when-mismatched "${two_lines}" 1 \
+    "go.mod names go${want}, but the provisioned toolchain reports: ${wrong}"
+STUB_STDERR="${two_lines}" STUB_STDOUT="go version go${want} linux/amd64" run_assert "${want}" "${stub}"
+go_stderr_passes go-stderr-passes-when-accepted "${two_lines}" 0 ""
 
 # An empty version must not reach the comparison: `go` alone is a prefix of
 # every line the go command prints.

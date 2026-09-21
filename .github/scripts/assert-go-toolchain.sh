@@ -25,8 +25,12 @@ fi
 # names the wanted version followed by a space, and a substring match over both
 # streams is satisfied by that notice whatever the `go version` line says.
 # Measured 2026-09-19 with go1.27.1 over an empty GOMODCACHE: the notice goes to
-# stderr and `go version go1.27.1 linux/amd64` is the whole of stdout. The go
-# command's stderr is left to pass through to the caller's log.
+# stderr and `go version go1.27.1 linux/amd64` is the whole of stdout.
+#
+# The go command's stderr is never captured, so it lands on this script's
+# stderr ahead of any reason. When the go command will not run, that is where
+# its own account of why is — a failed toolchain fetch, say — and the reason
+# below does not repeat it. The go-stderr-passes-* rows hold this.
 if ! reported="$("${go_cmd}" version)"; then
     echo "\`${go_cmd} version\` would not run, so there is nothing to hold against go${want}." >&2
     exit 1
