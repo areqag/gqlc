@@ -389,18 +389,32 @@ func isEmittedHelper(name string) bool {
 //     taken only for the first record decoded (`len(h.recordDecoders) ==
 //     1`) reads the field-less one, marks nothing, and the second record's
 //     decoder calls a helper the file does not declare. No fixture has
-//     that order, so the whole age and conformance packages passed it.
-//     The reverse order is beside it as the control on the ORDER: it
-//     passes under that mutant, so the pair says it is the position of
-//     the field-less record that matters and not the count of properties;
+//     that order, so the whole age and conformance packages passed it;
+//   - the reverse order, which holds the mirror image: the mark written
+//     as an ASSIGNMENT above the loop, `h.recordField = len(Fields) > 0`,
+//     so the LAST record decoded decides. That one passes the row above
+//     and fails here, and it too passed both packages. Each row passes
+//     under the other's mutant, so it takes the pair to hold that
+//     the mark is a disjunction over the batch's records and not a
+//     function of any one of them;
 //   - a record of a single NULLABLE field. recordWidth has three fields,
 //     two of them NOT NULL, so a mark taken only when `len(Fields) > 1`,
-//     or only for a NOT NULL field, still marked it. Two goldens caught
-//     both; no row here did.
+//     or only for a NOT NULL field, still marked it. Only goldens caught
+//     those — union_only_carrier_under_record both, and
+//     union_only_carrier_record_member the first — and no row here did;
+//   - a record whose ONLY field is a field-less record. The outer decoder
+//     reads its one field through the helper and the inner decoder reads
+//     none, so a mark withheld where the field is itself a declared
+//     record leaves nothing to mark it. The row after it puts a field on
+//     the inner record and PASSES under that mutant, because the inner
+//     record's own walk marks: it is there to say which of the two
+//     shapes the mutant shows on.
 func TestTheRecordFieldHelperIsDeclaredOnlyWhereARecordReadsAField(t *testing.T) {
 	const helper = "agtypeRecordField"
 	empty := graph.RecordOf(nil)
 	oneNullable := graph.RecordOf([]graph.RecordField{{Name: "note", Type: graph.TypeString}})
+	onlyARecord := graph.RecordOf([]graph.RecordField{{Name: "inner", Type: empty, NotNull: true}})
+	onlyAFieldedRecord := graph.RecordOf([]graph.RecordField{{Name: "inner", Type: oneNullable, NotNull: true}})
 
 	for _, row := range []struct {
 		widths []graph.PropertyType
@@ -413,6 +427,8 @@ func TestTheRecordFieldHelperIsDeclaredOnlyWhereARecordReadsAField(t *testing.T)
 		{[]graph.PropertyType{empty, recordWidth}, true},
 		{[]graph.PropertyType{recordWidth, empty}, true},
 		{[]graph.PropertyType{oneNullable}, true},
+		{[]graph.PropertyType{onlyARecord}, true},
+		{[]graph.PropertyType{onlyAFieldedRecord}, true},
 	} {
 		t.Run(widthsName(row.widths), func(t *testing.T) {
 			entities := entityOfWidths(t, row.widths)
