@@ -83,7 +83,11 @@
 #     of it each run, and GQLC_GOLDENS_UNUSED_PROC_ROOT, the name a shortcut
 #     would give it, at the script alone and through the real recipe, and
 #     require the sweep to have read /proc and its own numbers all the same.
-#     So an assignment here stays `x=value`, never `x="${x:-value}"`;
+#     So an assignment here stays `x=value`, never `x="${x:-value}"`, and a
+#     row reads this file for that: no default of a NAME in any spelling
+#     (`${1:-}` is an argument's, and stays), and no `printf -v`, `mapfile`,
+#     `readarray`, `declare` or `typeset`, which assign where the exported
+#     list does not look;
 #   - <dir> must be an absolute path to a directory that is there, symlinks
 #     followed, or rc=2. That is ALL that is checked: `/`, a link to a
 #     directory and a path holding a space or a newline are taken;
