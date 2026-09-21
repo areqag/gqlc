@@ -12,7 +12,8 @@
 #
 #   exit 0   match.     stdout: the PATH version, then the pin, one per line
 #   exit 3   mismatch.  stdout: the same two lines
-#   exit 1   there is no pin to compare against; stderr says why, stdout empty
+#   exit 1   one side could not be read — no pin, or a just that does not state
+#            a version; stderr says why, stdout empty
 #
 # Both lines are printed on a mismatch because both callers name both versions,
 # and a caller that re-read either one would be the second derivation this file
@@ -33,6 +34,23 @@ if ! printf '%s' "$want" | command grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
     echo "error: $pin_file does not hold a just version (got '$want')." >&2
     exit 1
 fi
-have="$(just --version | sed -n 's/^just //p')"
+# Asked in its own statement and not at the head of a pipeline: under `set -e`
+# with pipefail a `just --version` that exits 3 made this script exit 3 with
+# nothing printed, which both callers read as a mismatch between two empty
+# versions (bd gqlc-07di).
+reported=0
+said="$(just --version)" || reported=$?
+if [ "$reported" -ne 0 ]; then
+    echo "error: \`just --version\` exited $reported, so the just on PATH states no version to check against $pin_file." >&2
+    exit 1
+fi
+# Held to a version at the FRONT and compared whole below: `1.55.1 (abc 2026)`
+# states a version that is not the pin, which is a mismatch and the caller's to
+# answer; an empty or wordless answer states none, and is not.
+have="$(sed -n '1s/^just //p' <<<"$said")"
+if ! printf '%s' "$have" | command grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+'; then
+    echo "error: \`just --version\` does not state a just version (got '$(sed -n 1p <<<"$said")')." >&2
+    exit 1
+fi
 printf '%s\n%s\n' "$have" "$want"
 [ "$have" = "$want" ] || exit 3
