@@ -23,8 +23,8 @@ import (
 // field's type is spelled inline at every site that mentions it and no
 // helper signature can name it. Without the decode helper the field has
 // a type and no reader. Without the call in the entity decoder the helper
-// is emitted and dead, which nothing else reports: it compiles, and the
-// fence's linter skips every generated file (bd gqlc-nv8e).
+// is emitted and dead, which compiles; `unused` over the goldens reports
+// it for the record fixtures (`just check-goldens-unused`, bd gqlc-ukzq).
 //
 // Written against the rendered bytes rather than against decodeFunc,
 // because decodeFunc's answer is a NAME and a name is not a helper: the
