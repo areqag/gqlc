@@ -117,13 +117,15 @@ func carriesZone(goType string) bool {
 // helpers records which agtype encode / decode helpers a batch reaches
 // for. Each is emitted only when something calls it.
 //
-// Only one direction of that is gated. A helper referenced but not
-// declared fails to compile, which TestGoldenBuild and
+// Both directions of that are gated, the second with one limit. A helper
+// referenced but not declared fails to compile, which TestGoldenBuild and
 // TestEmittedHelpersAreClosedOverWhatTheyCall both catch. A helper
-// declared but not referenced is caught by nothing: .golangci.yml sets
-// generated: lax, so the linter skips the emitted goldens outright. The
-// unreferenced direction is dead weight in the output rather than a
-// defect in it, which is why it is recorded here and not gated.
+// nothing calls, declared into a golden package, compiles, and is
+// reported by `unused` over the goldens (`just check-goldens-unused`,
+// part of the required fence, bd gqlc-ukzq). One called only by an
+// entity decoder that nothing calls is not reported, because entity
+// decoders are rooted there whether or not anything calls THEM (bd
+// gqlc-m1dk).
 //
 // agtypeEntity, agtypeObject, agtypeSpan and agtypeString are not among
 // them. A graph type's element type list is one-or-more (GQL.g4
@@ -141,11 +143,11 @@ type helpers struct {
 	// than its carrier decodes. They are separate marks rather than one,
 	// because an emission that declares only integer widths would
 	// otherwise carry agtypeFloat32 and the math import it alone names
-	// (bd gqlc-awtb). The unused import does not compile. The unused
-	// function alone compiles, and is reported by `unused` over the
-	// goldens (`just check-goldens-unused`, bd gqlc-ukzq) — unless an
-	// entity decoder calls it, since those are rooted there whether or
-	// not anything calls THEM (bd gqlc-m1dk).
+	// (bd gqlc-awtb). The unused import does not compile. The function
+	// alone compiles, and where nothing calls it is reported by `unused`
+	// over the goldens (`just check-goldens-unused`, bd gqlc-ukzq). Where
+	// only an entity decoder calls it, it is not, even if nothing calls
+	// the decoder: those are rooted there (bd gqlc-m1dk).
 	intAs       bool // agtypeIntAs — an integer width narrower than int64 decodes
 	narrowFloat bool // agtypeFloat32 — a FLOAT32 decodes
 
