@@ -2993,17 +2993,25 @@ gh-orphans-close *args:
 # .golangci.yml via upward walk, giving parity for free. Used identically
 # locally (post-generate) and in CI.
 #
-# THE LINT STEP READS NO GOLDEN, and the directive above is not met by it. The
-# parity is with the root config including its `exclusions: generated: lax`, and
-# every golden carries the generated header: measured 2026-09-20, 1081 of this
-# module's 1105 Go files, which leaves golangci-lint the 24 hand-written ones.
-# Build, vet and tidy are what hold the goldens here. In particular an
-# unexported helper the emitter over-emits is reported by nothing — it compiles,
-# vet is silent, and a regenerated golden records it (bd gqlc-nv8e). Lifting the
-# exclusion is not a one-line repair: the full linter set then reports 1387
-# findings, and `unused` stays silent until `generated-is-used: false` is set as
-# well, at which point it reports 514. The measurements and the gate are bd
-# gqlc-ukzq.
+# THE LINT STEP BELOW READS NO GOLDEN. Its parity is with the root config
+# including `exclusions: generated: lax`, and every golden carries the generated
+# header, so golangci-lint is left the module's hand-written files (counted on
+# every run by check-goldens-unused, below). Build, vet and tidy hold the goldens
+# here; of the linter set, ONE linter does:
+#
+#   - ENFORCED on generated code: `unused`, by check-goldens-unused, which runs
+#     after this body. An unexported symbol the emitter emits with no caller
+#     reds this required check — except an entity decoder, which that recipe
+#     roots, counts and prints, pending bd gqlc-m1dk.
+#   - NOT ENFORCED on generated code: every other linter in .golangci.yml, by
+#     decision. Measured 2026-09-20 at golangci-lint v2.13.1 with both of that
+#     recipe's locks lifted in a copy of the root config, the other linters
+#     report 873 findings over the goldens: gofumpt 252, gocyclo 214, errcheck
+#     158, gocognit 152, dupl 77, ireturn 11, gocritic 9. So `generated` is not
+#     flipped in .golangci.yml. The stage briefs under docs/specs
+#     (codegen-stage-c1.md through c6) say emitted code "must lint-clean under
+#     .golangci.yml ... enforced automatically"; they are history, and this
+#     list is what holds today.
 #
 # The module set is DISCOVERED, not named (bd gqlc-oxne). It used to be the
 # literal `test/data/codegen`, three times over, while `just vuln` beside it had
@@ -3032,7 +3040,7 @@ gh-orphans-close *args:
 #
 # check-codegen-external-tests runs ahead of the linter: both fail on the same
 # regression, and only the guard names the scan it protects (ADR 0026).
-test-codegen-fence: sweep-discovery-probes ensure-golangci check-codegen-external-tests
+test-codegen-fence: sweep-discovery-probes ensure-golangci check-codegen-external-tests && check-goldens-unused
     #!/usr/bin/env bash
     set -euo pipefail
     scope() { go run ./internal/tools/modscope "$@"; }
@@ -3130,6 +3138,181 @@ test-codegen-fence: sweep-discovery-probes ensure-golangci check-codegen-externa
         (cd "${m}" && go mod tidy -diff)
         (cd "${m}" && {{ lint_lock }} {{ golangci }} run)
     done
+
+# `unused` over the goldens, with generated files VISIBLE (bd gqlc-ukzq). Runs
+# after test-codegen-fence's body, so a golden that does not compile is reported
+# by `go build` in its own words rather than here as a typecheck failure.
+#
+# What it holds: an unexported symbol the emitter writes into a package that
+# never names it. That compiles, vet is silent, and a regenerated golden records
+# it, so before this recipe golden byte comparison was the only thing between an
+# over-emitted helper and master (bd gqlc-nv8e; the instance that was live is bd
+# gqlc-vvxn). The per-use gates on the temporal, uuid, record and union helpers
+# are what this makes falsifiable.
+#
+# TWO LOCKS, and the config below lifts both. `exclusions.generated: lax` drops
+# every file carrying the generated header, and with that alone lifted `unused`
+# still reports nothing, because the linter itself counts every object in a
+# generated file as used until `generated-is-used: false`. Measured 2026-09-20
+# at v2.13.1; each lock is restored on its own, on every run, in the witness
+# below.
+#
+# ENTITY DECODERS ARE ROOTED, and that is an exemption, not a finding fixed.
+# Both backends emit decode<Entity> for every entity the schema declares whether
+# or not the batch reads it, which is an open design question (bd gqlc-m1dk) and
+# not this recipe's to settle. Unrooted, `unused` reports 513 over these goldens
+# (same measurement): the decoders nothing calls, and — the larger part — the
+# helpers only those decoders call. That second part is why this is a ROOT and
+# not an exclusion rule: a transitive finding carries an ordinary helper name,
+# toDate or agtypeInt64, which is exactly the name this gate has to keep
+# reporting elsewhere. internal/tools/goldenroots picks the decoders out by
+# SHAPE — func decode<T>(x) (<T>, error) where <T> is an exported struct the
+# package defines — so decodeRecord<digest> and decodeUnion<digest>, which are
+# emitted per use, stay held; it prints what it rooted and how many of those
+# nothing else names, and refuses a run that rooted none.
+#
+# The tree is not edited. The module is copied outside it (~1600 files, ~30 ms
+# measured), the roots are written into the copy, and the trap removes it. The
+# cache sits under the copy too: every run's paths are new, so entries written
+# to this checkout's cache would never be read again.
+#
+# The whole recipe is ~3 s of the fence on the dev host, the full-module run
+# being about half of it.
+[private]
+check-goldens-unused: sweep-discovery-probes ensure-golangci
+    #!/usr/bin/env bash
+    set -euo pipefail
+    scope() { go run ./internal/tools/modscope "$@"; }
+
+    modules_raw="$(scope modules)" || exit 1
+    declared_raw="$(scope declared)" || exit 1
+    taglist="$(printf '%s\n' "${declared_raw}" | sed '/^$/d' | paste -sd,)"
+
+    scratch="$(mktemp -d "{{ scratch_root }}/gqlc-goldens-unused-XXXXXX")"
+    trap 'rm -rf "${scratch}"' EXIT
+
+    # The tags are the root config's own, read by the reader
+    # check-golangci-build-tags holds to the tree, so this config cannot fall
+    # out of step with .golangci.yml: there is no second list.
+    write_config() {
+        local generated="${1}" generated_is_used="${2}"
+        {
+            printf 'version: "2"\nrun:\n  build-tags: [%s]\n' "${taglist}"
+            printf 'linters:\n  default: none\n  enable: [unused]\n'
+            printf '  settings:\n    unused:\n      generated-is-used: %s\n' "${generated_is_used}"
+            printf '  exclusions:\n    generated: %s\n' "${generated}"
+        } >"${scratch}/${3}"
+    }
+    write_config disable false unused.yml
+    write_config lax     false lock-generated.yml
+    write_config disable true  lock-generated-is-used.yml
+
+    # Leaves the linter's exit status in lint_rc and what it printed in lint_out.
+    # Paths in lint_out are relative to the scratch root, which mirrors the tree,
+    # so a finding reads as the path of the golden it is about.
+    lint_rc=0; lint_out=""
+    run_unused() {
+        local module="${1}" config="${2}"
+        shift 2
+        lint_rc=0
+        lint_out="$(cd "${scratch}/${module}" && GOLANGCI_LINT_CACHE="${scratch}/cache" \
+            {{ quote(lint_lock) }} {{ quote(golangci) }} run -c "${scratch}/${config}" \
+            --max-issues-per-linter 0 --max-same-issues 0 "$@" 2>&1)" || lint_rc=$?
+    }
+
+    # WITNESS targets: one emitted package per driver family, found rather than
+    # named, and refused if either family has none.
+    first_golden() {
+        find "${scratch}/${1}" -path "*/golden/${2}/models.go" | LC_ALL=C sort | head -n 1
+    }
+
+    fenced=0
+    while IFS= read -r m; do
+        case "${m}" in ""|".") continue ;; esac
+        fenced=$((fenced + 1))
+        mkdir -p "${scratch}/$(dirname "${m}")"
+        cp -R "${m}" "${scratch}/${m}"
+
+        total="$(find "${scratch}/${m}" -name '*.go' | wc -l)"
+        generated="$(find "${scratch}/${m}" -name '*.go' -exec grep -lE '^// Code generated .* DO NOT EDIT\.$' {} + | wc -l)"
+        echo "unused over goldens: ${m}, ${generated} of ${total} Go files carry the generated header"
+
+        # WITNESS, ahead of the rooting so that a sink rooting too much roots
+        # these as well and is caught by their silence. They are shaped as the
+        # two per-use decoder families a `^decode` rule would swallow: a record
+        # decoder answering an unexported alias, a union decoder answering any.
+        neo4j_pkg="$(first_golden "${m}" 'neo4j-go-v*')"
+        age_pkg="$(first_golden "${m}" 'apache-age-pgx-v*')"
+        if [ -z "${neo4j_pkg}" ] || [ -z "${age_pkg}" ]; then
+            echo "error: ${m} holds no golden/neo4j-go-v*/models.go or no golden/apache-age-pgx-v*/models.go," >&2
+            echo "       so the witness below has no emitted package to write into (bd gqlc-ukzq)." >&2
+            echo "       If a driver family was renamed, rename it here; if ${m} holds no goldens," >&2
+            echo "       this recipe has to learn which modules do." >&2
+            exit 1
+        fi
+        cp "${neo4j_pkg}" "${scratch}/neo4j.clean"
+        cp "${age_pkg}" "${scratch}/age.clean"
+        printf '\ntype recordfencewitness = struct{}\n\nfunc decodeRecordfencewitness(v map[string]any) (recordfencewitness, error) {\n\t_ = v\n\treturn recordfencewitness{}, nil\n}\n' >>"${neo4j_pkg}"
+        printf '\nfunc decodeUnionfencewitness(raw []byte) (any, error) {\n\treturn raw, nil\n}\n' >>"${age_pkg}"
+
+        go run ./internal/tools/goldenroots "${scratch}/${m}"
+
+        witness_pkgs=("$(dirname "${neo4j_pkg}")" "$(dirname "${age_pkg}")")
+        run_unused "${m}" unused.yml "${witness_pkgs[@]}"
+        for name in decodeRecordfencewitness decodeUnionfencewitness; do
+            case "${lint_out}" in
+                *"func ${name} is unused"*) ;;
+                *)  echo "error: an unexported func nothing calls, ${name}, was appended to a golden in" >&2
+                    echo "       a scratch copy and \`unused\` did not name it (exit ${lint_rc}). Either" >&2
+                    echo "       generated files are no longer visible to this run, or the rooting in" >&2
+                    echo "       internal/tools/goldenroots has widened past entity decoders — this" >&2
+                    echo "       func is shaped like a per-use record/union decoder, which a rule" >&2
+                    echo "       keyed on the \`decode\` prefix roots. The gate below is blind to an" >&2
+                    echo "       over-emitted helper (bd gqlc-ukzq). What the linter said:" >&2
+                    printf '%s\n' "${lint_out}" | sed 's/^/         /' >&2
+                    exit 1
+                    ;;
+            esac
+        done
+
+        # One row per LOCK: the same run with that lock restored must go quiet.
+        # They are what say the witness above measured the two settings and not
+        # something else, and what reddens if a golangci-lint bump makes either
+        # setting inert — at which point the config above is carrying a line
+        # that does nothing and the comment on it is wrong.
+        for lock in lock-generated lock-generated-is-used; do
+            run_unused "${m}" "${lock}.yml" "${witness_pkgs[@]}"
+            if [ "${lint_rc}" -ne 0 ]; then
+                echo "error: with ${lock}.yml — this recipe's config with one of its two locks put" >&2
+                echo "       back — \`unused\` still exited ${lint_rc} over the witness packages, so" >&2
+                echo "       that setting is not what hides a generated file's symbols and the" >&2
+                echo "       two-lock account in this recipe's comment is stale (bd gqlc-ukzq):" >&2
+                printf '%s\n' "${lint_out}" | sed 's/^/         /' >&2
+                exit 1
+            fi
+        done
+
+        cp "${scratch}/neo4j.clean" "${neo4j_pkg}"
+        cp "${scratch}/age.clean" "${age_pkg}"
+
+        run_unused "${m}" unused.yml
+        if [ "${lint_rc}" -ne 0 ]; then
+            echo "error: \`unused\` over ${m} with generated files visible (bd gqlc-ukzq). Each" >&2
+            echo "       symbol below is emitted into a package that never names it; the paths are" >&2
+            echo "       the goldens', read from a scratch copy. The fix is in the emitter — gate" >&2
+            echo "       the helper on the use that calls it — and then a regenerate. Entity" >&2
+            echo "       decoders are not reported: they are rooted above, pending bd gqlc-m1dk." >&2
+            printf '%s\n' "${lint_out}" | sed 's/^/         /' >&2
+            exit 1
+        fi
+        echo "unused over goldens: ${m}, 0 issues"
+    done <<<"${modules_raw}"
+
+    if [ "${fenced}" -eq 0 ]; then
+        echo "error: discovery found no module besides the root, so \`unused\` read no golden" >&2
+        echo "       (bd gqlc-ukzq); see the same refusal in test-codegen-fence." >&2
+        exit 1
+    fi
 
 # Holds every nested module to the packaging that keeps it inside govulncheck's
 # call graph (ADR 0026, bd gqlc-rohp). The fence is the only always-run required
