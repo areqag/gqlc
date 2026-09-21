@@ -2904,6 +2904,18 @@ gh-orphans-close *args:
 # .golangci.yml via upward walk, giving parity for free. Used identically
 # locally (post-generate) and in CI.
 #
+# THE LINT STEP READS NO GOLDEN, and the directive above is not met by it. The
+# parity is with the root config including its `exclusions: generated: lax`, and
+# every golden carries the generated header: measured 2026-09-20, 1081 of this
+# module's 1105 Go files, which leaves golangci-lint the 24 hand-written ones.
+# Build, vet and tidy are what hold the goldens here. In particular an
+# unexported helper the emitter over-emits is reported by nothing — it compiles,
+# vet is silent, and a regenerated golden records it (bd gqlc-nv8e). Lifting the
+# exclusion is not a one-line repair: the full linter set then reports 1387
+# findings, and `unused` stays silent until `generated-is-used: false` is set as
+# well, at which point it reports 514. The measurements and the gate are bd
+# gqlc-ukzq.
+#
 # The module set is DISCOVERED, not named (bd gqlc-oxne). It used to be the
 # literal `test/data/codegen`, three times over, while `just vuln` beside it had
 # already been taught to find its modules on disk — so a third module added to

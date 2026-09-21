@@ -16,9 +16,10 @@ import (
 // encodings is codegen.RecordEncodings' answer, so the file's order is
 // the canonical-encoding order both backends share and is byte-stable
 // across runs. uses is conversionUses' record half, so a helper is
-// emitted exactly where something calls it — an unexported function
-// nothing calls fails the emitted package's own lint fence, which is a
-// red fixture rather than a dead line.
+// emitted exactly where something calls it. No gate downstream enforces
+// that: a helper nothing calls compiles and the fence's linter skips
+// generated files, so a regenerated golden records it (bd gqlc-nv8e,
+// gqlc-ukzq). TestRecordHelpersAreEmittedOnlyWhereCalled is what holds it.
 func renderRecordHelpers(pkg string, encodings []graph.PropertyType, uses map[graph.PropertyType]carrierUse, target driverTarget) []byte {
 	var body strings.Builder
 	for _, pt := range encodings {
