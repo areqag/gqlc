@@ -11,6 +11,9 @@
 #                            its owner in it, print its path
 #   sweep <root>             remove the copies under <root> whose owner is gone
 #
+# Either may be preceded by `--test-proc-root <dir>`, which is for the rows
+# alone: see THE PROC ROOT below.
+#
 # Both halves are here so that the name, the owner record and the reading of
 # /proc are each spelled once. The rows beside this file build every fixture
 # through `new`, so they do not spell them either.
@@ -32,16 +35,22 @@
 #     seven digits), a tick no longer than a u64. ANYTHING ELSE READS AS ALIVE —
 #     an empty or garbled field, `0<pid>` beside that pid's right tick — because
 #     a record this script cannot have written says nothing about a death. So
-#     does an owner that is a zombie, until its parent reaps it, and so does
-#     every owner on a host with no /proc: there `new` writes `-` for the tick,
-#     and `sweep` removes nothing at all;
+#     does an owner that is a zombie, until its parent reaps it; so does an
+#     owner whose stat file is THERE and has no number in field 22, since only
+#     a stat that cannot be read at all says the pid is gone; and so does every
+#     owner on a host with no /proc: there `new` writes `-` for the tick, and
+#     `sweep` removes nothing at all;
 #   - the record is OLDER than stale_minutes. The owner test reads this host's
 #     process table, so it calls dead an owner it cannot see: one in another pid
 #     namespace sharing <root>, or on another host sharing it. Age is what is
 #     left for those, so the threshold has to outlast a live run. The recipe
 #     makes four golangci-lint runs and each may wait out .githooks/lint-lock.sh's
 #     whole budget, 755 s at its ceiling: 50 minutes of waiting, against ~3 s of
-#     work on the dev host. 90 is that with room.
+#     work on the dev host. 90 is that with room. ASSUMED, and held by nothing
+#     (2026-09-20): ONE fenced module, test/data/codegen. The recipe makes the
+#     four runs once PER module `modscope modules` names besides the root, so a
+#     second one takes a live run's ceiling to 100 minutes, past this number:
+#     re-derive it then.
 #
 # <root> must be absolute, and both halves refuse one that is not: a relative
 # root beginning with `-` reads to find as an option, and the sweep would go
@@ -61,32 +70,54 @@
 # between unlinking the record and the rmdir after it leaves another. Both are
 # unmarked, which the second rule protects.
 #
+# THE PROC ROOT. `--test-proc-root <dir>` makes both halves read `<dir>/<pid>/stat`
+# where they would read /proc's, so that the rows can stand an EMPTY directory
+# in for a host with no /proc, or write a stat file no live process has, on a
+# runner that cannot mask /proc (bd gqlc-qbah: CI's cannot, and the rows that
+# needed it said SKIP in the one job that gates a merge). Told the wrong
+# directory a sweeper calls every owner dead, so:
+#
+#   - it is an ARGUMENT, and nothing is read from the environment. What a real
+#     run inherits is its environment; its argument list is the two words the
+#     recipe spells. The rows export EVERY name this file assigns, read out
+#     of it each run, and GQLC_GOLDENS_UNUSED_PROC_ROOT, the name a shortcut
+#     would give it, at the script alone and through the real recipe, and
+#     require the sweep to have read /proc and its own numbers all the same.
+#     So an assignment here stays `x=value`, never `x="${x:-value}"`;
+#   - <dir> must be an absolute path to a directory that is there, symlinks
+#     followed, or rc=2. That is ALL that is checked: `/`, a link to a
+#     directory and a path holding a space or a newline are taken;
+#   - it is said on stderr, in one line, every time it is in effect.
+#
 # NOT RUN ANYWHERE: a host that really has no /proc (darwin). What the rows run
-# is this host with /proc masked inside a user namespace, where `unshare -rm`
-# is allowed, and they say SKIP where it is not.
+# is this host told to read an empty directory. `mv -T`, `find -mmin` and
+# `touch -h` are GNU's as well; a sweep whose mv refuses -T removes nothing.
 set -euo pipefail
 
 prefix="gqlc-goldens-unused"
 record=".gqlc-goldens-unused-owner"
 stale_minutes=90
-
-# The tick <pid> was started at, or non-zero if it cannot be read. The command
-# name is field 2 and may itself hold spaces and parentheses, so the count
-# starts after the LAST ") ": field 3 is then $1, and field 22 is $20.
-proc_start() {
-    local stat
-    stat="$(cat "/proc/${1}/stat" 2>/dev/null)" || return 1
-    stat="${stat##*) }"
-    # shellcheck disable=SC2086 # split into fields on purpose
-    set -- ${stat}
-    [ -n "${20:-}" ] || return 1
-    printf '%s\n' "${20}"
-}
+proc_root="/proc"
 
 # A decimal number of at most ${1} digits, written the way the kernel writes one.
 canonical() {
     case "${2}" in "" | 0?* | *[!0-9]*) return 1 ;; esac
     [ "${#2}" -le "${1}" ]
+}
+
+# The tick <pid> was started at. Returns 1 if there is no stat file to read,
+# which is what a pid nobody holds looks like, and 2 if there is one and no tick
+# in it. The command name is field 2 and may itself hold spaces and parentheses,
+# so the count starts after the LAST ") ": field 3 is then $1, and field 22 is
+# $20.
+proc_start() {
+    local stat
+    stat="$(cat "${proc_root}/${1}/stat" 2>/dev/null)" || return 1
+    stat="${stat##*) }"
+    # shellcheck disable=SC2086 # split into fields on purpose
+    set -- ${stat}
+    canonical 20 "${20:-}" || return 2
+    printf '%s\n' "${20}"
 }
 is_pid() { canonical 7 "${1}" && [ "${1}" != 0 ]; }
 
@@ -101,12 +132,13 @@ absolute() {
 }
 
 owner_alive() {
-    local pid="" start="" now
+    local pid="" start="" now unread=0
     read -r pid start <"${1}" 2>/dev/null || true
     is_pid "${pid}" || return 0
     canonical 20 "${start}" || return 0
-    now="$(proc_start "${pid}")" || return 1
-    [ "${now}" = "${start}" ]
+    now="$(proc_start "${pid}")" || unread=$?
+    [ "${unread}" -ne 2 ] || return 0
+    [ "${unread}" -eq 0 ] && [ "${now}" = "${start}" ]
 }
 
 new() {
@@ -144,6 +176,17 @@ sweep() {
     [ "${removed}" -eq 0 ] ||
         echo "goldens-unused scratch: removed ${removed} stale copies a killed run left under ${root}, freeing ${freed} inodes (bd gqlc-7hyt)"
 }
+
+if [ "${1:-}" = --test-proc-root ]; then
+    proc_root="${2:-}"
+    case "${proc_root}" in /*) ;; *) proc_root="" ;; esac
+    if [ ! -d "${proc_root}" ]; then
+        echo "error: --test-proc-root '${2:-}' is not an absolute path to a directory, so nothing is read from it, swept or made (bd gqlc-qbah)." >&2
+        exit 2
+    fi
+    echo "goldens-unused scratch: TEST ONLY: process start ticks are read from ${proc_root} and not from /proc (bd gqlc-qbah)" >&2
+    shift 2
+fi
 
 usage="usage: goldens-unused-scratch.sh new <root> <owner-pid> | sweep <root>"
 case "${1:-}" in
