@@ -400,6 +400,11 @@ jobs:
       # linter too — it is where the 429 in bd gqlc-l45j's first witness landed.
       - uses: ./.github/actions/setup-golangci
       - run: just test-codegen-fence
+      # The rows for the scratch copy the fence's `unused` run makes, and for the
+      # sweep that reaps one a SIGKILLed run left behind (bd gqlc-7hyt). They ride
+      # this job because the last row runs that recipe for real, which needs
+      # what this job already provisions.
+      - run: just test-goldens-unused-scratch
 
   actionlint:
     runs-on: ubuntu-latest
