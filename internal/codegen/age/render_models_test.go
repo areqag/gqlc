@@ -557,6 +557,13 @@ func helperDeclaredAndCalled(t *testing.T, src []byte, name string) (declared, c
 func TestEveryBoundRecordsEncoderIsDeclaredAndEveryDeclaredOneIsCalled(t *testing.T) {
 	small := graph.RecordOf([]graph.RecordField{{Name: "x", Type: graph.TypeInt32, NotNull: true}})
 	around := graph.RecordOf([]graph.RecordField{{Name: "inner", Type: small, NotNull: true}})
+	empty := graph.RecordOf(nil)
+	snake := graph.RecordOf([]graph.RecordField{{Name: "zip_code", Type: graph.TypeInt32, NotNull: true}})
+	camel := graph.RecordOf([]graph.RecordField{{Name: "zipCode", Type: graph.TypeInt32, NotNull: true}})
+	snakeTy, _ := age.TypeMap{}.Property(snake)
+	camelTy, _ := age.TypeMap{}.Property(camel)
+	require.Equal(t, snakeTy, camelTy,
+		"the two field names no longer mangle to one Go field, so the row binding both is two records of two Go types")
 
 	for _, row := range []struct {
 		name     string
@@ -568,6 +575,14 @@ func TestEveryBoundRecordsEncoderIsDeclaredAndEveryDeclaredOneIsCalled(t *testin
 		{
 			name: "two records bound", binds: []boundWidth{{width: recordWidth}, {width: small}},
 			encoders: []graph.PropertyType{recordWidth, small},
+		},
+		{
+			name: "the same two in the other order", binds: []boundWidth{{width: small}, {width: recordWidth}},
+			encoders: []graph.PropertyType{recordWidth, small},
+		},
+		{
+			name: "a field-less record between two others", binds: []boundWidth{{width: recordWidth}, {width: empty}, {width: small}},
+			encoders: []graph.PropertyType{recordWidth, empty, small},
 		},
 		{
 			name: "one record bound twice", binds: []boundWidth{{width: small}, {width: small}},
@@ -593,6 +608,14 @@ func TestEveryBoundRecordsEncoderIsDeclaredAndEveryDeclaredOneIsCalled(t *testin
 			name: "a list of one and a nullable other", binds: []boundWidth{{width: graph.ListOf(recordWidth, true)}, {width: small, nullable: true}},
 			encoders: []graph.PropertyType{recordWidth, small},
 		},
+		{
+			name: "a list of nullable records", binds: []boundWidth{{width: graph.ListOf(recordWidth, false)}},
+			encoders: []graph.PropertyType{recordWidth},
+		},
+		{
+			name: "two records of one Go type", binds: []boundWidth{{width: snake}, {width: camel}},
+			encoders: []graph.PropertyType{snake, camel},
+		},
 	} {
 		t.Run(row.name, func(t *testing.T) {
 			files := renderRecordBatch(t, row.reads, row.binds)
@@ -606,7 +629,9 @@ func TestEveryBoundRecordsEncoderIsDeclaredAndEveryDeclaredOneIsCalled(t *testin
 				}
 				declared, called := recordHelpersDeclaredAndCalled(t, family.prefix+"Record", files)
 				require.ElementsMatch(t, want, called,
-					"the row's own premise is off: these are not the %sRecord helpers the batch calls", family.prefix)
+					"these are not the %sRecord helpers the batch calls. Either the row's own premise is off, or "+
+						"one that calls another is itself undeclared and its call sites went with it: models.go declares %v",
+					family.prefix, declared)
 				require.ElementsMatch(t, called, declared,
 					"the batch calls the %sRecord helpers %v and models.go declares %v. Declared with no caller "+
 						"compiles and only a golden would record it; called with no declaration, or declared "+
