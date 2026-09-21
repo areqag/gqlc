@@ -57,24 +57,28 @@ scratch_root := "/tmp"
 # states is a red-in-CI-green-here nobody can reproduce (bd gqlc-rnyit). Not
 # wired into any gate: repinning every host is a rollout, so this answers when
 # asked rather than reddening checkouts whose host is not the pin yet.
+#
+# The comparison is .github/scripts/just-version-vs-pin.sh, which `gates` reads
+# too, for its justfile-format arm (bd gqlc-i2lw). What is shared is the
+# DERIVATION of "matches the pin". The refusal below is this recipe's alone:
+# `gates` skips that arm on a mismatch and installs nothing.
 check-just-version:
     #!/usr/bin/env bash
     set -euo pipefail
     pin_file="{{ justfile_directory() }}/.github/actions/setup-just/just-version"
-    if [ ! -f "$pin_file" ]; then
-        echo "error: $pin_file is absent, so there is no pin to check against." >&2
-        exit 1
-    fi
-    want="$(tr -d '[:space:]' < "$pin_file")"
-    if ! printf '%s' "$want" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
-        echo "error: $pin_file does not hold a just version (got '$want')." >&2
-        exit 1
-    fi
-    have="$(just --version | sed -n 's/^just //p')"
-    if [ "$have" = "$want" ]; then
-        echo "just $have matches the pin ($pin_file)"
-        exit 0
-    fi
+    verdict=0
+    versions="$("{{ justfile_directory() }}/.github/scripts/just-version-vs-pin.sh" "$pin_file")" || verdict=$?
+    have="$(sed -n 1p <<<"$versions")"
+    want="$(sed -n 2p <<<"$versions")"
+    case "$verdict" in
+        0)
+            echo "just $have matches the pin ($pin_file)"
+            exit 0
+            ;;
+        3) ;;
+        # No pin to compare against, and the comparison has already said why.
+        *) exit "$verdict" ;;
+    esac
     echo "error: just $have is on PATH and this tree pins $want ($pin_file)." >&2
     echo "       Install the pin:" >&2
     echo "         curl --proto '=https' --tlsv1.2 -sSfL https://just.systems/install.sh \\" >&2
@@ -1253,6 +1257,18 @@ test-bd-prime-guard:
 # is already a required context.
 test-setup-go-assertion:
     @.github/scripts/assert-go-toolchain.rows .github/scripts/assert-go-toolchain.sh
+
+# The rows for the `gates` recipe's justfile-format arm, for the comparison it
+# shares with check-just-version, and for that recipe's own answers (bd
+# gqlc-i2lw). ~1s: the real `gates` body runs under the real just with every
+# other arm answered by a stub on PATH, so the rows do not depend on which just
+# this host has — which is the variable under test.
+#
+# ENROLLED UNDER `tidy`, in ci.yml and in the `gates` recipe, beside
+# test-setup-go-assertion above and for its reason. CI is also the only place
+# the pinned half of that arm runs for real on every PR.
+test-gates-justfile-format:
+    @.github/scripts/gates-justfile-format.rows justfile
 
 # The rows for `just complexity`'s EXIT CODE, which is the only thing
 # .githooks/pre-commit has to tell "a function is over the gate" from "nothing
@@ -2588,6 +2604,21 @@ fmt: ensure-golangci
 fmt-check: ensure-golangci
     {{ golangci }} fmt --diff
 
+# The justfile's own formatting, as ci.yml's tidy job checks it, plus the remedy
+# (bd gqlc-nuk0, gqlc-i2lw). The formatter is --unstable, so this verdict is CI's
+# only under the just CI pins: `just check-just-version` says whether this host
+# has it, and `gates` asks that before running this as an arm. Run by hand it
+# answers for whatever just is on PATH.
+#
+# fails when `just --fmt --unstable` would rewrite the justfile
+check-justfile-format:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    if ! just --fmt --check --unstable; then
+        echo "error: the justfile is not formatted as \`just --fmt --unstable\` would write it. Repair: just --fmt --unstable" >&2
+        exit 1
+    fi
+
 # THE PRE-PR GATE SET: every required CI context that can run on this machine.
 #
 # It exists because a hand-written list of gates drifts and nothing tells you.
@@ -2636,9 +2667,27 @@ fmt-check: ensure-golangci
 #                bd-export-monotonic-local and check-label-lengths.py and
 #                test-bd-prime-guard and test-setup-go-assertion as their
 #                own arms, and `just lint-hooks .github/scripts` because `just
-#                lint` already depends on it. One step is runnable here and
-#                is not an arm: `just --fmt --check --unstable` (read
-#                2026-09-20 against ci.yml's tidy job; bd gqlc-i2lw).
+#                lint` already depends on it.
+#   tidy (SKIPPED)
+#                `just check-justfile-format`, which is that job's `just
+#                --fmt --check --unstable` step, is an arm ONLY WHEN THE JUST
+#                ON PATH IS THE ONE CI PINS (bd gqlc-i2lw). It reads nothing
+#                but the tree, so unlike the steps above it is reachable
+#                here; but the formatter is --unstable and the local just is
+#                unpinned (bd gqlc-rnyit), so another just's verdict is not
+#                CI's in either direction — a red that CI would not give, or
+#                a green that CI reds one round trip later, which is the cost
+#                this recipe exists to remove. On any other just the arm is
+#                SKIPPED and not failed: repinning every host is a rollout,
+#                and an arm red on every unpinned host teaches people to read
+#                past a red `gates`. A skip is never silent. It is said under
+#                the arm's own header, again in the NOT-covered summary with
+#                both versions, and the closing line stops saying "all
+#                passed"; the arm is not counted among those that ran. A pin
+#                that cannot be READ is a failure, not a skip. "Matches the
+#                pin" is .github/scripts/just-version-vs-pin.sh, the one
+#                derivation `check-just-version` reads too; that recipe's
+#                refusal is deliberately not what is wired in here.
 #
 # `just fmt-check` is an arm but is NOT a CI job: no workflow calls it. It is
 # here because it prints a diff where `golangci-lint run` prints issues, and it
@@ -2660,6 +2709,7 @@ gates:
     set -uo pipefail
     failed=()
     contexts=()
+    skipped=()
 
     # $1 is the required CI context this arm stands for; the rest is the command.
     # The context is COLLECTED rather than restated in the summary below, because
@@ -2680,6 +2730,31 @@ gates:
         fi
     }
 
+    # `run`, for an arm whose verdict is CI's only under the just CI pins. On any
+    # other just it is SKIPPED: said here, carried into the summary, and NOT
+    # collected into contexts, which would count an arm that graded nothing.
+    # Only a mismatch (3) skips. Any other non-zero is a pin that could not be
+    # read, and that fails the arm: read as a skip, it would be an arm that stops
+    # grading on every host at once with nothing red to say so.
+    run_under_pinned_just() {
+        local ctx="$1"; shift
+        local versions verdict=0 have want
+        echo ""
+        echo "=== gates[${ctx}]: $*"
+        versions="$(.github/scripts/just-version-vs-pin.sh .github/actions/setup-just/just-version)" || verdict=$?
+        if [ "${verdict}" -eq 3 ]; then
+            have="$(sed -n 1p <<<"${versions}")"
+            want="$(sed -n 2p <<<"${versions}")"
+            echo "SKIPPED: just ${have} is on PATH and CI pins ${want}, so this arm did not run. ci.yml's tidy job runs it under the pin."
+            skipped+=("$* — just ${have} is on PATH and CI pins ${want}.")
+            return
+        fi
+        contexts+=("${ctx}")
+        if [ "${verdict}" -ne 0 ] || ! "$@"; then
+            failed+=("$*")
+        fi
+    }
+
     run lint           just fmt-check
     run lint           just lint
     run lint           just lint-cache-check
@@ -2695,6 +2770,7 @@ gates:
     run codegen-fence  just test-codegen-fence
     run actionlint     just actionlint
     run tidy           just tidy-check
+    run_under_pinned_just tidy just check-justfile-format
     run tidy           just bd-export-monotonic-local
     run tidy           python3 .github/scripts/check-label-lengths.py .beads/issues.jsonl
     # The enrolled series are listed HERE, in ci.yml and in ordinal-recheck.yml
@@ -2728,6 +2804,9 @@ gates:
     # The rows for setup-go's provisioned-toolchain assertion (bd gqlc-ma1l).
     # ci.yml's tidy job runs the same command.
     run tidy           just test-setup-go-assertion
+    # The rows for the justfile-format arm above (bd gqlc-i2lw). ci.yml's tidy
+    # job runs the same command.
+    run tidy           just test-gates-justfile-format
     run govulncheck    just vuln
 
     # Refuse BEFORE the summary, not after: the summary is a coverage claim, and
@@ -2751,12 +2830,22 @@ gates:
     echo "       tidy (3 steps)    check-pr-closes.py, check-pr-authors.sh and"
     echo "                         check-cron-freshness.sh read a PR body, a PR's"
     echo "                         commit list and the Actions API. None exist here."
+    for arm in "${skipped[@]}"; do
+        echo "       tidy (SKIPPED)    ${arm}"
+        echo "                         The formatter is --unstable, so only the pin's"
+        echo "                         verdict is CI's. \`just check-just-version\` has the"
+        echo "                         install remedy."
+    done
 
     if [ "${#failed[@]}" -ne 0 ]; then
         echo ""
         echo "gates: ${#failed[@]} of ${ran} FAILED — their output is above, in order:" >&2
         printf '  %s\n' "${failed[@]}" >&2
         exit 1
+    fi
+    if [ "${#skipped[@]}" -ne 0 ]; then
+        echo "gates: all ${ran} graded arm(s) passed; ${#skipped[@]} SKIPPED, which is not a pass (NOT covered, above)."
+        exit 0
     fi
     echo "gates: all ${ran} passed."
 

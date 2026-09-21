@@ -272,6 +272,12 @@ jobs:
       # a job reads it, it has already run.
       - name: the setup-go toolchain assertion's own rows
         run: just test-setup-go-assertion
+      # The rows for the arm `just gates` runs the justfile-format step above
+      # as (bd gqlc-i2lw): run under the pinned just, SKIPPED visibly under any
+      # other. Stubbed on PATH, so they grade both halves whichever just runs
+      # them.
+      - name: the gates justfile-format arm's own rows
+        run: just test-gates-justfile-format
       # bd gqlc-v2p: fails when a PR's `.beads/issues.jsonl` drops or reopens
       # an issue vs its base. Fetch only the base commit (depth 1) so cost is
       # O(1) in history size, not O(N). Skip on master push — the tip IS the
