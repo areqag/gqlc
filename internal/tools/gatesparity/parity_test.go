@@ -186,9 +186,9 @@ var notArms = []notArm{
 	},
 }
 
-// readSteps is the `run:` steps of one job in a workflow. A job that is absent
-// or runs nothing is an error: every rule below is vacuously true of it.
-func readSteps(workflow []byte, job string) ([]step, error) {
+// readSteps is the `run:` steps of the tidy job in a workflow. A job that is
+// absent or runs nothing is an error: every rule below is vacuously true of it.
+func readSteps(workflow []byte) ([]step, error) {
 	var parsed struct {
 		Jobs map[string]struct {
 			Steps []step `yaml:"steps"`
@@ -197,9 +197,9 @@ func readSteps(workflow []byte, job string) ([]step, error) {
 	if err := yaml.Unmarshal(workflow, &parsed); err != nil {
 		return nil, fmt.Errorf("read the workflow: %w", err)
 	}
-	found, ok := parsed.Jobs[job]
+	found, ok := parsed.Jobs[tidyJob]
 	if !ok {
-		return nil, fmt.Errorf("the workflow has no job named %q", job)
+		return nil, fmt.Errorf("the workflow has no job named %q", tidyJob)
 	}
 	var steps []step
 	for _, s := range found.Steps {
@@ -208,7 +208,7 @@ func readSteps(workflow []byte, job string) ([]step, error) {
 		}
 	}
 	if len(steps) == 0 {
-		return nil, fmt.Errorf("job %q has no `run:` step", job)
+		return nil, fmt.Errorf("job %q has no `run:` step", tidyJob)
 	}
 	return steps, nil
 }
@@ -387,7 +387,7 @@ func TestEveryTidyStepIsAGatesArmOrSaysWhyNot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	steps, err := readSteps(raw, tidyJob)
+	steps, err := readSteps(raw)
 	if err != nil {
 		t.Fatalf("%s: %v", ciPath, err)
 	}
@@ -536,12 +536,12 @@ func TestReadersRefuseWhatTheyCannotRead(t *testing.T) {
 		"not YAML":           "jobs: [\n",
 	} {
 		t.Run(name, func(t *testing.T) {
-			if steps, err := readSteps([]byte(workflow), tidyJob); err == nil {
+			if steps, err := readSteps([]byte(workflow)); err == nil {
 				t.Fatalf("read %d step(s) and no error", len(steps))
 			}
 		})
 	}
-	steps, err := readSteps([]byte("jobs:\n  tidy:\n    steps:\n      - uses: x\n      - name: n\n        run: |\n          a\n          b\n"), tidyJob)
+	steps, err := readSteps([]byte("jobs:\n  tidy:\n    steps:\n      - uses: x\n      - name: n\n        run: |\n          a\n          b\n"))
 	if err != nil || len(steps) != 1 || steps[0].label() != "n" || steps[0].command() != "a b" {
 		t.Fatalf("got %+v, %v; want the one run step, labelled n, commanding `a b`", steps, err)
 	}
@@ -549,8 +549,8 @@ func TestReadersRefuseWhatTheyCannotRead(t *testing.T) {
 	// The attributes reach compare only if the YAML reader fills them in, in
 	// both spellings continue-on-error has.
 	for _, allowed := range []string{"true", "${{ matrix.experimental }}"} {
-		steps, err = readSteps([]byte("jobs:\n  tidy:\n    steps:\n      - run: just x\n        if: always()\n"+
-			"        continue-on-error: "+allowed+"\n        working-directory: docs\n"), tidyJob)
+		steps, err = readSteps([]byte("jobs:\n  tidy:\n    steps:\n      - run: just x\n        if: always()\n" +
+			"        continue-on-error: " + allowed + "\n        working-directory: docs\n"))
 		if err != nil || len(steps) != 1 || fmt.Sprint(steps[0].weakening()) != "[if continue-on-error working-directory]" {
 			t.Fatalf("continue-on-error: %s: got %+v, %v; want all three attributes read", allowed, steps, err)
 		}
