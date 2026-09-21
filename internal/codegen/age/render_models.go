@@ -120,7 +120,7 @@ func carriesZone(goType string) bool {
 // Both directions of that are gated, the second with one limit. A helper
 // referenced but not declared fails to compile, which TestGoldenBuild and
 // TestEmittedHelpersAreClosedOverWhatTheyCall both catch. A helper
-// declared into a golden package that nothing calls compiles, and is
+// nothing calls, declared into a golden package, compiles, and is
 // reported by `unused` over the goldens (`just check-goldens-unused`,
 // part of the required fence, bd gqlc-ukzq). One called only by an
 // entity decoder that nothing calls is not reported, because entity
