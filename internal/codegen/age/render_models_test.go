@@ -694,7 +694,18 @@ func TestEveryBoundRecordsEncoderIsDeclaredAndEveryDeclaredOneIsCalled(t *testin
 //     members' helpers, failed nothing else in either package;
 //   - a union bound only as a FIELD of a bound record. It is the only
 //     union in its batch, so the first-only family passes it; what it
-//     holds is the record's field walk stepping over a union;
+//     holds is the record's field walk stepping over a union, which the
+//     two rows after it fail under too;
+//   - the same union two records deep. A field walk that steps over a
+//     union only BELOW the first record level passes the row above, and
+//     nothing else in either package failed under it. It is a record row
+//     and a union row at once: both records' encoders and the union's;
+//   - a union bound under a RECORD MEMBER of another. A member walk that
+//     does not descend into a record member leaves that record's encoder
+//     named by the union's body and undeclared, and the union beneath it
+//     unmarked; one golden, union_only_carrier_record_member, failed under
+//     it besides. It reaches two unions, ascending, so the first row's
+//     three mutants fail it as well;
 //   - a union bound only inside a LIST MEMBER of another. A member walk
 //     stepping over a list leaves the inner encoder named by the outer
 //     one's body and undeclared, and nothing else in either package
@@ -713,11 +724,12 @@ func TestEveryBoundRecordsEncoderIsDeclaredAndEveryDeclaredOneIsCalled(t *testin
 // fails every row binding two different encodings, here and in the test
 // above.
 //
-// There is no list-of-NULLABLE-unions row, and the assertion ahead of the
-// rows is why: `any` is never starred, so that list is the same carrier
-// text as its NOT NULL twin and the emitter cannot tell them apart. The
-// record side's `&& !nullElem` mutant, put on the union arm, fails
-// nothing anywhere.
+// Every list here has NULLABLE elements, the only kind a schema can spell
+// for a union. `any` is never starred, so unlike a record's list this one
+// never sets forParam's nullable-element flag, and the record side's
+// `&& !nullElem` mutant put on the union arm fails nothing anywhere. The
+// assertion ahead of the rows is what that rests on: the NOT NULL-element
+// list, which only the constructor can build, carries as the same text.
 func TestEveryBoundUnionsEncoderIsDeclaredAndEveryDeclaredOneIsCalled(t *testing.T) {
 	flag := graph.UnionOf([]graph.UnionMember{{Type: graph.TypeBool}, {Type: graph.TypeFloat64}})
 	pick := graph.UnionOf([]graph.UnionMember{{Type: graph.TypeInt32}, {Type: graph.TypeString}})
@@ -729,7 +741,8 @@ func TestEveryBoundUnionsEncoderIsDeclaredAndEveryDeclaredOneIsCalled(t *testing
 	nullableElems, _ := age.TypeMap{}.Property(graph.ListOf(pick, false))
 	notNullElems, _ := age.TypeMap{}.Property(graph.ListOf(pick, true))
 	require.Equal(t, notNullElems, nullableElems,
-		"a list of nullable unions no longer carries as its NOT NULL twin does, so it is owed a row of its own")
+		"a list of nullable unions no longer carries as its constructor-only NOT NULL twin does, so the star "+
+			"is live for a union leaf and the rows' lists no longer stand for both")
 	require.Less(t, flag, lone, "the rows below are named for an order these three no longer have")
 	require.Less(t, lone, pick, "the rows below are named for an order these three no longer have")
 	require.Less(t, outer, pick, "the other-order row is no longer the only row reaching two unions that descends")
