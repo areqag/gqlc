@@ -6,6 +6,7 @@ import (
 	"go/parser"
 	"go/token"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -35,8 +36,10 @@ func TestAnEntityDecoderIsReadByShape(t *testing.T) {
 		{"age vertex", person + "func decodePerson(raw []byte) (Person, error) { return Person{}, nil }", []string{"decodePerson"}},
 		{"an entity with no properties", "type Knows struct{}\nfunc decodeKnows(rel dbtype.Relationship) (Knows, error) { return Knows{}, nil }", []string{"decodeKnows"}},
 		{"sorted", person + "type Blob struct{}\nfunc decodePerson(raw []byte) (Person, error) { return Person{}, nil }\nfunc decodeBlob(raw []byte) (Blob, error) { return Blob{}, nil }", []string{"decodeBlob", "decodePerson"}},
+		{"an entity named as a record decoder is spelled", "type Recordaaaaaaaa struct{ Name string }\nfunc decodeRecordaaaaaaaa(raw []byte) (Recordaaaaaaaa, error) { return Recordaaaaaaaa{}, nil }", []string{"decodeRecordaaaaaaaa"}},
 
 		{"a record decoder answers an unexported alias", "type record4329c440 = struct{ Zip int32 }\nfunc decodeRecord4329c440(raw []byte) (record4329c440, error) { return record4329c440{}, nil }", nil},
+		{"the same name answering an unexported alias", "type recordaaaaaaaa = struct{ Name string }\nfunc decodeRecordaaaaaaaa(raw []byte) (recordaaaaaaaa, error) { return recordaaaaaaaa{}, nil }", nil},
 		{"a record decoder beside an entity", person + "type record4329c440 = struct{}\nfunc decodeRecord4329c440(v map[string]any) (record4329c440, error) { return record4329c440{}, nil }", nil},
 		{"a union decoder answers any", person + "func decodeUnionbd73dd3d(raw []byte) (any, error) { return nil, nil }", nil},
 		{"the struct is defined elsewhere or nowhere", "func decodePerson(raw []byte) (Person, error) { return Person{}, nil }", nil},
@@ -65,10 +68,77 @@ const goldens = "../../../test/data/codegen/valid"
 
 // perUseDecoder is a record's or a union's decoder as both backends name it:
 // the family and the 8-hex digest of the encoding.
-var (
-	perUseDecoder = regexp.MustCompile(`^decode(Record|Union)[0-9a-f]{8}$`)
-	perUseDecl    = regexp.MustCompile(`(?m)^func decode(Record|Union)[0-9a-f]{8}\(`)
-)
+var perUseDecoder = regexp.MustCompile(`^decode(Record|Union)[0-9a-f]{8}$`)
+
+// perUseFamily answers which per-use family a declaration belongs to, "" for
+// neither. The name does not settle it: a schema may call an entity
+// Record<8 hex>, and its decoder is then spelled as a record's is. The tool
+// tells the two apart by what they answer, so this does too — a record's
+// decoder answers an unexported alias and a union's answers any, where an
+// entity's answers an exported name.
+func perUseFamily(fn *ast.FuncDecl) string {
+	m := perUseDecoder.FindStringSubmatch(fn.Name.Name)
+	if m == nil || fn.Recv != nil || fn.Type.Results.NumFields() == 0 {
+		return ""
+	}
+	if id, ok := fn.Type.Results.List[0].Type.(*ast.Ident); ok && id.IsExported() {
+		return ""
+	}
+	return m[1]
+}
+
+// perUseDecoders maps each per-use decoder the files declare to its family.
+func perUseDecoders(files []*ast.File) map[string]string {
+	out := map[string]string{}
+	for _, f := range files {
+		for _, d := range f.Decls {
+			if fn, ok := d.(*ast.FuncDecl); ok {
+				if family := perUseFamily(fn); family != "" {
+					out[fn.Name.Name] = family
+				}
+			}
+		}
+	}
+	return out
+}
+
+// TestAPerUseDecoderIsReadByWhatItAnswers holds the test below to the tool's
+// own question. Its first row is an entity whose name is a record decoder's
+// spelling: the tool roots it, rightly, and a reading by name alone called that
+// a per-use decoder rooted.
+func TestAPerUseDecoderIsReadByWhatItAnswers(t *testing.T) {
+	for _, row := range []struct {
+		name, src string
+		want      map[string]string
+	}{
+		{
+			"an entity named as a record decoder is spelled",
+			"type Recordaaaaaaaa struct{}\nfunc decodeRecordaaaaaaaa(raw []byte) (Recordaaaaaaaa, error) { return Recordaaaaaaaa{}, nil }",
+			map[string]string{},
+		},
+		{
+			"a record decoder",
+			"type record4329c440 = struct{}\nfunc decodeRecord4329c440(raw []byte) (record4329c440, error) { return record4329c440{}, nil }",
+			map[string]string{"decodeRecord4329c440": "Record"},
+		},
+		{
+			"a union decoder",
+			"func decodeUnionbd73dd3d(v any) (any, error) { return v, nil }",
+			map[string]string{"decodeUnionbd73dd3d": "Union"},
+		},
+		{
+			"an entity decoder",
+			"type Person struct{}\nfunc decodePerson(raw []byte) (Person, error) { return Person{}, nil }",
+			map[string]string{},
+		},
+	} {
+		t.Run(row.name, func(t *testing.T) {
+			if got := perUseDecoders(parse(t, row.src)); !maps.Equal(got, row.want) {
+				t.Fatalf("read %v as per-use, want %v", got, row.want)
+			}
+		})
+	}
+}
 
 // TestNoPerUseDecoderInTheGoldensIsRooted is the same claim over what the
 // emitters really write, which the rows above only imitate. It is refused as
@@ -85,8 +155,13 @@ func TestNoPerUseDecoderInTheGoldensIsRooted(t *testing.T) {
 			return err
 		}
 		rooted += len(roots)
+		files, err := parseDir(path)
+		if err != nil {
+			return err
+		}
+		perUse := perUseDecoders(files)
 		for _, r := range roots {
-			if perUseDecoder.MatchString(r) {
+			if perUse[r] != "" {
 				t.Errorf("%s: %s is a per-use decoder and was rooted, so an uncalled one is no longer reported", path, r)
 			}
 		}
@@ -94,18 +169,8 @@ func TestNoPerUseDecoderInTheGoldensIsRooted(t *testing.T) {
 		if strings.Contains(filepath.Base(path), "age") {
 			driver = "age"
 		}
-		files, err := filepath.Glob(filepath.Join(path, "*.go"))
-		if err != nil {
-			return err
-		}
-		for _, file := range files {
-			src, err := os.ReadFile(file)
-			if err != nil {
-				return err
-			}
-			for _, m := range perUseDecl.FindAllSubmatch(src, -1) {
-				seen[driver+" "+string(m[1])]++
-			}
+		for _, family := range perUse {
+			seen[driver+" "+family]++
 		}
 		return nil
 	})

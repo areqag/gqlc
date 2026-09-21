@@ -3005,14 +3005,15 @@ gh-orphans-close *args:
 #     reds this required check — except an entity decoder, which that recipe
 #     roots, counts and prints, pending bd gqlc-m1dk.
 #   - NOT ENFORCED on generated code: every other linter in .golangci.yml, by
-#     decision. Measured 2026-09-20 at golangci-lint v2.13.1 with both of that
-#     recipe's locks lifted in a copy of the root config, the other linters
-#     report 873 findings over the goldens: gofumpt 252, gocyclo 214, errcheck
-#     158, gocognit 152, dupl 77, ireturn 11, gocritic 9. So `generated` is not
-#     flipped in .golangci.yml. The stage briefs under docs/specs
-#     (codegen-stage-c1.md through c6) say emitted code "must lint-clean under
-#     .golangci.yml ... enforced automatically"; they are history, and this
-#     list is what holds today.
+#     decision. Measured 2026-09-20 at e2f02f06 and golangci-lint v2.13.1, with
+#     both of that recipe's locks lifted in a copy of the root config: the other
+#     linters report several hundred findings over the goldens, most of them
+#     from gofumpt, gocyclo, errcheck and gocognit. No count is kept here: it
+#     grows with every fixture added, and the decision does not turn on it. So
+#     `generated` is not flipped in .golangci.yml. The stage briefs under
+#     docs/specs (codegen-stage-c1.md through c6) say emitted code "must
+#     lint-clean under .golangci.yml ... enforced automatically"; they are
+#     history, and this list is what holds today.
 #
 # The module set is DISCOVERED, not named (bd gqlc-oxne). It used to be the
 # literal `test/data/codegen`, three times over, while `just vuln` beside it had
@@ -3161,16 +3162,17 @@ test-codegen-fence: sweep-discovery-probes ensure-golangci check-codegen-externa
 # ENTITY DECODERS ARE ROOTED, and that is an exemption, not a finding fixed.
 # Both backends emit decode<Entity> for every entity the schema declares whether
 # or not the batch reads it, which is an open design question (bd gqlc-m1dk) and
-# not this recipe's to settle. Unrooted, `unused` reports 513 over these goldens
-# (same measurement): the decoders nothing calls, and — the larger part — the
-# helpers only those decoders call. That second part is why this is a ROOT and
-# not an exclusion rule: a transitive finding carries an ordinary helper name,
-# toDate or agtypeInt64, which is exactly the name this gate has to keep
-# reporting elsewhere. internal/tools/goldenroots picks the decoders out by
-# SHAPE — func decode<T>(x) (<T>, error) where <T> is an exported struct the
-# package defines — so decodeRecord<digest> and decodeUnion<digest>, which are
-# emitted per use, stay held; it prints what it rooted and how many of those
-# nothing else names, and refuses a run that rooted none.
+# not this recipe's to settle. Unrooted, `unused` reported 513 over these goldens
+# (at e2f02f06, in the one run test-codegen-fence's comment cites): the decoders
+# nothing calls, and — the larger part — the helpers only those decoders call.
+# That second part is why this is a ROOT and not an exclusion rule: a transitive
+# finding carries an ordinary helper name, toDate or agtypeInt64, which is
+# exactly the name this gate has to keep reporting elsewhere.
+# internal/tools/goldenroots picks the decoders out by SHAPE — func
+# decode<T>(x) (<T>, error) where <T> is an exported struct the package defines
+# — so decodeRecord<digest> and decodeUnion<digest>, which are emitted per use,
+# stay held; it prints what it rooted and how many of those nothing else names,
+# and refuses a run that rooted none.
 #
 # The tree is not edited. The module is copied outside it (~1600 files, ~30 ms
 # measured), the roots are written into the copy, and the trap removes it. The
