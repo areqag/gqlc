@@ -68,7 +68,14 @@ cat >"${stubs}/just" <<'EOF'
 printf '%s\n' "$*" >>"${STUB_LOG}"
 case "$*" in
     --version)
-        echo "just ${STUB_JUST_VERSION}" ;;
+        # STUB_VERSION_SAYS, when set (empty counts), is printed instead of a
+        # well-formed answer; STUB_VERSION_RC is the status it leaves with.
+        if [ -n "${STUB_VERSION_SAYS+set}" ]; then
+            printf '%s' "${STUB_VERSION_SAYS:+${STUB_VERSION_SAYS}$'\n'}"
+        else
+            echo "just ${STUB_JUST_VERSION}"
+        fi
+        exit "${STUB_VERSION_RC:-0}" ;;
     "--fmt --check --unstable")
         [ "${STUB_FORMATTED}" = yes ] && exit 0
         echo "stub: the formatter would change this justfile" >&2
@@ -81,6 +88,8 @@ esac
 EOF
 printf '#!/usr/bin/env bash\nexit 0\n' >"${stubs}/python3"
 chmod +x "${stubs}/just" "${stubs}/python3"
+# The stub reads these two from the environment, and so would read a caller's.
+unset STUB_VERSION_SAYS STUB_VERSION_RC
 
 pass=0
 fail=0
@@ -207,6 +216,48 @@ else
     row check-just-version-mismatch FAIL "rc=${rc} stdout='${out}' stderr='$(recipe_err | tr '\n' '|')'"
 fi
 
+# --- a just that does not state its version ---------------------------------
+# "Could not tell", from the other side (bd gqlc-07di). Before these rows the
+# comparison never looked at what `just --version` said: an empty answer was a
+# mismatch between '' and the pin, so gates printed a SKIPPED line with no
+# version in it and stayed green, and a `just --version` that exited 3 was read
+# as the comparison's own "mismatch" status. A just that cannot say what it is
+# is a broken toolchain, not an unpinned one, so gates goes RED.
+#
+# unstated NAME REASON: gates must be red, must not have run the formatter, and
+# must give REASON and never SKIPPED. The stub's answer is in the environment.
+unstated() {
+    local name="$1" reason="$2"
+    run_recipe gates "${pin}" yes
+    if [ "${rc}" -eq 1 ] && [ "${fmt_ran}" = no ] && has_line "${err}" "${reason}" \
+        && has_line "${err}" "  just check-justfile-format" \
+        && ! printf '%s\n' "${out}" | command grep -q "SKIPPED"; then
+        row "${name}" PASS "rc=1, the arm is in the FAILED list, nothing says SKIPPED"
+    else
+        row "${name}" FAIL "rc=${rc} fmt_ran=${fmt_ran}, expected rc=1 with '${reason}', the arm in the FAILED list and no SKIPPED; stderr tail: $(printf '%s\n' "${err}" | tail -n 4 | tr '\n' '|')"
+    fi
+}
+no_version() { echo "error: \`just --version\` does not state a just version (got '$1')."; }
+
+STUB_VERSION_SAYS="" unstated empty-version-fails-not-skips "$(no_version "")"
+STUB_VERSION_SAYS="justice for all" unstated garbage-version-fails-not-skips "$(no_version "justice for all")"
+# The answer itself is the pin, so only the status can redden this row: 3 is the
+# comparison's own word for "mismatch", and must not be heard as one.
+STUB_VERSION_SAYS="just ${pin}" STUB_VERSION_RC=3 unstated version-exiting-3-fails-not-skips \
+    "error: \`just --version\` exited 3, so the just on PATH states no version to check against ${pin_rel}."
+
+STUB_VERSION_SAYS="" run_recipe check-just-version "${pin}" yes
+if [ "${rc}" -eq 1 ] && [ -z "${out}" ] && [ "$(recipe_err)" = "$(no_version "")" ]; then
+    row check-just-version-empty-version PASS "rc=1, the reason and no install remedy for a version nobody stated"
+else
+    row check-just-version-empty-version FAIL "rc=${rc} stdout='${out}' stderr='$(recipe_err | tr '\n' '|')'"
+fi
+
+# A version with a tail still STATES one, and it is not the pin: a skip, naming
+# it whole. Held so that the rows above cannot be satisfied by refusing
+# everything that is not exactly X.Y.Z.
+skips version-with-a-tail-skips "${pin} (abc 2026)" no
+
 # --- a pin that cannot be read ----------------------------------------------
 # LAST among the stubbed rows, because it breaks the scratch tree's pin. "Could
 # not tell" is neither a match nor a mismatch: check-just-version refuses, and
@@ -231,6 +282,19 @@ if [ "${rc}" -eq 1 ] && [ "${fmt_ran}" = no ] && has_line "${err}" "${unreadable
     row unreadable-pin-fails-not-skips PASS "rc=1, the arm is in the FAILED list, nothing says SKIPPED"
 else
     row unreadable-pin-fails-not-skips FAIL "rc=${rc} fmt_ran=${fmt_ran}, expected rc=1 with '${unreadable}', the arm in the FAILED list and no SKIPPED; stderr tail: $(printf '%s\n' "${err}" | tail -n 4 | tr '\n' '|')"
+fi
+
+# An ABSENT pin is the same answer as a malformed one, and only the malformed
+# one had a row: made to exit 3, it survived as a skip on every host.
+rm -f "${pin_file}"
+absent="error: ${pin_rel} is absent, so there is no pin to check against."
+run_recipe gates "${pin}" yes
+if [ "${rc}" -eq 1 ] && [ "${fmt_ran}" = no ] && has_line "${err}" "${absent}" \
+    && has_line "${err}" "  just check-justfile-format" \
+    && ! printf '%s\n' "${out}" | command grep -q "SKIPPED"; then
+    row absent-pin-fails-not-skips PASS "rc=1, the reason names the missing file, nothing says SKIPPED"
+else
+    row absent-pin-fails-not-skips FAIL "rc=${rc} fmt_ran=${fmt_ran}, expected rc=1 with '${absent}', the arm in the FAILED list and no SKIPPED; stderr tail: $(printf '%s\n' "${err}" | tail -n 4 | tr '\n' '|')"
 fi
 
 # --- the real just ----------------------------------------------------------

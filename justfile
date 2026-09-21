@@ -76,7 +76,8 @@ check-just-version:
             exit 0
             ;;
         3) ;;
-        # No pin to compare against, and the comparison has already said why.
+        # One side could not be read — no pin, or a just that states no
+        # version — and the comparison has already said which and why.
         *) exit "$verdict" ;;
     esac
     echo "error: just $have is on PATH and this tree pins $want ($pin_file)." >&2
@@ -2656,18 +2657,12 @@ check-justfile-format:
 #                required context this recipe does not cover rather than a
 #                nightly whose red arrives later. It carries -count=1, so it
 #                is the slower of the two to re-run.
-#   tidy (part)  three of that job's steps read state that does not exist
-#                before the PR: check-pr-closes.py wants the body,
-#                check-pr-authors.sh the commit list, check-cron-freshness.sh
-#                the Actions API. Unrunnable here by construction, not by
-#                choice. These DO run — tidy-check and
-#                check-doc-ordinals.py and
-#                check-open-pr-ordinals.py --self-test and
-#                next-doc-ordinal.py --self-test and
-#                bd-export-monotonic-local and check-label-lengths.py and
-#                test-bd-prime-guard and test-setup-go-assertion as their
-#                own arms, and `just lint-hooks .github/scripts` because `just
-#                lint` already depends on it.
+#   tidy (part)  not every step of that job is an arm below. Which steps
+#                are not, and why not for each, is the notArms table in
+#                internal/tools/gatesparity/parity_test.go. It is not
+#                restated here, where it went stale three times: `just test`
+#                runs that package, which holds the table to ci.yml and to
+#                this recipe in both directions (bd gqlc-07di).
 #   tidy (SKIPPED)
 #                `just check-justfile-format`, which is that job's `just
 #                --fmt --check --unstable` step, is an arm ONLY WHEN THE JUST
@@ -2683,11 +2678,12 @@ check-justfile-format:
 #                past a red `gates`. A skip is never silent. It is said under
 #                the arm's own header, again in the NOT-covered summary with
 #                both versions, and the closing line stops saying "all
-#                passed"; the arm is not counted among those that ran. A pin
-#                that cannot be READ is a failure, not a skip. "Matches the
-#                pin" is .github/scripts/just-version-vs-pin.sh, the one
-#                derivation `check-just-version` reads too; that recipe's
-#                refusal is deliberately not what is wired in here.
+#                passed"; the arm is not counted among those that ran. A
+#                side that cannot be READ — no pin, or a just that states no
+#                version — is a failure, not a skip. "Matches the pin" is
+#                .github/scripts/just-version-vs-pin.sh, the one derivation
+#                `check-just-version` reads too; that recipe's refusal is
+#                deliberately not what is wired in here.
 #
 # `just fmt-check` is an arm but is NOT a CI job: no workflow calls it. It is
 # here because it prints a diff where `golangci-lint run` prints issues, and it
@@ -2733,9 +2729,11 @@ gates:
     # `run`, for an arm whose verdict is CI's only under the just CI pins. On any
     # other just it is SKIPPED: said here, carried into the summary, and NOT
     # collected into contexts, which would count an arm that graded nothing.
-    # Only a mismatch (3) skips. Any other non-zero is a pin that could not be
-    # read, and that fails the arm: read as a skip, it would be an arm that stops
-    # grading on every host at once with nothing red to say so.
+    # Only a mismatch (3) skips. Any other non-zero is a side that could not be
+    # read — no pin, or a just on PATH that states no version — and that fails
+    # the arm: an unreadable pin read as a skip would be an arm that stops
+    # grading on every host at once with nothing red to say so, and an unstated
+    # version read as one is a SKIPPED line with no version in it.
     run_under_pinned_just() {
         local ctx="$1"; shift
         local versions verdict=0 have want
@@ -2827,10 +2825,13 @@ gates:
     echo "       live-smoke-age    entirely. It is PR-blocking too (bd gqlc-ezwae) and"
     echo "                         has no Docker-free half here; all of it needs"
     echo "                         Docker: just test-codegen-live-age"
-    echo "       tidy (3 steps)    check-pr-closes.py, check-pr-authors.sh and"
+    echo "       tidy (part)       check-pr-closes.py, check-pr-authors.sh and"
     echo "                         check-cron-freshness.sh read a PR body, a PR's"
     echo "                         commit list and the Actions API. None exist here."
-    for arm in "${skipped[@]}"; do
+    # Guarded: before bash 4.4 an EMPTY array expanded bare under `set -u` is
+    # an unbound variable, and empty is this array on every run that skips
+    # nothing (measured on bash 4.3.48, bd gqlc-07di).
+    for arm in ${skipped[@]+"${skipped[@]}"}; do
         echo "       tidy (SKIPPED)    ${arm}"
         echo "                         The formatter is --unstable, so only the pin's"
         echo "                         verdict is CI's. \`just check-just-version\` has the"
