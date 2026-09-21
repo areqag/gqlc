@@ -528,8 +528,18 @@ func helperDeclaredAndCalled(t *testing.T, src []byte, name string) (declared, c
 //     conformance packages passed it: no fixture binds two. The mirror
 //     image, the set REPLACED at each mark so that only the last record
 //     bound is in it, fails this same row on the first record. The check
-//     is per record, so one order holds both, and a reverse row failed
-//     under exactly the same mutants — which is why there is none;
+//     is per record, so both of those fail under any row binding two;
+//   - the same two in the other order, because an ORDER-DEPENDENT mark
+//     needs both orders and the row above is one. A record marked only
+//     if its encoding sorts after every one already marked passes every
+//     other row binding two except the field-less row and the
+//     one-Go-type row, which happen to descend as well: recordWidth's
+//     encoding sorts before small's. Its mirror fails on the row above
+//     and passes here;
+//   - a field-less record between two others. A mark that RESETS the set
+//     when the record has no field drops the one bound before it, and no
+//     other row binds one. It descends from its first bind to its second,
+//     so it fails under the ascending-only mark too;
 //   - one record bound twice declares ONE encoder. The walk keeps repeats,
 //     so a record planned once per bind shows as one name declared twice,
 //     which parses and does not compile. It takes BOTH dedupes gone to
@@ -547,13 +557,23 @@ func helperDeclaredAndCalled(t *testing.T, src []byte, name string) (declared, c
 //     and the closure sweep says so; marked together with its fields'
 //     helpers it is closed and compiles, and the sweep passes it;
 //   - a record bound only as another's FIELD. Its call site is in
-//     models.go, and it fails under the same two mutants as the first row
-//     with one parameter and no second bind;
+//     models.go, and it fails under the first row's two mutants with one
+//     parameter and no second bind;
 //   - a record bound inside a LIST beside a different one bound NULLABLE.
 //     A mark withheld from a list's element, or from a nullable
 //     parameter, leaves that record's encoder named by the combinator
-//     around it and undeclared, and nothing else in the age or conformance
-//     packages failed under either.
+//     around it and undeclared. No other test in the age or conformance
+//     packages failed under either, and no other row here under the
+//     second;
+//   - a list of NULLABLE records. forParam peels the element's star into
+//     a variable of its own, and a mark withheld when it is set passes the
+//     row above, whose list elements are NOT NULL;
+//   - two records of one Go type: `zip_code` and `zipCode` both carry as
+//     the same struct text and are two encodings, so two encoders. Records
+//     dedupe on the encoding today and this passes; a dedupe keyed on the
+//     Go type text, which is how the list wrappers dedupe (bd gqlc-3s7q),
+//     declares one and calls two. `zipCode` sorts before `zip_code`, so
+//     this row descends and fails under the ascending-only mark as well.
 func TestEveryBoundRecordsEncoderIsDeclaredAndEveryDeclaredOneIsCalled(t *testing.T) {
 	small := graph.RecordOf([]graph.RecordField{{Name: "x", Type: graph.TypeInt32, NotNull: true}})
 	around := graph.RecordOf([]graph.RecordField{{Name: "inner", Type: small, NotNull: true}})
