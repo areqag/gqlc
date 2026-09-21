@@ -381,41 +381,86 @@ func isEmittedHelper(name string) bool {
 // The record with fields is the control: a fix that stopped emitting the
 // helper altogether passes the field-less rows and fails there, on the
 // closure sweep as well.
+//
+// The rows after the first four each hold a mutant of the mark that the
+// first four pass and that only a golden, or nothing, held (bd gqlc-52p2):
+//
+//   - a field-less record BEFORE one with fields, in one batch. A mark
+//     taken only for the first record decoded (`len(h.recordDecoders) ==
+//     1`) reads the field-less one, marks nothing, and the second record's
+//     decoder calls a helper the file does not declare. No fixture has
+//     that order, so the whole age and conformance packages passed it.
+//     The reverse order is beside it as the control on the ORDER: it
+//     passes under that mutant, so the pair says it is the position of
+//     the field-less record that matters and not the count of properties;
+//   - a record of a single NULLABLE field. recordWidth has three fields,
+//     two of them NOT NULL, so a mark taken only when `len(Fields) > 1`,
+//     or only for a NOT NULL field, still marked it. Two goldens caught
+//     both; no row here did.
 func TestTheRecordFieldHelperIsDeclaredOnlyWhereARecordReadsAField(t *testing.T) {
 	const helper = "agtypeRecordField"
 	empty := graph.RecordOf(nil)
+	oneNullable := graph.RecordOf([]graph.RecordField{{Name: "note", Type: graph.TypeString}})
 
 	for _, row := range []struct {
-		width graph.PropertyType
-		calls bool
+		widths []graph.PropertyType
+		calls  bool
 	}{
-		{empty, false},
-		{graph.ListOf(empty, true), false},
-		{recordWidth, true},
-		{graph.ListOf(recordWidth, true), true},
+		{[]graph.PropertyType{empty}, false},
+		{[]graph.PropertyType{graph.ListOf(empty, true)}, false},
+		{[]graph.PropertyType{recordWidth}, true},
+		{[]graph.PropertyType{graph.ListOf(recordWidth, true)}, true},
+		{[]graph.PropertyType{empty, recordWidth}, true},
+		{[]graph.PropertyType{recordWidth, empty}, true},
+		{[]graph.PropertyType{oneNullable}, true},
 	} {
-		t.Run(string(row.width), func(t *testing.T) {
-			goType, ok := age.TypeMap{}.Property(row.width)
-			require.True(t, ok, "this backend no longer carries %s, so the row is stale", row.width)
-
-			entities := []age.WiredEntity{age.WiredEntity{Entity: codegen.Entity{
-				Name:   "E",
-				Kind:   codegen.EntityNode,
-				Fields: []codegen.EntityField{{PropName: "p", Field: "P", GoType: goType, Width: row.width}},
-			}}.WithLabels("E", age.VertexAnnotation)}
+		t.Run(widthsName(row.widths), func(t *testing.T) {
+			entities := entityOfWidths(t, row.widths)
 			var h age.Helpers
 			h.ForEntities(entities)
 
 			declared, called := helperDeclaredAndCalled(t, age.RenderModels("models", entities, h), helper)
 			require.Equal(t, row.calls, called,
-				"the row's own premise is off: a decoded %s was expected to call %s %t", row.width, helper, row.calls)
+				"the row's own premise is off: decoding %s was expected to call %s %t",
+				widthsName(row.widths), helper, row.calls)
 			require.Equal(t, called, declared,
-				"a read-only batch of one %s property declares %s = %t and calls it = %t. Declared with no "+
-					"caller is an unexported function nothing reaches, which compiles and which only the "+
-					"golden would record; called with no declaration does not compile",
-				row.width, helper, declared, called)
+				"a read-only batch of one entity with the properties %s declares %s = %t and calls it = %t. "+
+					"Declared with no caller is an unexported function nothing reaches, which compiles and "+
+					"which only the golden would record; called with no declaration does not compile",
+				widthsName(row.widths), helper, declared, called)
 		})
 	}
+}
+
+// widthsName names a row by its property widths in declaration order,
+// which for a row of one is the width itself.
+func widthsName(widths []graph.PropertyType) string {
+	names := make([]string, len(widths))
+	for i, w := range widths {
+		names[i] = string(w)
+	}
+	return strings.Join(names, " then ")
+}
+
+// entityOfWidths is one node entity with a property per width, in the
+// order given. The order is the point for the rows that carry two:
+// helpers.ForEntities walks the fields in it.
+func entityOfWidths(t *testing.T, widths []graph.PropertyType) []age.WiredEntity {
+	t.Helper()
+
+	fields := make([]codegen.EntityField, len(widths))
+	for i, width := range widths {
+		goType, ok := age.TypeMap{}.Property(width)
+		require.True(t, ok, "this backend no longer carries %s, so the row is stale", width)
+		fields[i] = codegen.EntityField{
+			PropName: "p" + strconv.Itoa(i), Field: "P" + strconv.Itoa(i), GoType: goType, Width: width,
+		}
+	}
+	return []age.WiredEntity{age.WiredEntity{Entity: codegen.Entity{
+		Name:   "E",
+		Kind:   codegen.EntityNode,
+		Fields: fields,
+	}}.WithLabels("E", age.VertexAnnotation)}
 }
 
 // helperDeclaredAndCalled parses one emitted models.go and reports whether
