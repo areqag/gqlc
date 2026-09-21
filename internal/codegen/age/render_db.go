@@ -11,8 +11,9 @@ import (
 // and the statement composer every query method calls.
 //
 // withQueries gates the composer, and withOneSentinels the :one
-// sentinels, on the batch reaching for them: an emitted-but-uncalled
-// declaration is a lint failure in the generated module. The Tx block is
+// sentinels, on the batch reaching for them, so db.go carries no
+// declaration nothing uses. No lint enforces that — the fence's linter
+// skips generated files (bd gqlc-nv8e). The Tx block is
 // not gated, and does not need to be — it is exported repository surface
 // in every declaration, so nothing in it is unused from the compiler's
 // point of view whatever the batch holds.
