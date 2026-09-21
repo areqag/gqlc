@@ -18,9 +18,12 @@
 // jobs live in another workflow behind an event filter.
 //
 // WHAT IT DOES NOT REACH. A `uses:` step is taken to provision and not to
-// grade, so a composite action that grew a check would pass unseen. And where
+// grade, so a composite action that grew a check would pass unseen. Where
 // notArms names an arm that answers for a step under another spelling, that
 // the arm really does the step's work is argued in the entry, not measured.
+// And of a step's attributes it reads the three in weakening below and no
+// others: `env:`, `shell:`, a job-level `if:` or `defaults:` can each change
+// what a step grades, and none is looked at.
 //
 // It is a test rather than a recipe so that `just test` — a required context —
 // carries it; a separate gate arm would be one more edge to drop in silence.
@@ -54,10 +57,56 @@ const (
 	thisFile    = "internal/tools/gatesparity/parity_test.go"
 )
 
-// step is one `run:` step of a workflow job.
+// step is one `run:` step of a workflow job. The last three are read only to
+// be refused; `continue-on-error` is a boolean or an expression, so it is
+// taken as whatever YAML made of it.
 type step struct {
-	Name string `yaml:"name"`
-	Run  string `yaml:"run"`
+	Name            string `yaml:"name"`
+	Run             string `yaml:"run"`
+	If              string `yaml:"if"`
+	ContinueOnError any    `yaml:"continue-on-error"`
+	WorkingDir      string `yaml:"working-directory"`
+}
+
+// weakening is the attributes under which a step that spells an arm's command
+// is still not the gate the arm claims parity with: it can be skipped, which
+// satisfies a required context; it can fail without failing the job; or it
+// runs the command somewhere the arm does not. A step in notArms may carry
+// them, because its entry is where the difference is argued.
+func (s step) weakening() []string {
+	var found []string
+	if s.If != "" {
+		found = append(found, "if")
+	}
+	if s.ContinueOnError != nil {
+		found = append(found, "continue-on-error")
+	}
+	if s.WorkingDir != "" {
+		found = append(found, "working-directory")
+	}
+	return found
+}
+
+// justLineRe is a script line that invokes just.
+var justLineRe = regexp.MustCompile(`(?m)^\s*(just\s+\S.*?)\s*$`)
+
+// armFor is what a complaint offers as the arm for a step nothing covers. A
+// one-line step is its own command. A script is not: flattened, it reads as a
+// command nobody wrote, so the just invocations in it are offered instead.
+func (s step) armFor() string {
+	if !strings.Contains(strings.TrimSpace(s.Run), "\n") {
+		return fmt.Sprintf("add `run %s %s` to the %s recipe", tidyContext, s.command(), gatesRecipe)
+	}
+	var invoked []string
+	for _, m := range justLineRe.FindAllStringSubmatch(s.Run, -1) {
+		invoked = append(invoked, "`"+strings.Join(strings.Fields(m[1]), " ")+"`")
+	}
+	if len(invoked) == 0 {
+		return fmt.Sprintf("give the %s recipe an arm that runs what the step's script runs, which invokes no just recipe",
+			gatesRecipe)
+	}
+	return fmt.Sprintf("give the %s recipe a `run %s ...` arm for what the step's script runs, which invokes %s",
+		gatesRecipe, tidyContext, strings.Join(invoked, " and "))
 }
 
 // command is the step's script with its whitespace collapsed, which is what is
@@ -240,12 +289,19 @@ func compare(steps []step, arms []arm, table []notArm, body []string) []string {
 				"notArms lists tidy step %q, and the %s recipe runs `%s` as a tidy arm: the entry is stale, delete it from %s",
 				s.label(), gatesRecipe, s.command(), thisFile))
 		case tidyArms[s.command()]:
+			for _, attr := range s.weakening() {
+				complaints = append(complaints, fmt.Sprintf(
+					"%s's %s job runs step %q under `%s:`, and the %s recipe claims that step as the arm `%s`. "+
+						"A step that can be skipped, can fail without failing the job, or runs somewhere else is not the gate the arm mirrors. "+
+						"Either remove `%s:` from the step, or, if it is deliberate, teach %s why the two are still one check",
+					ciPath, tidyJob, s.label(), attr, gatesRecipe, s.command(), attr, thisFile))
+			}
 		case !listed:
 			complaints = append(complaints, fmt.Sprintf(
 				"%s's %s job runs step %q and `just %s` has no arm for it, so its red is found one CI round trip late. "+
-					"If it reads only the tree, add `run %s %s` to the %s recipe; "+
+					"If it reads only the tree, %s; "+
 					"if it cannot run before the PR exists, add it to notArms in %s with the reason",
-				ciPath, tidyJob, s.label(), gatesRecipe, tidyContext, s.command(), gatesRecipe, thisFile))
+				ciPath, tidyJob, s.label(), gatesRecipe, s.armFor(), thisFile))
 		case entry.Arm != "" && !anyArm[entry.Arm]:
 			complaints = append(complaints, fmt.Sprintf(
 				"notArms says the arm `%s` answers for tidy step %q, and the %s recipe has no such arm",
@@ -382,6 +438,42 @@ func TestCompare(t *testing.T) {
 			want: `runs step "new check" and`,
 		},
 		{
+			name:  "a script with no arm is offered its just line, not itself flattened",
+			steps: append([]step{{Name: "sneaky", Run: "echo hi\njust sneaky-check  docs\n"}}, healthySteps...),
+			arms:  healthyArms, table: healthyTable, body: healthyBody,
+			want: "arm for what the step's script runs, which invokes `just sneaky-check docs`; if",
+		},
+		{
+			name:  "a script with no arm and no just line",
+			steps: append([]step{{Name: "sneaky", Run: "echo hi\n./check.sh\n"}}, healthySteps...),
+			arms:  healthyArms, table: healthyTable, body: healthyBody,
+			want: "which invokes no just recipe; if",
+		},
+		{
+			name:  "an arm's step behind if",
+			steps: append([]step{{Run: "just tidy-check", If: "false"}}, healthySteps[1:]...),
+			arms:  healthyArms, table: healthyTable, body: healthyBody,
+			want: "runs step \"just tidy-check\" under `if:`",
+		},
+		{
+			name:  "an arm's step allowed to fail",
+			steps: append([]step{{Run: "just tidy-check", ContinueOnError: true}}, healthySteps[1:]...),
+			arms:  healthyArms, table: healthyTable, body: healthyBody,
+			want: "under `continue-on-error:`",
+		},
+		{
+			name:  "an arm's step run somewhere else",
+			steps: append([]step{{Run: "just tidy-check", WorkingDir: "docs"}}, healthySteps[1:]...),
+			arms:  healthyArms, table: healthyTable, body: healthyBody,
+			want: "under `working-directory:`",
+		},
+		{
+			name: "a listed step may carry them",
+			steps: append([]step{{Name: "needs a PR", Run: "gh api pulls\ncheck.py body", If: "github.event_name == 'pull_request'"}},
+				healthySteps[:3]...),
+			arms: healthyArms, table: healthyTable, body: healthyBody,
+		},
+		{
 			name: "a tidy arm with no step", steps: healthySteps,
 			arms:  append([]arm{{"tidy", "just orphan"}}, healthyArms...),
 			table: healthyTable, body: healthyBody,
@@ -454,6 +546,15 @@ func TestReadersRefuseWhatTheyCannotRead(t *testing.T) {
 		t.Fatalf("got %+v, %v; want the one run step, labelled n, commanding `a b`", steps, err)
 	}
 
+	// The attributes reach compare only if the YAML reader fills them in, in
+	// both spellings continue-on-error has.
+	for _, allowed := range []string{"true", "${{ matrix.experimental }}"} {
+		steps, err = readSteps([]byte("jobs:\n  tidy:\n    steps:\n      - run: just x\n        if: always()\n"+
+			"        continue-on-error: "+allowed+"\n        working-directory: docs\n"), tidyJob)
+		if err != nil || len(steps) != 1 || fmt.Sprint(steps[0].weakening()) != "[if continue-on-error working-directory]" {
+			t.Fatalf("continue-on-error: %s: got %+v, %v; want all three attributes read", allowed, steps, err)
+		}
+	}
 	arms, err := readArms([]string{
 		"    run() {",
 		"    # run tidy just commented-out",
