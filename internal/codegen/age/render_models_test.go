@@ -723,13 +723,17 @@ func TestEveryBoundUnionsEncoderIsDeclaredAndEveryDeclaredOneIsCalled(t *testing
 	pick := graph.UnionOf([]graph.UnionMember{{Type: graph.TypeInt32}, {Type: graph.TypeString}})
 	lone := graph.UnionOf([]graph.UnionMember{{Type: graph.TypeInt32, NotNull: true}})
 	holder := graph.RecordOf([]graph.RecordField{{Name: "stamp", Type: pick, NotNull: true}})
-	outer := graph.UnionOf([]graph.UnionMember{{Type: graph.ListOf(pick, true)}, {Type: graph.TypeBool}})
+	outer := graph.UnionOf([]graph.UnionMember{{Type: graph.ListOf(pick, false)}, {Type: graph.TypeBool}})
+	nest := graph.RecordOf([]graph.RecordField{{Name: "held", Type: holder, NotNull: true}})
+	either := graph.UnionOf([]graph.UnionMember{{Type: holder}, {Type: graph.TypeBool}})
 	nullableElems, _ := age.TypeMap{}.Property(graph.ListOf(pick, false))
 	notNullElems, _ := age.TypeMap{}.Property(graph.ListOf(pick, true))
 	require.Equal(t, notNullElems, nullableElems,
 		"a list of nullable unions no longer carries as its NOT NULL twin does, so it is owed a row of its own")
 	require.Less(t, flag, lone, "the rows below are named for an order these three no longer have")
 	require.Less(t, lone, pick, "the rows below are named for an order these three no longer have")
+	require.Less(t, outer, pick, "the other-order row is no longer the only row reaching two unions that descends")
+	require.Less(t, either, pick, "the other-order row is no longer the only row reaching two unions that descends")
 
 	for _, row := range []struct {
 		name     string
@@ -771,15 +775,23 @@ func TestEveryBoundUnionsEncoderIsDeclaredAndEveryDeclaredOneIsCalled(t *testing
 			encoders: []graph.PropertyType{holder, pick},
 		},
 		{
+			name: "a union bound two records deep", binds: []boundWidth{{width: nest}},
+			encoders: []graph.PropertyType{nest, holder, pick},
+		},
+		{
+			name: "a union bound under a record member of another", binds: []boundWidth{{width: either}},
+			encoders: []graph.PropertyType{either, holder, pick},
+		},
+		{
 			name: "a union bound in a list member of another", binds: []boundWidth{{width: outer}},
 			encoders: []graph.PropertyType{outer, pick},
 		},
 		{
-			name: "a list of one and a nullable other", binds: []boundWidth{{width: graph.ListOf(flag, true)}, {width: pick, nullable: true}},
+			name: "a list of one and a nullable other", binds: []boundWidth{{width: graph.ListOf(flag, false)}, {width: pick, nullable: true}},
 			encoders: []graph.PropertyType{flag, pick},
 		},
 		{
-			name: "two lists of different unions", binds: []boundWidth{{width: graph.ListOf(flag, true)}, {width: graph.ListOf(pick, true)}},
+			name: "two lists of different unions", binds: []boundWidth{{width: graph.ListOf(flag, false)}, {width: graph.ListOf(pick, false)}},
 			encoders: []graph.PropertyType{flag, pick},
 		},
 	} {
