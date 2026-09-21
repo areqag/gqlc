@@ -134,10 +134,11 @@ func TestRecordUseAnswersForExactlyTheSharedEncodingSet(t *testing.T) {
 
 // TestRecordHelpersAreEmittedOnlyWhereCalled pins the gating. A helper
 // emitted for a direction the batch never reaches is an unexported
-// function nothing calls: it compiles, and the fence's linter skips every
-// generated file, so a regenerated golden records it and no lint reports
-// it (bd gqlc-nv8e). The reverse is the build failure the invariant above
-// describes.
+// function nothing calls. It compiles, and the gate that reports such a
+// function — `unused` over the goldens, `just check-goldens-unused` (bd
+// gqlc-ukzq) — has no golden of this file to read, no fixture declaring a
+// record targeting this driver. The reverse is the build failure the
+// invariant above describes.
 //
 // The imports are asserted with the same rows because they are gated on
 // the same reading: an encode-only file names fmt nowhere, since only a

@@ -492,8 +492,10 @@ is what stops sources 1–6 taking a name the package block already holds.
 The Tx block is emitted unconditionally (not gated on the batch having
 queries): it is repository surface, all of it exported, so the emitted-
 but-unused concern that gates the AGE composer does not apply. (That
-concern is dead code in the emitted package, not a lint failure: the
-fence's linter skips generated files, bd gqlc-nv8e.)
+concern is an unexported declaration nothing uses. The fence's own lint
+step skips generated files, bd gqlc-nv8e; since bd gqlc-ukzq the fence
+also runs `unused` over the goldens with generated files visible —
+`just check-goldens-unused` — which reports one.)
 
 ## 10. Declined, with reasons
 

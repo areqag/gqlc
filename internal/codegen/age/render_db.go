@@ -12,8 +12,10 @@ import (
 //
 // withQueries gates the composer, and withOneSentinels the :one
 // sentinels, on the batch reaching for them, so db.go carries no
-// declaration nothing uses. No lint enforces that — the fence's linter
-// skips generated files (bd gqlc-nv8e). The Tx block is
+// declaration nothing uses. The unexported composer is held to that by
+// `unused` over the goldens (`just check-goldens-unused`, bd gqlc-ukzq);
+// the sentinels are exported, so no linter can call them unused and the
+// goldens' bytes are what hold them. The Tx block is
 // not gated, and does not need to be — it is exported repository surface
 // in every declaration, so nothing in it is unused from the compiler's
 // point of view whatever the batch holds.

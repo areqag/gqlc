@@ -70,9 +70,9 @@
 // the node it creates is one AccountWhole can decode.
 //
 // Between them these reach every helper renderUUIDConversions can emit, so
-// each one's body is compiled and vetted by the fence here. That is coverage
-// of the helpers, not a guard on over-emission: a helper emitted for no call
-// site compiles, and the fence's linter skips generated files (bd gqlc-nv8e).
+// each one's body is compiled and vetted by the fence here. Over-emission is
+// held from the other side: a helper emitted for no call site compiles, and
+// the fence's `unused` run over the goldens reports it (bd gqlc-ukzq).
 
 // name: AccountWhole :one
 MATCH (a:Account) WHERE a.id = $id RETURN a

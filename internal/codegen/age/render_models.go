@@ -141,9 +141,11 @@ type helpers struct {
 	// than its carrier decodes. They are separate marks rather than one,
 	// because an emission that declares only integer widths would
 	// otherwise carry agtypeFloat32 and the math import it alone names
-	// (bd gqlc-awtb). The unused IMPORT is what a gate catches — it does
-	// not compile. The unused function alone compiles and no lint reads
-	// it: the fence's linter skips every generated file (bd gqlc-nv8e).
+	// (bd gqlc-awtb). The unused import does not compile. The unused
+	// function alone compiles, and is reported by `unused` over the
+	// goldens (`just check-goldens-unused`, bd gqlc-ukzq) — unless an
+	// entity decoder calls it, since those are rooted there whether or
+	// not anything calls THEM (bd gqlc-m1dk).
 	intAs       bool // agtypeIntAs — an integer width narrower than int64 decodes
 	narrowFloat bool // agtypeFloat32 — a FLOAT32 decodes
 
@@ -907,7 +909,8 @@ func renderModels(pkg string, entities []wiredEntity, h helpers) []byte {
 	// The field helper is gated on a decoded record having a field to
 	// read (needRecord), not on a record decoding: a record of no fields
 	// declares no call site, so record_any_and_empty's AGE golden carries
-	// no helper. It carried one with no caller until bd gqlc-vvxn.
+	// no helper. It carried one with no caller until bd gqlc-vvxn, and
+	// `just check-goldens-unused` now reports that (bd gqlc-ukzq).
 	if h.recordField {
 		writeRecordFieldHelper(&b)
 	}
