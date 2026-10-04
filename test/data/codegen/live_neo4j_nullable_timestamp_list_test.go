@@ -118,6 +118,10 @@ func runNullableTimestampListRows(ctx context.Context, t *testing.T, arm nullabl
 		got, err := arm.read(ctx, 1)
 		require.NoError(t, err, "the column decode refused a value it wrote")
 		requireStampPtrsEqual(t, want.stamps, got.stamps, "stamps")
+		// The instant comparison above passes a bind that normalised to UTC;
+		// the offset is what tells it from one that kept the value.
+		_, off := got.stamps[0].Zone()
+		require.Equal(t, 7200, off, "the +02:00 offset of the first stamp did not survive the round trip")
 		require.NotNil(t, got.maybe, "maybe was written and read back as null")
 		requireStampPtrsEqual(t, *want.maybe, *got.maybe, "maybe")
 		require.Len(t, got.fixed, len(want.fixed))
