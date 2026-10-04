@@ -214,7 +214,7 @@ func encodeUnion4563e5a7(v any) (any, error) {
 	case int64:
 		return t, nil
 	case []*time.Time:
-		return t, nil
+		return fromNullableTimestampList(t), nil
 	}
 	return nil, fmt.Errorf("encode %s: no member carries %T", "UNION<INT64|LIST<TIMESTAMP>>", v)
 }

@@ -106,6 +106,41 @@ func TestParamBindExprTemporalLists(t *testing.T) {
 	}
 }
 
+// TestParamBindExprNullableTimestampList pins the one list shape whose leaf the
+// driver packs and whose ELEMENT it does not (bd gqlc-gk6q).
+//
+// time.Time is among packStruct's cases, so []time.Time binds bare. But packV's
+// pointer arm hands a pointer-to-struct to packStruct as the pointer, and
+// *time.Time is not a case: v5.28.4 raises UnsupportedTypeError and v6.2.0
+// falls through to mapping.StructAsMap and packs an empty map. A pointer to a
+// scalar takes packV's other branch and is indirected, which is why the
+// numeric rows below bind bare — measured on both majors against the pinned
+// image, nil elements included, and they are here so a fix that routed every
+// element-nullable list through a helper fails rather than passes.
+func TestParamBindExprNullableTimestampList(t *testing.T) {
+	tests := []struct {
+		name     string
+		goType   string
+		nullable bool
+		want     string
+	}{
+		{"nullable-element timestamp list", "[]*time.Time", false, "fromNullableTimestampList(arg)"},
+		{"nullable list of nullable timestamps", "[]*time.Time", true, "fromNullableTimestampListPtr(arg)"},
+
+		{"NOT NULL-element timestamp list", "[]time.Time", false, "arg"},
+		{"nullable NOT NULL-element timestamp list", "[]time.Time", true, "arg"},
+		{"nullable-element int64 list", "[]*int64", false, "arg"},
+		{"nullable-element int32 list", "[]*int32", false, "arg"},
+		{"nullable-element float32 list", "[]*float32", true, "arg"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := codegen.Param{RawName: "p", Field: "P", GoType: tt.goType, Nullable: tt.nullable}
+			require.Equal(t, tt.want, neo4j.ParamBindExpr(f, "arg"))
+		})
+	}
+}
+
 // TestParamBindExprUnsignedWidthsReachTheDriverUnconverted pins the bind
 // expression for every integer width, and exists for the two rows that
 // change: uint64 and uint.

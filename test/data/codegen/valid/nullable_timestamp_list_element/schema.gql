@@ -1,0 +1,8 @@
+CREATE PROPERTY GRAPH TYPE NullableTimestampListElement AS {
+    (:Entry {
+        id     :: INT64 NOT NULL,
+        stamps :: LIST<TIMESTAMP> NOT NULL,
+        maybe  :: LIST<TIMESTAMP>,
+        fixed  :: LIST<TIMESTAMP NOT NULL> NOT NULL
+    })
+}

@@ -21,7 +21,7 @@ func generate(in codegen.Input, target driverTarget, packageName string) ([]code
 	// One walk answers both conversion kinds, so models.go's record
 	// helpers and temporal_neo4j.go's carrier bridges are gated off the
 	// same reading of the batch (see conversionUses).
-	neutralUse, recordUse, unionUse := conversionUses(prepared, target.types())
+	neutralUse, recordUse, unionUse, timestampUse := conversionUses(prepared, target.types())
 
 	files := []codegen.File{
 		{Path: "db.go", Contents: renderDB(pkg, hasOne, hasIter, target)},
@@ -80,6 +80,16 @@ func generate(in codegen.Input, target driverTarget, packageName string) ([]code
 			codegen.File{Path: "uuid.go", Contents: codegen.RenderUUID(pkg)},
 			codegen.File{Path: "uuid_neo4j.go", Contents: renderUUIDConversions(pkg, neutralUse)},
 		)
+	}
+
+	// The nullable-element TIMESTAMP list helpers (bd gqlc-gk6q), gated on
+	// a site calling one. The plain helper stands under its Ptr wrapper, so
+	// the one bit answers for the file.
+	if timestampUse.listElem {
+		files = append(files, codegen.File{
+			Path:     "timestamp_neo4j.go",
+			Contents: renderTimestampConversions(pkg, timestampUse),
+		})
 	}
 
 	// Per-source `<name>.cypher.go` file emission — grouped by

@@ -17,12 +17,12 @@
 // first row writes it and reads the slot back raw, so a server that refused it
 // would red there rather than in a decode.
 //
-// THE TIMESTAMP LIST IS WRITTEN RAW. Its member carries as []*time.Time and
-// the encode hands that to the driver bare, which both majors refuse — v5
-// client-side, v6 by packing each element as an empty map the server will
-// not store (bd gqlc-gk6q, which reaches a top-level parameter of the same
-// width too). The decode is this bead's and is read back like the other four;
-// the refusal is pinned by its own row so the fix reds it.
+// THE TIMESTAMP LIST IS WRITTEN THROUGH THE GENERATED WRITE like the other
+// four. Its member carries as []*time.Time, which neither major packs bare —
+// v5 refused it client-side and v6 packed each element as an empty map — so
+// the encode arm binds it through fromNullableTimestampList (bd gqlc-gk6q).
+// The same bead's top-level-parameter route runs off this test's container
+// too; its rows are in live_neo4j_nullable_timestamp_list_test.go.
 //
 // No NULL element is written. A neo4j property array cannot hold one, so the
 // nil-element arm of the decode is unreachable from a stored property and is
@@ -72,7 +72,7 @@ type unionListTemporalArm struct {
 	raw     func(ctx context.Context, t *testing.T, cypher string) []map[string]any
 }
 
-func TestNeo4jRoundTripsAUnionOfATemporalList(t *testing.T) {
+func TestNeo4jRoundTripsANullableElementTemporalList(t *testing.T) {
 	if os.Getenv("GQLC_SKIP_LIVE") != "" {
 		t.Skip("GQLC_SKIP_LIVE set; skipping live backend containers")
 	}
@@ -97,20 +97,32 @@ func TestNeo4jRoundTripsAUnionOfATemporalList(t *testing.T) {
 	t.Run("a list expression of nullable union elements", func(t *testing.T) {
 		runUnionListExpressionRows(ctx, t, boltURI)
 	})
+
+	// The top-level-parameter route of bd gqlc-gk6q, off the same container
+	// rather than a serial one of its own; its rows and arms are in
+	// live_neo4j_nullable_timestamp_list_test.go.
+	paramArms := []struct {
+		name string
+		open func(ctx context.Context, t *testing.T, boltURI string) nullableTimestampListArm
+	}{
+		{name: "neo4j-go-v5", open: openNullableTimestampListArmV5},
+		{name: "neo4j-go-v6", open: openNullableTimestampListArmV6},
+	}
+	for _, a := range paramArms {
+		t.Run("timestamp-list-parameter/"+a.name, func(t *testing.T) {
+			runNullableTimestampListRows(ctx, t, a.open(ctx, t, boltURI))
+		})
+	}
 }
 
 // The stamps are written at a non-UTC offset so the read-back is known to
 // carry the instant rather than the wall clock; the comparison is on the
-// instant, because the driver hands back its own *time.Location.
+// instant, because the driver hands back its own *time.Location. The zone is
+// named "Offset" for nullableTimestampListStamps' reason (bd gqlc-m3ax).
 var unionListStamps = []time.Time{
-	time.Date(2024, 2, 29, 23, 30, 0, 0, time.FixedZone("", 2*3600)),
+	time.Date(2024, 2, 29, 23, 30, 0, 0, time.FixedZone("Offset", 2*3600)),
 	time.Date(1999, 12, 31, 12, 0, 0, 500, time.UTC),
 }
-
-// unionListStampsCypher stores unionListStamps on Diary 1 through a raw
-// session; see the header for why the generated write cannot.
-const unionListStampsCypher = "MATCH (d:Diary {id: 1}) SET d.stamps = " +
-	"[datetime('2024-02-29T23:30:00+02:00'), datetime('1999-12-31T12:00:00.0000005Z')]"
 
 func runUnionListTemporalRows(ctx context.Context, t *testing.T, arm unionListTemporalArm) {
 	t.Helper()
@@ -118,16 +130,14 @@ func runUnionListTemporalRows(ctx context.Context, t *testing.T, arm unionListTe
 		t.Helper()
 		arm.raw(ctx, t, wipeCypher)
 	}
-	// openLists writes Diary 1 holding every list member and answers what
-	// it wrote: four through the generated write, the stamps raw.
+	// openLists writes Diary 1 holding every list member through the
+	// generated write and answers what it wrote.
 	openLists := func(t *testing.T) diaryUnions {
 		t.Helper()
 		want := arm.lists()
-		generated := want
-		generated.stamps = nil
-		require.NoError(t, arm.open(ctx, 1, generated),
-			"the server refused the write, so StorableProperty's admission of a union whose member is a list is wrong")
-		arm.raw(ctx, t, unionListStampsCypher)
+		require.NoError(t, arm.open(ctx, 1, want),
+			"the server refused the write, so StorableProperty's admission of a union whose member is a list is wrong, "+
+				"or the TIMESTAMP member reached the driver unconverted (bd gqlc-gk6q)")
 		return want
 	}
 
@@ -190,12 +200,25 @@ func runUnionListTemporalRows(ctx context.Context, t *testing.T, arm unionListTe
 		require.Empty(t, none, "a date list no node holds must match no node")
 	})
 
-	t.Run("a TIMESTAMP list member is still refused at the write", func(t *testing.T) {
+	t.Run("a TIMESTAMP list member round-trips alone through the generated write", func(t *testing.T) {
 		wipe(t)
-		err := arm.open(ctx, 1, diaryUnions{stamps: arm.lists().stamps})
-		require.Error(t, err,
-			"bd gqlc-gk6q is fixed: write the stamps through the generated write in openLists, delete "+
-				"unionListStampsCypher and this row, and close that bead")
+		want := diaryUnions{stamps: arm.lists().stamps}
+		require.NoError(t, arm.open(ctx, 1, want),
+			"the LIST<TIMESTAMP> member was refused at the write (bd gqlc-gk6q)")
+
+		rows := arm.raw(ctx, t, "MATCH (d:Diary {id: 1}) RETURN [x IN d.stamps | valueType(x)] AS stamps")
+		require.Len(t, rows, 1)
+		require.Equal(t, []any{"ZONED DATETIME NOT NULL", "ZONED DATETIME NOT NULL"}, rows[0]["stamps"],
+			"each stamp must be stored as the instant it was, not as a map")
+
+		whole, err := arm.whole(ctx, 1)
+		require.NoError(t, err)
+		require.NotNil(t, whole.stamps, "the stamps were written and read back as null")
+		wantStamps, ok := (*want.stamps).([]*time.Time)
+		require.True(t, ok, "the premise: the written stamps are a list of *time.Time")
+		gotStamps, ok := (*whole.stamps).([]*time.Time)
+		require.True(t, ok, "the stamps must come back as the LIST<TIMESTAMP> member, got %T", *whole.stamps)
+		requireStampPtrsEqual(t, wantStamps, gotStamps, "stamps")
 	})
 }
 
