@@ -5,6 +5,11 @@
 // built it unless the bind walks the value. The live rows are in
 // live_neo4j_any_param_timestamp_test.go.
 //
+// `seenOn` and `ref` are never bound. They are here so the package declares
+// gqlc's own temporal carriers and its UUID carrier, which a caller can
+// then place inside an ANY value; neither driver major packs one (v5
+// refuses the type, v6 sends its fields as a map).
+//
 // neo4j-only: the refusal is the neo4j drivers' zone-id rule (bd
 // gqlc-m3ax). What AGE does with a time.Time inside an ANY value is not
 // measured here.

@@ -9,4 +9,6 @@ type Slot struct {
 	Loose   []any
 	Marker  any
 	Payload *any
+	Ref     *UUID
+	SeenOn  *Date
 }

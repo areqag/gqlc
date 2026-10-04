@@ -23,6 +23,7 @@ import (
 	"context"
 	"testing"
 	"time"
+	"uuid"
 
 	neo4jv5 "github.com/neo4j/neo4j-go-driver/v5/neo4j"
 	neo4jv6 "github.com/neo4j/neo4j-go-driver/v6/neo4j"
@@ -50,6 +51,17 @@ type anyParamTimestampArm struct {
 	byBag     func(ctx context.Context, v *[]any) ([]int64, error)
 	byLoose   func(ctx context.Context, v []any) ([]int64, error)
 	raw       func(ctx context.Context, t *testing.T, cypher string) []map[string]any
+	// carriers answers values of the package's own neutral carriers, each
+	// with the value type the server must store it as.
+	carriers func() []anyCarrierCase
+}
+
+// anyCarrierCase is one value of a gqlc neutral carrier placed inside an
+// ANY parameter, and the valueType the server must report for it stored.
+type anyCarrierCase struct {
+	name   string
+	value  any
+	stored string
 }
 
 func runAnyParamTimestampRows(ctx context.Context, t *testing.T, arm anyParamTimestampArm) {
@@ -153,6 +165,24 @@ func runAnyParamTimestampRows(ctx context.Context, t *testing.T, arm anyParamTim
 
 	// The walk must leave every value that is not a stamp as it was, and a
 	// nil pointer carrier must still bind the null its nullability declared.
+	// gqlc's own carriers, which neither major packs: v5 refuses the type
+	// and v6 sends the struct's fields as a map. Each is written through
+	// the NOT NULL ANY parameter and matched back through it, so the row
+	// holds both the stored type and the value.
+	for _, c := range arm.carriers() {
+		t.Run("a neutral carrier inside an ANY parameter binds as its own type: "+c.name, func(t *testing.T) {
+			wipe(t)
+			require.NoError(t, arm.add(ctx, anySlot{id: 1, marker: c.value}),
+				"a %s inside an ANY parameter was refused", c.name)
+			rows := arm.raw(ctx, t, "MATCH (s:Slot {id: 1}) RETURN valueType(s.marker) AS stored")
+			require.Len(t, rows, 1)
+			require.Equal(t, c.stored, rows[0]["stored"], "%s was stored as the wrong type", c.name)
+			got, err := arm.byMarker(ctx, c.value)
+			require.NoError(t, err)
+			require.Equal(t, []int64{1}, got, "%s does not bind as the value it was written as", c.name)
+		})
+	}
+
 	t.Run("a value that is not a stamp binds unchanged, and a nil carrier binds null", func(t *testing.T) {
 		wipe(t)
 		require.NoError(t, arm.add(ctx, anySlot{
@@ -201,6 +231,20 @@ func openAnyParamTimestampArmV5(ctx context.Context, t *testing.T, boltURI strin
 		byBag:     q.SlotIdsByBag,
 		byLoose:   q.SlotIdsByLoose,
 		raw:       raw.raw,
+		carriers: func() []anyCarrierCase {
+			day := aptv5.Date{Year: 2024, Month: 2, Day: 29}
+			return []anyCarrierCase{
+				{"Date", day, "DATE NOT NULL"},
+				{"*Date", &day, "DATE NOT NULL"},
+				{"[]Date", []aptv5.Date{day, {Year: 1999, Month: 12, Day: 31}}, "LIST<DATE NOT NULL> NOT NULL"},
+				{"[]*Date", []*aptv5.Date{&day}, "LIST<DATE NOT NULL> NOT NULL"},
+				{"[]any holding a LocalTime", []any{aptv5.LocalTime{Hour: 9, Minute: 15, Nanosecond: 7}}, "LIST<LOCAL TIME NOT NULL> NOT NULL"},
+				{"Time", aptv5.Time{Hour: 9, Minute: 15, OffsetSeconds: -5 * 3600}, "ZONED TIME NOT NULL"},
+				{"LocalDateTime", aptv5.LocalDateTime{Year: 2024, Month: 2, Day: 29, Hour: 23, Minute: 30}, "LOCAL DATETIME NOT NULL"},
+				{"Duration", aptv5.Duration{Months: 1, Days: 2, Seconds: 3, Nanos: 4}, "DURATION NOT NULL"},
+				{"UUID", uuid.MustParse("6ba7b810-9dad-11d1-80b4-00c04fd430c8"), "STRING NOT NULL"},
+			}
+		},
 	}
 }
 
@@ -225,5 +269,19 @@ func openAnyParamTimestampArmV6(ctx context.Context, t *testing.T, boltURI strin
 		byBag:     q.SlotIdsByBag,
 		byLoose:   q.SlotIdsByLoose,
 		raw:       raw.raw,
+		carriers: func() []anyCarrierCase {
+			day := aptv6.Date{Year: 2024, Month: 2, Day: 29}
+			return []anyCarrierCase{
+				{"Date", day, "DATE NOT NULL"},
+				{"*Date", &day, "DATE NOT NULL"},
+				{"[]Date", []aptv6.Date{day, {Year: 1999, Month: 12, Day: 31}}, "LIST<DATE NOT NULL> NOT NULL"},
+				{"[]*Date", []*aptv6.Date{&day}, "LIST<DATE NOT NULL> NOT NULL"},
+				{"[]any holding a LocalTime", []any{aptv6.LocalTime{Hour: 9, Minute: 15, Nanosecond: 7}}, "LIST<LOCAL TIME NOT NULL> NOT NULL"},
+				{"Time", aptv6.Time{Hour: 9, Minute: 15, OffsetSeconds: -5 * 3600}, "ZONED TIME NOT NULL"},
+				{"LocalDateTime", aptv6.LocalDateTime{Year: 2024, Month: 2, Day: 29, Hour: 23, Minute: 30}, "LOCAL DATETIME NOT NULL"},
+				{"Duration", aptv6.Duration{Months: 1, Days: 2, Seconds: 3, Nanos: 4}, "DURATION NOT NULL"},
+				{"UUID", uuid.MustParse("6ba7b810-9dad-11d1-80b4-00c04fd430c8"), "STRING NOT NULL"},
+			}
+		},
 	}
 }

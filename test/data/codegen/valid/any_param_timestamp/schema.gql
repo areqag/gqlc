@@ -4,6 +4,8 @@ CREATE PROPERTY GRAPH TYPE AnyParamTimestamp AS {
         payload :: ANY VALUE,
         marker  :: ANY VALUE NOT NULL,
         bag     :: LIST<ANY VALUE>,
+        seenOn  :: DATE,
+        ref     :: UUID,
         loose   :: LIST NOT NULL
     })
 }
