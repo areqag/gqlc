@@ -1,0 +1,9 @@
+CREATE PROPERTY GRAPH TYPE AnyParamTimestamp AS {
+    (:Slot {
+        id      :: INT64 NOT NULL,
+        payload :: ANY VALUE,
+        marker  :: ANY VALUE NOT NULL,
+        bag     :: LIST<ANY VALUE>,
+        loose   :: LIST NOT NULL
+    })
+}
