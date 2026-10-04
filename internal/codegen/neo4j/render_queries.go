@@ -664,6 +664,11 @@ func paramBindExpr(f codegen.Param, access string) string {
 	if expr, ok := unionBindExpr(f, access); ok {
 		return expr
 	}
+	if isAnyValueCarrier(f.GoType) {
+		// Nullable or not: fromAnyValue's pointer arms answer a nil
+		// *any or *[]any with the Cypher null.
+		return fmt.Sprintf("fromAnyValue(%s)", access)
+	}
 	if isSliceType(f.GoType) {
 		return sliceParamBindExpr(f.GoType, f.Width, f.Nullable, access)
 	}
@@ -674,22 +679,7 @@ func paramBindExpr(f codegen.Param, access string) string {
 		return fmt.Sprintf("from%s(%s)", timestampHelper, access)
 	}
 	if f.Nullable {
-		if isNeutralCarrier(f.GoType) {
-			return fmt.Sprintf("from%sPtr(%s)", f.GoType, access)
-		}
-		if codegen.IsDeclaredRecord(f.GoType, f.Width) {
-			// A declared record is in the temporal carriers' position
-			// rather than in the pass-the-pointer-through one: packX's
-			// reflect.Ptr arm indirects to a struct and hands it to
-			// packStruct, which raises UnsupportedTypeError for a struct
-			// it does not know. So the nil-to-Cypher-null job belongs to
-			// an emitted wrapper here too, one indirection earlier than
-			// the shape below survives.
-			return fmt.Sprintf("encode%sPtr(%s)", codegen.RecordHelperSuffix(f.Width), access)
-		}
-		// Uniform: pass the pointer through as-is. A nil pointer binds
-		// Cypher null via the driver's parameter marshalling.
-		return access
+		return nullableScalarBindExpr(f, access)
 	}
 	if outrangesTheSignedCarrier(f.GoType) {
 		return access
@@ -698,6 +688,28 @@ func paramBindExpr(f codegen.Param, access string) string {
 	if carrier != f.GoType {
 		return widenExpr(f.GoType, f.Width, access)
 	}
+	return access
+}
+
+// nullableScalarBindExpr is paramBindExpr's answer for a nullable
+// parameter that is neither a union, an ANY carrier, a slice nor a
+// TIMESTAMP.
+func nullableScalarBindExpr(f codegen.Param, access string) string {
+	if isNeutralCarrier(f.GoType) {
+		return fmt.Sprintf("from%sPtr(%s)", f.GoType, access)
+	}
+	if codegen.IsDeclaredRecord(f.GoType, f.Width) {
+		// A declared record is in the temporal carriers' position
+		// rather than in the pass-the-pointer-through one: packX's
+		// reflect.Ptr arm indirects to a struct and hands it to
+		// packStruct, which raises UnsupportedTypeError for a struct
+		// it does not know. So the nil-to-Cypher-null job belongs to
+		// an emitted wrapper here too, one indirection earlier than
+		// the shape below survives.
+		return fmt.Sprintf("encode%sPtr(%s)", codegen.RecordHelperSuffix(f.Width), access)
+	}
+	// Uniform: pass the pointer through as-is. A nil pointer binds
+	// Cypher null via the driver's parameter marshalling.
 	return access
 }
 

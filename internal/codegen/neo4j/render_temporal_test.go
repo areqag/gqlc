@@ -133,6 +133,9 @@ func TestTimestampUsesMarksTheHelperEachBindCalls(t *testing.T) {
 	})
 	recordText, ok := tm.Property(record)
 	require.True(t, ok)
+	anyRecord := graph.RecordOf([]graph.RecordField{{Name: "payload", Type: graph.TypeAnyPropertyValue}})
+	anyRecordText, ok := tm.Property(anyRecord)
+	require.True(t, ok)
 	tests := []struct {
 		name  string
 		param codegen.Param
@@ -188,6 +191,29 @@ func TestTimestampUsesMarksTheHelperEachBindCalls(t *testing.T) {
 			"record fields",
 			codegen.Param{GoType: recordText, Width: record},
 			neo4j.CarrierUseFlags{Encode: true, EncodePtr: true},
+		},
+		// fromAnyValue, for each ANY carrier and for one in a record
+		// field. It is the only bit set: the walk calls fromTimestamp,
+		// which the file always declares, and no declared-width helper.
+		{
+			"any value",
+			codegen.Param{GoType: "any", Width: graph.TypeAnyPropertyValue},
+			neo4j.CarrierUseFlags{AnyValue: true},
+		},
+		{
+			"nullable any value",
+			codegen.Param{GoType: "any", Width: graph.TypeAnyPropertyValue, Nullable: true},
+			neo4j.CarrierUseFlags{AnyValue: true},
+		},
+		{
+			"nullable any list",
+			codegen.Param{GoType: "[]any", Width: graph.ListOf(graph.TypeAnyPropertyValue, false), Nullable: true},
+			neo4j.CarrierUseFlags{AnyValue: true},
+		},
+		{
+			"record any field",
+			codegen.Param{GoType: anyRecordText, Width: anyRecord},
+			neo4j.CarrierUseFlags{AnyValue: true},
 		},
 	}
 	for _, tt := range tests {

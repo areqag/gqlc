@@ -107,6 +107,7 @@ func RenderModels(pkg string, entities []codegen.Entity, prepared []codegen.Quer
 type CarrierUseFlags struct {
 	Decode, Encode, EncodePtr, List, ListPtr bool
 	ListElem, ListElemPtr                    bool
+	AnyValue                                 bool
 }
 
 func flagsOf(u carrierUse) CarrierUseFlags {
@@ -118,6 +119,7 @@ func flagsOf(u carrierUse) CarrierUseFlags {
 		ListPtr:     u.listPtr,
 		ListElem:    u.listElem,
 		ListElemPtr: u.listElemPtr,
+		AnyValue:    u.anyValue,
 	}
 }
 

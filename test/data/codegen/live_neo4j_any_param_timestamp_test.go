@@ -87,6 +87,8 @@ func runAnyParamTimestampRows(ctx context.Context, t *testing.T, arm anyParamTim
 	}{
 		{"any holding time.Now()", anySlot{id: 1, marker: time.Now()}},
 		{"any holding a *time.Time", anySlot{id: 1, marker: ptr(local)}},
+		{"any holding a []time.Time", anySlot{id: 1, marker: []time.Time{local, unnamed}}},
+		{"any holding a []*time.Time", anySlot{id: 1, marker: []*time.Time{ptr(abbreviated)}}},
 		{"*any holding an unnamed fixed zone", anySlot{id: 1, marker: int64(0), payload: ptr[any](unnamed)}},
 		{"[]any holding time.Local", anySlot{id: 1, marker: int64(0), loose: []any{local}}},
 		{"*[]any holding an abbreviated zone", anySlot{id: 1, marker: int64(0), bag: ptr([]any{abbreviated})}},

@@ -43,6 +43,11 @@ type carrierUse struct {
 	// different parameter types and neither can stand for the other: a
 	// batch binding both shapes owes both bodies.
 	listElem, listElemPtr bool
+	// anyValue records that an ANY VALUE or LIST<ANY VALUE> parameter is
+	// bound, whose value may hold the carrier with no declared width to
+	// say so. Only TIMESTAMP's answer reads it: fromAnyValue (bd
+	// gqlc-nvb4).
+	anyValue bool
 }
 
 // conversionUses walks the prepared batch ONCE and answers, for both
@@ -196,7 +201,19 @@ func (w *conversionUseWalk) markEncode(goType string, width graph.PropertyType, 
 		}
 		return
 	}
+	if isAnyValueCarrier(goType) {
+		w.timestamp.anyValue = true
+		return
+	}
 	w.markCarrier(goType, set)
+}
+
+// isAnyValueCarrier reports whether a parameter carrier is ANY VALUE's or
+// LIST<ANY VALUE>'s, whose bind walks the value (fromAnyValue). Asked only
+// after the union question, because `any` and `[]any` are also a closed
+// union's carriers and those bind through the union's own encode.
+func isAnyValueCarrier(goType string) bool {
+	return goType == "any" || goType == "[]any"
 }
 
 // encodeDirection answers which encode helper ONE parameter position
@@ -409,7 +426,9 @@ const timestampHelper = "Timestamp"
 // time.Now() is. A list element owes the same conversion, and so does a
 // *time.Time inside a list for its own reason: packV hands a
 // pointer-to-struct to packStruct still a pointer, and *time.Time is no
-// case there (bd gqlc-gk6q).
+// case there (bd gqlc-gk6q). Both hold for a value inside an ANY VALUE or
+// LIST<ANY VALUE> parameter, which has no declared width to dispatch on,
+// so fromAnyValue walks it (bd gqlc-nvb4).
 //
 // fromTimestamp converts only what the server would refuse or misread, and
 // sends every other value as it was. Cypher's = compares the zone FORM as
@@ -556,6 +575,55 @@ func fromNullableTimestampListPtr(v *[]*time.Time) any {
 }
 `)
 		}
+	}
+	if use.anyValue {
+		b.WriteString(`
+// fromAnyValue binds an ANY VALUE or LIST<ANY VALUE> parameter, whose
+// value has no declared width to choose a conversion by. A TIMESTAMP in
+// it is bound through fromTimestamp: bare, behind a pointer, or as an
+// element of a []time.Time, a []*time.Time or a []any at any depth. A nil
+// pointer binds the Cypher null, and every other value is bound as it is.
+func fromAnyValue(v any) any {
+	switch t := v.(type) {
+	case time.Time:
+		return fromTimestamp(t)
+	case *time.Time:
+		if t == nil {
+			return nil
+		}
+		return fromTimestamp(*t)
+	case *any:
+		if t == nil {
+			return nil
+		}
+		return fromAnyValue(*t)
+	case *[]any:
+		if t == nil {
+			return nil
+		}
+		return fromAnyValue(*t)
+	case []time.Time:
+		out := make([]any, len(t))
+		for i := range t {
+			out[i] = fromTimestamp(t[i])
+		}
+		return out
+	case []*time.Time:
+		out := make([]any, len(t))
+		for i := range t {
+			out[i] = fromAnyValue(t[i])
+		}
+		return out
+	case []any:
+		out := make([]any, len(t))
+		for i := range t {
+			out[i] = fromAnyValue(t[i])
+		}
+		return out
+	}
+	return v
+}
+`)
 	}
 	return []byte(b.String())
 }

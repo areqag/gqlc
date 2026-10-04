@@ -23,7 +23,7 @@ type AddSlotParams struct {
 //
 //	CREATE (s:Slot {id: $id, payload: $payload, marker: $marker, bag: $bag, loose: $loose})
 func (q *queries) AddSlot(ctx context.Context, arg AddSlotParams) error {
-	_, err := q.db.run(ctx, addSlotQueryText, map[string]any{"id": arg.Id, "payload": arg.Payload, "marker": arg.Marker, "bag": arg.Bag, "loose": arg.Loose}, neo4j.AccessModeWrite)
+	_, err := q.db.run(ctx, addSlotQueryText, map[string]any{"id": arg.Id, "payload": fromAnyValue(arg.Payload), "marker": fromAnyValue(arg.Marker), "bag": fromAnyValue(arg.Bag), "loose": fromAnyValue(arg.Loose)}, neo4j.AccessModeWrite)
 	return err
 }
 
@@ -33,7 +33,7 @@ const slotIdsByPayloadQueryText = `MATCH (s:Slot) WHERE s.payload = $payload RET
 //
 //	MATCH (s:Slot) WHERE s.payload = $payload RETURN s.id AS id ORDER BY s.id
 func (q *queries) SlotIdsByPayload(ctx context.Context, arg *any) ([]int64, error) {
-	records, err := q.db.run(ctx, slotIdsByPayloadQueryText, map[string]any{"payload": arg}, neo4j.AccessModeRead)
+	records, err := q.db.run(ctx, slotIdsByPayloadQueryText, map[string]any{"payload": fromAnyValue(arg)}, neo4j.AccessModeRead)
 	if err != nil {
 		return nil, err
 	}
@@ -57,7 +57,7 @@ const slotIdsByMarkerQueryText = `MATCH (s:Slot) WHERE s.marker = $marker RETURN
 //
 //	MATCH (s:Slot) WHERE s.marker = $marker RETURN s.id AS id ORDER BY s.id
 func (q *queries) SlotIdsByMarker(ctx context.Context, arg any) ([]int64, error) {
-	records, err := q.db.run(ctx, slotIdsByMarkerQueryText, map[string]any{"marker": arg}, neo4j.AccessModeRead)
+	records, err := q.db.run(ctx, slotIdsByMarkerQueryText, map[string]any{"marker": fromAnyValue(arg)}, neo4j.AccessModeRead)
 	if err != nil {
 		return nil, err
 	}
@@ -81,7 +81,7 @@ const slotIdsByBagQueryText = `MATCH (s:Slot) WHERE s.bag = $bag RETURN s.id AS 
 //
 //	MATCH (s:Slot) WHERE s.bag = $bag RETURN s.id AS id ORDER BY s.id
 func (q *queries) SlotIdsByBag(ctx context.Context, arg *[]any) ([]int64, error) {
-	records, err := q.db.run(ctx, slotIdsByBagQueryText, map[string]any{"bag": arg}, neo4j.AccessModeRead)
+	records, err := q.db.run(ctx, slotIdsByBagQueryText, map[string]any{"bag": fromAnyValue(arg)}, neo4j.AccessModeRead)
 	if err != nil {
 		return nil, err
 	}
@@ -105,7 +105,7 @@ const slotIdsByLooseQueryText = `MATCH (s:Slot) WHERE s.loose = $loose RETURN s.
 //
 //	MATCH (s:Slot) WHERE s.loose = $loose RETURN s.id AS id ORDER BY s.id
 func (q *queries) SlotIdsByLoose(ctx context.Context, arg []any) ([]int64, error) {
-	records, err := q.db.run(ctx, slotIdsByLooseQueryText, map[string]any{"loose": arg}, neo4j.AccessModeRead)
+	records, err := q.db.run(ctx, slotIdsByLooseQueryText, map[string]any{"loose": fromAnyValue(arg)}, neo4j.AccessModeRead)
 	if err != nil {
 		return nil, err
 	}
