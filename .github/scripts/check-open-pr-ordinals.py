@@ -23,14 +23,15 @@ commit status on each PR's head SHA, where its checks list already is. The
 collision reads as a red X within minutes, with no author push and no cron.
 Alternatives and why they lost are in gqlc-4plwf's design note.
 
-WHAT IS COMPARED, and this is the subtle part. Per PR, a THREE-DOT compare of
-the pushed master against the PR head, taking only files the PR ADDS (status
-added / renamed / copied) under an enrolled directory. Not the union of the two
-trees: a stale head still carrying an old master file whose ordinal master has
-since renumbered-and-reused collides in a union, but is absent from the tree
-the squash merge actually produces, so a union would report a collision that
-cannot happen. `renamed` is included because a renumber IS a rename and claims
-its new ordinal.
+WHAT IS COMPARED, and this is the subtle part. Per PR, the files the PR ADDS
+(status added / renamed / copied) under an enrolled directory, read from
+`repos/{owner}/{repo}/pulls/{n}/files` -- the PR's own three-dot diff, merge
+base to head. Not the union of the two trees: a stale head still carrying an
+old master file whose ordinal master has since renumbered-and-reused collides
+in a union, but is absent from the tree the squash merge actually produces, so
+a union would report a collision that cannot happen. `renamed` is included
+because a renumber IS a rename and claims its new ordinal; the endpoint names
+a rename by its NEW path in `filename` (old one in `previous_filename`).
 
 The verdict itself is delegated to check-doc-ordinals.py rather than
 reimplemented, by materializing a scratch directory of EMPTY files -- master's
@@ -42,20 +43,62 @@ because that checker's offenders() stats filenames and never opens one.
 THIS RUN GOES GREEN ON A COLLISION IT FINDS. The defect belongs to the PR and
 is reported on the PR; master is fine, and a collision that actually lands on
 master is caught by the unconditional tree check on ci.yml's push arm. What
-DOES fail this run is a broken instrument: an API call that errors, or a
-compare whose file list hits the cap below.
+DOES fail this run is a broken instrument: an API call that errors, or a PR
+whose file list reaches the cap below. A refused PR is posted an `error`
+status on its own head and the loop goes on, so one unreadable PR costs no
+other PR its verdict; the run reds once every PR has been examined.
 
-THE COMPARE FILE CAP IS SILENT, MEASURED NOT ASSUMED. On 2026-09-02 against
-this repository, `repos/{owner}/{repo}/compare/{base}...{head}` returned exactly
-300 entries in `files` for a range whose `total_commits` was 850, sent NO Link
-header, and ignored pagination: `?per_page=100&page=1` still returned 300 and
-`page=2` returned 0. So a truncated response is indistinguishable from a
-complete one by anything in the response, and there is no page to ask for the
-rest. A PR at the cap is therefore refused loudly rather than under-checked --
-under-checking here means a green status on a question nobody answered, which
-is the exact failure this file exists to remove.
+WHY pulls/files AND NOT THE COMPARE IT REPLACED (bd gqlc-rs3j). Until
+2026-10-04 this read `repos/{owner}/{repo}/compare/{master}...{head}`. On
+2026-09-02 that endpoint returned exactly 300 entries in `files` for a range
+whose `total_commits` was 850, sent NO Link header, and ignored pagination
+(`?per_page=100&page=2` returned 0), so the 300 was a silent truncation with no
+rest to ask for. PR #2978, a golden regeneration touching 303 files, hit it on
+2026-10-04 and was refused -- correctly, but the refusal exited the loop and
+silenced every PR after it. pulls/files paginates instead: for #2978 at
+5c257959 it sent `Link: rel="next"` and returned pages of 100, 100, 100 and 3.
+
+The swap is measured, not assumed, 2026-10-04 at master 43422c03, against
+`git diff --name-status --find-renames $(git merge-base origin/master H) H`
+for each head H: the full (status, filename, previous_filename) set from
+pulls/files equalled git's for open PRs #2990, #2985, #2978 and merged #2987,
+#2986, #2983, #2981, #2975, #2974; the compare equalled both for every one of
+those except #2978, where it stopped at 300 of 303. Renames were checked on
+merged #2844 and #2592, one each, where `filename` was git's new path. That is
+eleven PRs and three renames, a floor and not a census; a PR whose two
+endpoints disagree on the claiming set falsifies it.
+
+Two known differences, neither able to turn a collision green. (1) The
+endpoint diffs against the PR's own BASE branch, where the compare named
+master: a PR stacked on another PR lists only its own changes, and the
+parent's additions are checked on the parent. Every PR measured above targets
+master. (2) Its merge base is computed against GitHub's `base.sha`, which it
+refreshes lazily, not against the just-pushed GITHUB_SHA. For a head that has
+merged or rebased onto master past a stale `base.sha`, it can list master's
+own documents as additions. Those dedupe by name against master's listing,
+unless master has since renumbered one and reused its ordinal: then the stale
+extra collides, which is a FALSE FAILURE, never a lost one. Unwitnessed here:
+on 2026-10-04 a review re-measured five open PRs (#2999 #2998 #2996 #2994
+#2990), and merge-base(H, base.sha) equalled merge-base(H, origin/master) on
+all five, with pulls/files again equal to git's set. With the eleven above,
+that is sixteen PRs, a floor. None of the latest 400 PR heads held a merge
+commit.
+
+A third difference is closed in code. The compare named both SHAs, but
+pulls/files names neither and answers for whatever head the PR has when it
+is read. So after reading the files, the head is read again
+(current_head()); if it moved since the list, no status is posted.
+
+THE pulls/files CAP. GitHub's REST documentation gives that endpoint a
+3000-file maximum. That is documented, not measured -- no PR here has come
+near it -- and what the endpoint does past it is unwitnessed. So a PR at
+PULL_FILES_CAP is refused loudly rather than under-checked: under-checking
+here means a green status on a question nobody answered, which is the exact
+failure this file exists to remove.
 """
 
+import contextlib
+import io
 import json
 import os
 import subprocess
@@ -74,9 +117,10 @@ CONTEXT = "ordinal-recheck"
 # the API, which would drop the remedy silently mid-word.
 DESCRIPTION_LIMIT = 140
 
-# What the compare endpoint returns when it has stopped telling the truth about
-# how many files changed. Measured, with the falsifier, in the docstring above.
-COMPARE_FILE_CAP = 300
+# The most files the pull request files endpoint will list, by GitHub's REST
+# documentation. Documented, not measured: no PR here has come near it. At it,
+# the list is refused rather than trusted, as the compare's 300 used to be.
+PULL_FILES_CAP = 3000
 
 # A file the PR ADDS under an enrolled directory claims an ordinal. A modified
 # or deleted file does not: modifying 0012 leaves 0012 claimed once, and
@@ -84,6 +128,15 @@ COMPARE_FILE_CAP = 300
 CLAIMING_STATUSES = frozenset({"added", "renamed", "copied"})
 
 CHECKER = Path(__file__).resolve().parent / "check-doc-ordinals.py"
+
+
+class Refused(Exception):
+    """This PR's question cannot be fully asked; no verdict may be posted on it.
+
+    An exception rather than an exit because the refusal belongs to ONE PR. The
+    caller reports it on that PR's head and moves on to the next: exiting here
+    left every PR listed after it with no verdict at all (bd gqlc-rs3j).
+    """
 
 
 def run(argv, check=True):
@@ -146,21 +199,22 @@ def verdict(directory, master_names, added_names):
     return False, detail[:DESCRIPTION_LIMIT]
 
 
-def claimed_by(head_sha, files, directories):
-    """The enrolled files a compare's entries claim, as {directory: [name, ...]}.
+def claimed_by(files, directories):
+    """The enrolled files a PR's file entries claim, as {directory: [name, ...]}.
 
     The second decision core, kept free of the network for the reason verdict()
     is: which entry claims an ordinal is a judgement, and a test that can only
     see the final verdict cannot see it being made. Refuses at the cap here
     rather than in the caller because the cap is a property of this list.
     """
-    if len(files) >= COMPARE_FILE_CAP:
-        sys.exit(
-            f"error: the compare for {head_sha} returned {len(files)} files, at or "
-            f"over the {COMPARE_FILE_CAP} the API caps this response at. It sends no "
-            "Link header and does not paginate, so the rest cannot be fetched and a "
-            "truncated list is indistinguishable from a complete one. Refusing to "
-            "post a verdict on a question that was not fully asked."
+    if len(files) >= PULL_FILES_CAP:
+        # The first sentence is the status description, so it stands alone
+        # inside DESCRIPTION_LIMIT; the rest reaches the run log.
+        raise Refused(
+            f"{len(files)} changed files reach the API's {PULL_FILES_CAP}-file cap. "
+            "Past it the list is cut with nothing in the response to say so, and "
+            "a truncated list is indistinguishable from a complete one. Refusing "
+            "to post a verdict on a question that was not fully asked."
         )
 
     claimed = {directory: [] for directory in directories}
@@ -177,18 +231,28 @@ def claimed_by(head_sha, files, directories):
     return claimed
 
 
-def added_under(repo, base_sha, head_sha, directories):
-    """The enrolled files this PR adds, as {directory: [basename, ...]}."""
-    compare = json.loads(
+def added_under(repo, number, directories):
+    """The enrolled files PR `number` adds, as {directory: [basename, ...]}."""
+    pages = json.loads(
         run(
             [
                 "gh",
                 "api",
-                f"repos/{repo}/compare/{base_sha}...{head_sha}",
+                "--paginate",
+                # The page shape is pinned rather than left to gh: without it
+                # gh 2.102.0 merges array pages into one array, and its own
+                # help text says each page is printed separately.
+                "--slurp",
+                f"repos/{repo}/pulls/{number}/files?per_page=100",
             ]
         ).stdout
     )
-    return claimed_by(head_sha, compare.get("files", []), directories)
+    return claimed_by([entry for page in pages for entry in page], directories)
+
+
+def current_head(repo, number):
+    """PR `number`'s head SHA as GitHub reports it now."""
+    return json.loads(run(["gh", "api", f"repos/{repo}/pulls/{number}"]).stdout)["head"]["sha"]
 
 
 def post_status(repo, head_sha, state, description, target_url):
@@ -240,9 +304,30 @@ def check_open_prs(directories):
         ).stdout
     )
 
+    refused = []
     for pr in prs:
         head = pr["headRefOid"]
-        added = added_under(repo, base_sha, head, directories)
+        try:
+            added = added_under(repo, pr["number"], directories)
+        except Refused as refusal:
+            # An error, not a failure: nothing is known to collide, but nothing
+            # is known not to, and a stale green on this head must not stand.
+            description = f"not checked: {refusal}"[:DESCRIPTION_LIMIT]
+            post_status(repo, head, "error", description, target_url)
+            print(f"error: PR #{pr['number']}: {refusal}", file=sys.stderr)
+            refused.append(pr["number"])
+            continue
+        # pulls/files names no SHA, so the files are pinned to the listed head
+        # by asking again AFTER reading them. On a mismatch nothing is posted:
+        # the push that moved the head rebuilt its merge ref, which ci.yml's
+        # tree check reads, and the next master push asks this again.
+        now = current_head(repo, pr["number"])
+        if now != head:
+            print(
+                f"PR #{pr['number']}: head moved from {head} to {now} during the "
+                "read, no status posted"
+            )
+            continue
         if not any(added.values()):
             # Silent by design. Most PRs touch no enrolled series, and a
             # success status on every one of them would put a context on every
@@ -265,11 +350,18 @@ def check_open_prs(directories):
             description = f"no ordinal taken by base @{base_sha[:7]}"
             post_status(repo, head, "success", description, target_url)
             print(f"PR #{pr['number']}: success posted on {head}")
+
+    if refused:
+        # Red AFTER the loop: the run is a broken instrument for these PRs, and
+        # every other PR has already received its verdict.
+        listed = ", ".join(f"#{number}" for number in refused)
+        print(f"error: no verdict could be reached for PR {listed}", file=sys.stderr)
+        return 1
     return 0
 
 
 def self_test_claimed_by():
-    """Drive the status filter: which compare entry claims an ordinal.
+    """Drive the status filter: which file entry claims an ordinal.
 
     Split out from the verdict rows because a mutation narrowing
     CLAIMING_STATUSES survives every one of them -- the verdict never sees a
@@ -299,7 +391,7 @@ def self_test_claimed_by():
 
     failed = False
     for name, status, filename, want_claimed in rows:
-        claimed = claimed_by("headsha", [{"status": status, "filename": filename}], enrolled)
+        claimed = claimed_by([{"status": status, "filename": filename}], enrolled)
         got_claimed = any(claimed.values())
         if got_claimed != want_claimed:
             failed = True
@@ -315,15 +407,15 @@ def self_test_claimed_by():
     # chooses to fail loudly instead of answering, so a mutation that deletes it
     # buys a green status on a question that was never fully asked -- the exact
     # shape of the defect this gate exists to remove.
-    name = "a compare at the API's file cap is refused, not under-checked"
+    name = "a file list at the API's cap is refused, not under-checked"
     at_cap = [
         {"status": "added", "filename": f"docs/adr/{i:04d}-x.md"}
-        for i in range(COMPARE_FILE_CAP)
+        for i in range(PULL_FILES_CAP)
     ]
     try:
-        claimed_by("headsha", at_cap, ["docs/adr"])
-    except SystemExit as refusal:
-        if str(COMPARE_FILE_CAP) not in str(refusal):
+        claimed_by(at_cap, ["docs/adr"])
+    except Refused as refusal:
+        if str(PULL_FILES_CAP) not in str(refusal):
             failed = True
             print(
                 f"self-test FAILED: {name}\n"
@@ -336,7 +428,7 @@ def self_test_claimed_by():
         failed = True
         print(
             f"self-test FAILED: {name}\n"
-            f"  {COMPARE_FILE_CAP} entries were answered rather than refused",
+            f"  {PULL_FILES_CAP} entries were answered rather than refused",
             file=sys.stderr,
         )
 
@@ -350,7 +442,7 @@ def self_test_gh_failure():
     to STDOUT and exits non-zero. That body parses as a successful lookup
     with no files, so a call site reading it with check=False reports "adds
     no enrolled document" -- a silent green in a gate whose whole job is to
-    go red. This row puts a fake `gh` first on PATH and asserts the compare
+    go red. This row puts a fake `gh` first on PATH and asserts the file
     read fails loudly instead.
     """
     name = "a gh failure whose error body goes to stdout fails loudly, not green"
@@ -362,7 +454,7 @@ def self_test_gh_failure():
         os.environ["PATH"] = f"{tmp}{os.pathsep}{old_path}"
         try:
             try:
-                added_under("owner/repo", "base", "head", ["docs/adr"])
+                added_under("owner/repo", 1, ["docs/adr"])
             except SystemExit as failure:
                 if failure.code == 0:
                     print(
@@ -377,11 +469,257 @@ def self_test_gh_failure():
             os.environ["PATH"] = old_path
     print(
         f"self-test FAILED: {name}\n"
-        "  a failing gh was read as an empty compare, which the caller "
+        "  a failing gh was read as an empty file list, which the caller "
         'reports as "adds no enrolled document"',
         file=sys.stderr,
     )
     return True
+
+
+# A stand-in for `gh`, put first on PATH by the rows that drive the network
+# path. It serves a world read from WORLD and appends every status POST to
+# POSTED as one JSON line. Anything it does not model exits 99, so a call the
+# script newly makes is a loud row failure rather than an answer invented here.
+FAKE_GH = r'''
+import json, os, sys, urllib.parse
+WORLD, POSTED = {world!r}, {posted!r}
+args = sys.argv[1:]
+world = json.load(open(WORLD))
+if args[:2] == ["pr", "list"]:
+    print(json.dumps(world["prs"]))
+    sys.exit(0)
+if args[:1] == ["api"] and "-X" in args:
+    fields = dict(a.split("=", 1) for a in args if "=" in a and not a.startswith("repos/"))
+    fields["endpoint"] = next(a for a in args if a.startswith("repos/"))
+    with open(POSTED, "a") as out:
+        out.write(json.dumps(fields) + "\n")
+    print("{{}}")
+    sys.exit(0)
+endpoint = next((a for a in args if a.startswith("repos/")), "")
+path, _, query = endpoint.partition("?")
+parts = path.split("/")
+if args[:1] == ["api"] and len(parts) == 5 and parts[3] == "pulls" and not query:
+    # A head in "heads" moves only once its files have been read, so a check
+    # made before the read sees the listed head and cannot pass the row.
+    listed = next(pr["headRefOid"] for pr in world["prs"] if str(pr["number"]) == parts[4])
+    moved = os.path.exists(WORLD + ".read." + parts[4])
+    sha = world.get("heads", {{}}).get(parts[4], listed) if moved else listed
+    print(json.dumps({{"head": {{"sha": sha}}}}))
+    sys.exit(0)
+if args[:1] == ["api"] and len(parts) == 6 and parts[3] == "pulls" and parts[5] == "files":
+    files = world["files"][parts[4]]
+    open(WORLD + ".read." + parts[4], "w").close()
+    per_page = int(urllib.parse.parse_qs(query).get("per_page", ["30"])[0])
+    pages = [files[i:i + per_page] for i in range(0, len(files), per_page)] or [[]]
+    # Measured against gh 2.102.0, 2026-10-04: --slurp alone is refused;
+    # without --paginate only the first page; with it, one merged array; with
+    # --slurp too, the pages.
+    if "--slurp" in args and "--paginate" not in args:
+        sys.stderr.write("`--paginate` required when passing `--slurp`\n")
+        sys.exit(1)
+    if "--paginate" not in args:
+        print(json.dumps(pages[0]))
+    elif "--slurp" not in args:
+        print(json.dumps(files))
+    else:
+        print(json.dumps(pages))
+    sys.exit(0)
+sys.stderr.write("fake gh: unmodelled call: %r\n" % (args,))
+sys.exit(99)
+'''
+
+
+def run_against_fake_gh(world, directories, master_files):
+    """Drive check_open_prs() over `world` through FAKE_GH, as (rc, posts, out).
+
+    `posts` is {head_sha: status fields} for every status POSTed, and `out` the
+    lines printed, so a row can assert both what was posted and that a PR was
+    reached at all. Runs in a scratch cwd holding `master_files` per enrolled
+    directory, which is where check_open_prs() reads master's names from.
+    """
+    old_path, old_cwd = os.environ.get("PATH", ""), os.getcwd()
+    old_env = {k: os.environ.get(k) for k in ("GITHUB_REPOSITORY", "GITHUB_SHA",
+                                              "GITHUB_SERVER_URL", "GITHUB_RUN_ID")}
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        (tmp / "world.json").write_text(json.dumps(world))
+        posted = tmp / "posted.jsonl"
+        posted.touch()
+        bin_dir = tmp / "bin"
+        bin_dir.mkdir()
+        fake = bin_dir / "gh"
+        fake.write_text(
+            f"#!{sys.executable}\n"
+            + FAKE_GH.format(world=str(tmp / "world.json"), posted=str(posted))
+        )
+        fake.chmod(0o755)
+        tree = tmp / "tree"
+        for directory in directories:
+            (tree / directory).mkdir(parents=True)
+            for name in master_files.get(directory, []):
+                (tree / directory / name).touch()
+
+        os.environ.update(
+            PATH=f"{bin_dir}{os.pathsep}{old_path}",
+            GITHUB_REPOSITORY="owner/repo",
+            GITHUB_SHA="b" * 40,
+            GITHUB_SERVER_URL="https://github.invalid",
+            GITHUB_RUN_ID="1",
+        )
+        os.chdir(tree)
+        out = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
+                try:
+                    rc = check_open_prs(directories)
+                except SystemExit as stop:
+                    rc = f"SystemExit({stop.code!s:.200})"
+                except Exception as crash:
+                    rc = f"{type(crash).__name__}({crash!s:.200})"
+        finally:
+            os.chdir(old_cwd)
+            os.environ["PATH"] = old_path
+            for k, v in old_env.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+        posts = {}
+        for line in posted.read_text().splitlines():
+            fields = json.loads(line)
+            posts[fields["endpoint"].rsplit("/", 1)[1]] = fields
+    return rc, posts, out.getvalue()
+
+
+def self_test_refusal_does_not_silence_later_prs():
+    """One PR the instrument cannot read must not cost every PR after it.
+
+    Observed 2026-10-04 (bd gqlc-rs3j): PR #2978 legitimately changed 303
+    files, its read was refused at the cap, and the refusal exited the loop,
+    so every open PR listed after it got no verdict on three master pushes.
+    The world here is that order: a quiet PR, a colliding PR, the unreadable
+    one, then a PR whose ordinal master has taken -- the one whose RED the
+    abort used to eat. The colliding PR BEFORE the refused one is what pins
+    the refusal's `continue`: without it the refused PR falls through holding
+    the previous PR's additions, and a quiet predecessor hides that.
+    """
+    name = "a refused PR in the middle does not silence the PRs after it"
+    adr = "docs/adr"
+    taken = "0012-an-ordinal-master-already-holds.md"
+    quiet, capped, colliding, earlier = "1" * 40, "2" * 40, "3" * 40, "5" * 40
+    world = {
+        "prs": [
+            {"number": 1, "headRefOid": quiet},
+            {"number": 5, "headRefOid": earlier},
+            {"number": 2, "headRefOid": capped},
+            {"number": 3, "headRefOid": colliding},
+        ],
+        "files": {
+            "1": [{"status": "modified", "filename": "README.md"}],
+            "5": [{"status": "added", "filename": f"{adr}/0012-an-earlier-claim.md"}],
+            "2": [
+                {"status": "added", "filename": f"test/data/g{i:04d}.golden"}
+                for i in range(PULL_FILES_CAP)
+            ],
+            "3": [{"status": "added", "filename": f"{adr}/0012-a-different-document.md"}],
+        },
+    }
+    rc, posts, out = run_against_fake_gh(world, [adr], {adr: [taken]})
+
+    problems = []
+    if rc != 1:
+        problems.append(f"wanted rc=1 for the refused PR, got {rc!r}")
+    if quiet in posts:
+        problems.append(f"the quiet PR was posted a status: {posts[quiet]!r}")
+    if posts.get(capped, {}).get("state") != "error":
+        problems.append(f"the refused PR was not posted an error: {posts.get(capped)!r}")
+    elif str(PULL_FILES_CAP) not in posts[capped]["description"]:
+        problems.append(f"the error does not name the cap: {posts[capped]!r}")
+    elif len(posts[capped]["description"]) > DESCRIPTION_LIMIT:
+        problems.append(f"the error is past {DESCRIPTION_LIMIT} chars: {posts[capped]!r}")
+    if posts.get(earlier, {}).get("state") != "failure":
+        problems.append(f"the PR before it got no failure: {posts.get(earlier)!r}")
+    if posts.get(colliding, {}).get("state") != "failure":
+        problems.append(f"the PR after it got no failure: {posts.get(colliding)!r}")
+    elif "0012" not in posts[colliding]["description"]:
+        problems.append(f"the failure does not name 0012: {posts[colliding]!r}")
+    if problems:
+        print(f"self-test FAILED: {name}", file=sys.stderr)
+        for problem in problems:
+            print(f"  {problem}", file=sys.stderr)
+        print("  output was:\n    " + out.replace("\n", "\n    "), file=sys.stderr)
+        return True
+    print(f"self-test ok: {name}")
+    return False
+
+
+def self_test_read_past_one_page():
+    """A PR wider than one page is read on every page (bd gqlc-rs3j).
+
+    PR #2978 changed 303 files; the compare it was read through returns 300
+    and no way to ask for the rest. Two 303-file PRs here, each with its one
+    enrolled addition at an opposite end: the last entry (past the compare's
+    cap and three 100-entry pages) and the first. A read that keeps only the
+    first page loses the one, a read that keeps only the last loses the
+    other, and either reports "adds no enrolled document" for it.
+    """
+    name = "a PR wider than one page is read on every page"
+    adr = "docs/adr"
+    last, first = "4" * 40, "8" * 40
+    padding = [{"status": "modified", "filename": f"test/data/g{i:04d}.golden"} for i in range(302)]
+    claim = {"status": "added", "filename": f"{adr}/0012-a-claim-on-one-page.md"}
+    world = {
+        "prs": [{"number": 4, "headRefOid": last}, {"number": 8, "headRefOid": first}],
+        "files": {"4": padding + [claim], "8": [claim] + padding},
+    }
+    rc, posts, out = run_against_fake_gh(
+        world, [adr], {adr: ["0012-an-ordinal-master-already-holds.md"]}
+    )
+    states = {head: posts.get(head, {}).get("state") for head in (last, first)}
+    if rc != 0 or set(states.values()) != {"failure"}:
+        print(
+            f"self-test FAILED: {name}\n"
+            f"  wanted rc=0 and a failure on both heads, got rc={rc!r}, "
+            f"states {states!r}\n"
+            "  output was:\n    " + out.replace("\n", "\n    "),
+            file=sys.stderr,
+        )
+        return True
+    print(f"self-test ok: {name}")
+    return False
+
+
+def self_test_head_moved_during_read():
+    """Files read from one head are not posted onto another (bd gqlc-rs3j).
+
+    The PR list names each head SHA, but pulls/{n}/files names none: it
+    answers for whatever the head is when it is read. A push between the two
+    reads, or GitHub's own diff recompute after one, would attach a verdict
+    from one head's files to the other head. Here the head moves from 6... to
+    7... while the files are read, and the files collide; nothing may be
+    posted on either SHA.
+    """
+    name = "a head that moved between the list and the read gets no verdict"
+    adr = "docs/adr"
+    listed, moved = "6" * 40, "7" * 40
+    world = {
+        "prs": [{"number": 6, "headRefOid": listed}],
+        "heads": {"6": moved},
+        "files": {"6": [{"status": "added", "filename": f"{adr}/0012-a-claim.md"}]},
+    }
+    rc, posts, out = run_against_fake_gh(
+        world, [adr], {adr: ["0012-an-ordinal-master-already-holds.md"]}
+    )
+    if rc != 0 or posts:
+        print(
+            f"self-test FAILED: {name}\n"
+            f"  wanted rc=0 and no status, got rc={rc!r}, posted {posts!r}\n"
+            "  output was:\n    " + out.replace("\n", "\n    "),
+            file=sys.stderr,
+        )
+        return True
+    print(f"self-test ok: {name}")
+    return False
 
 
 def self_test():
@@ -425,6 +763,12 @@ def self_test():
 
     failed = self_test_claimed_by()
     if self_test_gh_failure():
+        failed = True
+    if self_test_refusal_does_not_silence_later_prs():
+        failed = True
+    if self_test_read_past_one_page():
+        failed = True
+    if self_test_head_moved_during_read():
         failed = True
     for name, master_names, added_names, want_ok in rows:
         got_ok, description = verdict("docs/adr", master_names, added_names)
