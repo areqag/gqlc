@@ -15,7 +15,7 @@
 // LIST<ANY<…>> is refused (StorableProperty), and a list expression is not
 // stored, so no NULL-element storage claim is made here.
 //
-// It runs inside TestNeo4jRoundTripsAUnionOfATemporalList, on that test's
+// It runs inside TestNeo4jRoundTripsANullableElementTemporalList, on that test's
 // container, rather than as a top-level test of its own: a fourth serial boot
 // in the PR-blocking half would cost ~20s of wall time for three rows.
 

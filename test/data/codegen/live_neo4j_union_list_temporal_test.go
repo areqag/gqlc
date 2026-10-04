@@ -72,7 +72,7 @@ type unionListTemporalArm struct {
 	raw     func(ctx context.Context, t *testing.T, cypher string) []map[string]any
 }
 
-func TestNeo4jRoundTripsAUnionOfATemporalList(t *testing.T) {
+func TestNeo4jRoundTripsANullableElementTemporalList(t *testing.T) {
 	if os.Getenv("GQLC_SKIP_LIVE") != "" {
 		t.Skip("GQLC_SKIP_LIVE set; skipping live backend containers")
 	}
@@ -97,6 +97,22 @@ func TestNeo4jRoundTripsAUnionOfATemporalList(t *testing.T) {
 	t.Run("a list expression of nullable union elements", func(t *testing.T) {
 		runUnionListExpressionRows(ctx, t, boltURI)
 	})
+
+	// The top-level-parameter route of bd gqlc-gk6q, off the same container
+	// rather than a serial one of its own; its rows and arms are in
+	// live_neo4j_nullable_timestamp_list_test.go.
+	paramArms := []struct {
+		name string
+		open func(ctx context.Context, t *testing.T, boltURI string) nullableTimestampListArm
+	}{
+		{name: "neo4j-go-v5", open: openNullableTimestampListArmV5},
+		{name: "neo4j-go-v6", open: openNullableTimestampListArmV6},
+	}
+	for _, a := range paramArms {
+		t.Run("timestamp-list-parameter/"+a.name, func(t *testing.T) {
+			runNullableTimestampListRows(ctx, t, a.open(ctx, t, boltURI))
+		})
+	}
 }
 
 // The stamps are written at a non-UTC offset so the read-back is known to
