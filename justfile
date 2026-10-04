@@ -3270,7 +3270,11 @@ check-goldens-unused: sweep-discovery-probes ensure-golangci
         cp -R "${m}" "${scratch}/${m}"
 
         total="$(find "${scratch}/${m}" -name '*.go' | wc -l)"
-        generated="$(find "${scratch}/${m}" -name '*.go' -exec grep -lE '^// Code generated .* DO NOT EDIT\.$' {} + | wc -l)"
+        # grep -r rather than find -exec grep {} +: the second runs grep once
+        # per argument batch, and a batch holding no generated file exits 1,
+        # which pipefail turns into a silent exit of the whole recipe. Measured
+        # 2026-10-04 at 1190 Go files, on the branch of bd gqlc-gk6q.
+        generated="$(grep -rlE --include='*.go' '^// Code generated .* DO NOT EDIT\.$' "${scratch}/${m}" | wc -l)"
         echo "unused over goldens: ${m}, ${generated} of ${total} Go files carry the generated header"
 
         # WITNESS: two unexported funcs nothing calls, which this run has to
