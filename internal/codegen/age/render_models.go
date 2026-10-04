@@ -474,7 +474,7 @@ func (h *helpers) forQueries(queries []codegen.Query) {
 		}
 		h.forParams(p.ParamFields)
 		for _, f := range p.RowFields {
-			h.need(f.GoType, f.Width)
+			h.need(f.GoType, rowWidth(f))
 		}
 	}
 }
@@ -2140,6 +2140,43 @@ func agtypeNullableProperty[T any](props map[string][]byte, key string, decode f
 	}
 }
 
+// listElemDocName is how a list wrapper's doc line names its element:
+// the Go text, with a record leaf named by its carrier alias and a union
+// leaf by its width.
+//
+// A record's carrier is a multi-line anonymous struct, and pasted into a
+// // comment it splits the line into lines that are not comments at all,
+// so the file does not parse. The stars and list levels in front of the
+// leaf are walked off first and put back after, because a nullable
+// record element is `*struct {…}` and a nested one `[]*struct {…}`, and
+// IsDeclaredRecord answers no for both (bd gqlc-dxhwp for the star; the
+// list level reached the comment raw until bd gqlc-k1dg).
+//
+// A union leaf is named by its width because its text is `any`, and so
+// is every other union's and ANY VALUE's: the doc lines of two wrappers
+// would otherwise read the same.
+func listElemDocName(goType string, width graph.PropertyType) string {
+	var prefix string
+	for {
+		if elem, ok := strings.CutPrefix(goType, "[]"); ok {
+			prefix, goType, width = prefix+"[]", elem, elemWidth(width)
+			continue
+		}
+		if elem, ok := strings.CutPrefix(goType, "*"); ok {
+			prefix, goType = prefix+"*", elem
+			continue
+		}
+		break
+	}
+	switch {
+	case codegen.IsDeclaredRecord(goType, width):
+		return prefix + codegen.RecordAliasName(width)
+	case codegen.IsDeclaredUnion(goType, width):
+		return prefix + string(width)
+	}
+	return prefix + goType
+}
+
 // writeListHelper emits the named wrapper for one Go slice type: the
 // generic walk with this type's element decoder bound in. A named
 // wrapper rather than the generic at each call site because a nested
@@ -2150,28 +2187,7 @@ func writeListHelper(b *strings.Builder, p listPlan) {
 	elemW := elemWidth(p.width)
 	name := listHelperName(p.goType, p.width)
 
-	// The doc line names the element by its carrier alias where it has
-	// one, because a record element's carrier is a multi-line anonymous
-	// struct and pasting it into a // comment breaks the line.
-	//
-	// The star is taken off before the question and put back after: a
-	// NULLABLE record element is `*struct {…}`, which IsDeclaredRecord
-	// answers no for, and the raw text would reach the comment through
-	// that no and split it across lines that are not comments at all
-	// (bd gqlc-dxhwp).
-	shown := elem
-	if bare, nullable := strings.CutPrefix(elem, "*"); codegen.IsDeclaredRecord(bare, elemW) {
-		shown = codegen.RecordAliasName(elemW)
-		if nullable {
-			shown = "*" + shown
-		}
-	}
-	// A union element is named by its width, because its text is `any`
-	// and so is every other union's and ANY VALUE's: the doc lines of two
-	// wrappers would otherwise read the same.
-	if codegen.IsDeclaredUnion(elem, elemW) {
-		shown = string(elemW)
-	}
+	shown := listElemDocName(elem, elemW)
 	fmt.Fprintf(b, "\n// %s decodes an agtype list of %s elements.\n", name, shown)
 	fmt.Fprintf(b, "func %s(raw []byte) (%s, error) {\n", name, p.goType)
 	if nullableUnionElem(p.goType, p.width) {

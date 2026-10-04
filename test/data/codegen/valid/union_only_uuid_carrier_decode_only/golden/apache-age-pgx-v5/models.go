@@ -88,20 +88,6 @@ func agtypeInt64(raw []byte) (int64, error) {
 	return out, nil
 }
 
-// agtypeFloat64 decodes an agtype float scalar. The float parser reads
-// it rather than the JSON decoder because agtype's float vocabulary is
-// IEEE 754's: NaN, Infinity and -Infinity are values AGE emits and JSON
-// has no spelling for. A value carrying the ::numeric annotation is one
-// AGE evaluated in arbitrary precision, and lands on the nearest
-// float64.
-func agtypeFloat64(raw []byte) (float64, error) {
-	out, err := strconv.ParseFloat(strings.TrimSuffix(string(raw), "::numeric"), 64)
-	if err != nil {
-		return 0, fmt.Errorf("gqlc: %q is not an agtype float: %w", raw, err)
-	}
-	return out, nil
-}
-
 // agtypeUUID decodes a stored UUID. agtype has no 128-bit value, so gqlc
 // stores one as the string scalar in its RFC 9562 text. The slot is an
 // ordinary agtype string on a vertex any writer can touch, so what is
@@ -263,9 +249,21 @@ func agtypeList[T any](raw []byte, decode func([]byte) (T, error)) ([]T, error) 
 	return out, nil
 }
 
-// agtypeListOfAny decodes an agtype list of any elements.
-func agtypeListOfAny(raw []byte) ([]any, error) {
-	return agtypeList(raw, agtypeValue)
+// agtypeIsNull reports whether a raw span is agtype's null. It is a
+// named helper rather than a comparison inside the closures that read it
+// so that the spelling the wire uses is one thing with one name.
+func agtypeIsNull(raw []byte) bool {
+	return string(bytes.TrimSpace(raw)) == "null"
+}
+
+// agtypeListOfNullableUnion26f53c9e decodes an agtype list of UNION<INT64|UUID> elements.
+func agtypeListOfNullableUnion26f53c9e(raw []byte) ([]any, error) {
+	return agtypeList(raw, func(elem []byte) (any, error) {
+		if agtypeIsNull(elem) {
+			return nil, nil
+		}
+		return decodeUnion26f53c9e(elem)
+	})
 }
 
 // decodeUnion26f53c9e dispatches an agtype value onto the member of
@@ -288,82 +286,6 @@ func decodeUnion26f53c9e(raw []byte) (any, error) {
 		return out, nil
 	}
 	return nil, fmt.Errorf("decode UNION<INT64|UUID>: %q is no member's wire shape", raw)
-}
-
-// agtypeValue decodes a value of no declared shape through agtype's own
-// vocabulary: its string, integer, float, boolean, list and map land on
-// Go's string, int64, float64, bool, []any and map[string]any, and the
-// null it carries inline lands on nil. The first byte chooses the arm,
-// which is enough because agtype's structured values are self-delimiting
-// and its scalars share no opening byte.
-//
-// Text outside that vocabulary is refused rather than carried through as
-// a string: a value of unknown shape is still a value, and reading
-// something that is not one as a value would put a fabricated Go value
-// in a caller's hands.
-func agtypeValue(raw []byte) (any, error) {
-	body := bytes.TrimSpace(raw)
-	if len(body) == 0 {
-		return nil, fmt.Errorf("gqlc: %q is not an agtype value", raw)
-	}
-	switch body[0] {
-	case '"':
-		out, err := agtypeString(body)
-		if err != nil {
-			return nil, err
-		}
-		return out, nil
-	case '[':
-		out, err := agtypeList(body, agtypeValue)
-		if err != nil {
-			return nil, err
-		}
-		return out, nil
-	case '{':
-		out, err := agtypeMap(body)
-		if err != nil {
-			return nil, err
-		}
-		return out, nil
-	}
-	switch string(body) {
-	case "null":
-		return nil, nil
-	case "true":
-		return true, nil
-	case "false":
-		return false, nil
-	}
-	// An integer is tried first and a float second, so a value AGE wrote
-	// without a fractional part keeps the width agtype held it at. A value
-	// outside int64's range is one AGE evaluated as a float, and reaches
-	// the caller as the float it is.
-	if out, err := agtypeInt64(body); err == nil {
-		return out, nil
-	}
-	out, err := agtypeFloat64(body)
-	if err != nil {
-		return nil, fmt.Errorf("gqlc: %q is not an agtype value", raw)
-	}
-	return out, nil
-}
-
-// agtypeMap decodes an agtype map whose members are of no declared
-// shape, each read through agtypeValue.
-func agtypeMap(raw []byte) (map[string]any, error) {
-	members, err := agtypeObject(raw)
-	if err != nil {
-		return nil, err
-	}
-	out := make(map[string]any, len(members))
-	for key, member := range members {
-		value, err := agtypeValue(member)
-		if err != nil {
-			return nil, fmt.Errorf("gqlc: member %q: %w", key, err)
-		}
-		out[key] = value
-	}
-	return out, nil
 }
 
 // agtypeProperty reads one property the schema declares NOT NULL out of a

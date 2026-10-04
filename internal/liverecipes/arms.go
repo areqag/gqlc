@@ -96,4 +96,6 @@ var LiveArms = map[string]Arm{
 	"TestNeo4jMinOverAnEmptyGroupIsNull":                        ArmNeo4j,
 	"TestAGEMinOverAnEmptyGroupIsNull":                          ArmAGE,
 	"TestAGERoundTripsANullElementInAUnionList":                 ArmAGE,
+	// A list expression column of union and record elements (bd gqlc-k1dg).
+	"TestAGEDecodesAListExpressionElementByItsWidth": ArmAGE,
 }
