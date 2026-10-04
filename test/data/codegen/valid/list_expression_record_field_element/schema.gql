@@ -1,0 +1,6 @@
+CREATE PROPERTY GRAPH TYPE ListExpressionRecordFieldElement AS {
+    (:Account {
+        id :: INT64 NOT NULL,
+        ul :: RECORD { u :: ANY<STRING | INT64>, n :: INT32 }
+    })
+}

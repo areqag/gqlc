@@ -1,0 +1,8 @@
+CREATE PROPERTY GRAPH TYPE ListExpressionUnknownElement AS {
+    (:Account {
+        id     :: INT64 NOT NULL,
+        dates  :: LIST<DATE NOT NULL>,
+        either :: ANY<DATE | INT64>,
+        n      :: INT32
+    })
+}
