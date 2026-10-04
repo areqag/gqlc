@@ -1240,16 +1240,20 @@ func appendRowField(p *Query, ci int, col resolver.Column, field string, entitie
 	case resolver.ResolvedScalar:
 		ty := tm.Scalar(t.Kind)
 		kind := ColumnScalar
+		nullable := false
 		// A null scalar has no narrowed carrier to assert against,
 		// so it shares ColumnAny's untyped lane at the top level
-		// (§5.5); a map scalar has a legitimate typed one.
+		// (§5.5); a map scalar has a legitimate typed one. Its only
+		// value is null, so it is nullable (bd gqlc-gem1p).
 		if t.Kind == resolver.ScalarNull {
 			kind = ColumnAny
+			nullable = true
 		}
 		p.RowFields = append(p.RowFields, Row{
 			ColumnName: col.Name,
 			Field:      field,
 			GoType:     ty,
+			Nullable:   nullable,
 			Kind:       kind,
 		})
 	case resolver.ResolvedUnknown:

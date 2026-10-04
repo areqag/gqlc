@@ -621,7 +621,7 @@ adds the five new column-shape rows.
 | `ResolvedScalar{Int}` | `int64` | `*int64` |
 | `ResolvedScalar{Float}` | `float64` | `*float64` |
 | `ResolvedScalar{String}` | `string` | `*string` |
-| `ResolvedScalar{Null}` | `any` | `any` (pointer-to-any is silly; nullable stays `any`) |
+| `ResolvedScalar{Null}` | `any` | `any` (pointer-to-any is silly; nullable stays `any`) *Note (2026-10-04, bd gqlc-gem1p):* superseded — a null-scalar column is now planned nullable and emits `*any`, for the reason given on the `ResolvedUnknown` row below. |
 | `ResolvedScalar{Map}` | `map[string]any` | `map[string]any` (nil-map is null-map; pointer redundant) |
 | `ResolvedUnknown` | `any` | `any` (same reasoning as null; nullable stays `any`) *Note (2026-10-04, bd gqlc-14u0l):* superseded — an unknown column is now planned nullable and emits `*any`, the spelling a nullable `ANY VALUE` column has had since #767 and ADR 0041 records for row fields. |
 | `ResolvedList{Element}` | `[]` + recurse via §4.7 | `*[]T` |

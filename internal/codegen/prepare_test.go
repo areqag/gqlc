@@ -2690,27 +2690,37 @@ func TestPreparedWidthIsEmptyWhereNoPropertyTypeWasResolved(t *testing.T) {
 }
 
 // An unknown column carries no NOT NULL for a null gate to enforce:
-// a.dates[0] over a node with no dates is a null the graph holds, so the
-// row field is nullable on every target (bd gqlc-14u0l).
-func TestAnUnknownColumnIsPlannedNullable(t *testing.T) {
+// a.dates[0] over a node with no dates is a null the graph holds (bd
+// gqlc-14u0l), and a literal null holds nothing else (bd gqlc-gem1p), so
+// both row fields are nullable on every target. A string scalar stays
+// non-nullable, so the null arm is the only scalar that moved.
+func TestAnUntypedColumnIsPlannedNullable(t *testing.T) {
 	in := codegen.Input{
 		Schema: schema.Schema{Name: "Test"},
 		Queries: []codegen.NamedQuery{{
 			Name:        "Fetch",
 			Cardinality: queryfile.CardinalityOne,
-			SourceText:  "RETURN foo(1) AS u",
+			SourceText:  "RETURN foo(1) AS u, null AS n, 's' AS s",
 			Validated: resolver.ValidatedQuery{
 				Statement: resolver.StatementRead,
-				Columns:   []resolver.Column{{Name: "u", Type: resolver.ResolvedUnknown{}}},
+				Columns: []resolver.Column{
+					{Name: "u", Type: resolver.ResolvedUnknown{}},
+					{Name: "n", Type: resolver.ResolvedScalar{Kind: resolver.ScalarNull}},
+					{Name: "s", Type: resolver.ResolvedScalar{Kind: resolver.ScalarString}},
+				},
 			},
 		}},
 	}
 
 	prepared, err := codegen.Prepare(in, stubTypeMap{}, "")
 	require.NoError(t, err)
-	require.Len(t, prepared.Queries[0].RowFields, 1)
-	row := prepared.Queries[0].RowFields[0]
-	require.Equal(t, codegen.ColumnAny, row.Kind)
-	require.Equal(t, "any", row.GoType)
-	require.True(t, row.Nullable, "a non-nullable unknown column fails the row on a null the graph holds")
+	rows := prepared.Queries[0].RowFields
+	require.Len(t, rows, 3)
+	for _, row := range rows[:2] {
+		require.Equal(t, codegen.ColumnAny, row.Kind, "column %q", row.ColumnName)
+		require.True(t, row.Nullable, "column %q: a non-nullable untyped column fails the row on a null the graph holds", row.ColumnName)
+	}
+	require.Equal(t, "any", rows[0].GoType)
+	require.Equal(t, codegen.ColumnScalar, rows[2].Kind)
+	require.False(t, rows[2].Nullable, "a literal string is never null")
 }
