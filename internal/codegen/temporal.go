@@ -134,11 +134,18 @@ func referencesCarrier(p Prepared, carrier func(graph.PropertyType) (string, boo
 // list member its element — and a union nested below one is an entry of
 // UnionEncodings in its own right, so no descent is written here.
 //
+// The entities walked are the DECODED ones, the set both backends emit
+// union helpers from (DecodedEntities). An entity no query decodes has no
+// decoder, and its struct carries each union as `any`, so a union reached
+// only from there has no helper pair and names nothing. Walked over every
+// entity, such a batch emitted the carrier file with no referent (bd
+// gqlc-r2dp).
+//
 // A union one of whose members carrier refuses fails preparation and
 // cannot reach here. It answers true, on the ground typeTextNamesCarrier
 // gives for a text that does not parse.
 func unionMembersNameCarrier(p Prepared, carrier func(graph.PropertyType) (string, bool), set map[string]struct{}) bool {
-	for _, pt := range UnionEncodings(p.Entities, p.Queries) {
+	for _, pt := range UnionEncodings(DecodedEntities(p), p.Queries) {
 		members, ok := UnionMembers(pt, carrier)
 		if !ok {
 			return true

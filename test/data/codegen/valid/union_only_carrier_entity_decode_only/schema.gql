@@ -1,0 +1,7 @@
+CREATE PROPERTY GRAPH TYPE UnionOnlyCarrierEntityDecodeOnly AS {
+    (:Account {
+        id     :: INT64 NOT NULL,
+        either :: ANY<DATE | INT64>,
+        ref    :: ANY<UUID | INT64>
+    })
+}
