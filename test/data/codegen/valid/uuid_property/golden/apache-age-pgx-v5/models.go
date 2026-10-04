@@ -379,8 +379,8 @@ func agtypeNullableElem[T any](decode func([]byte) (T, error)) func([]byte) (*T,
 }
 
 // agtypeIsNull reports whether a raw span is agtype's null. It is a
-// named helper rather than a comparison inside the closure above so that
-// the spelling the wire uses is one thing with one name.
+// named helper rather than a comparison inside the closures that read it
+// so that the spelling the wire uses is one thing with one name.
 func agtypeIsNull(raw []byte) bool {
 	return string(bytes.TrimSpace(raw)) == "null"
 }

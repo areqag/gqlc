@@ -1,0 +1,8 @@
+CREATE PROPERTY GRAPH TYPE UnionListTwoWidths AS {
+    (:Ledger {
+        id    :: INT64 NOT NULL,
+        dates :: LIST<ANY<DATE | INT64>>,
+        tags  :: LIST<ANY<STRING | INT32>>,
+        bag   :: LIST<ANY VALUE>
+    })
+}
