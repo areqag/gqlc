@@ -217,6 +217,12 @@ type ListElem struct {
 	// composition of the form `"[]" + plan.GoType` stays correct with no
 	// further edit. The field exists so a render layer can ask the
 	// question instead of parsing the star back out of the text.
+	//
+	// The one element set here with no star is a declared union's: its
+	// carrier `any` holds null as nil, so the star is withheld while the
+	// decode still owes the nil arm. Nullable therefore does not imply a
+	// star, and a render layer taking an address on it has to ask
+	// IsDeclaredUnion first.
 	Nullable bool
 }
 
@@ -1661,15 +1667,21 @@ func propertyListElemPlan(tt resolver.ResolvedProperty, entities []Entity, entit
 	// carrier, which no NULL element can ever satisfy — the decode
 	// fails on a value the schema declared legal (bd gqlc-sokgc).
 	//
-	// `any` is the one exemption: it carries null as nil already, so a
-	// star would be a second spelling of the same absence.
+	// `any` is the one exemption from the STAR: it carries null as nil
+	// already, so a star would be a second spelling of the same absence.
+	// It is not an exemption from the NULLABILITY when the `any` is a
+	// declared union's carrier. That element is walked, through the
+	// union's decode helper, and the helper carries no member for nil, so
+	// the walk has to be told the element may be NULL or a NULL element
+	// fails the whole column (bd gqlc-dkcz). An undeclared `any` is not
+	// walked at all, which is why it keeps both exemptions.
 	//
 	// Applied before the two returns below so both take it. The nested
 	// arm's `ty` is the TypeMap's text for the WHOLE inner list, which
 	// carries its own element's star already, so `*` here is this
 	// level's alone and the two compose.
-	elemNullable := tt.Nullable && ty != "any"
-	if elemNullable {
+	elemNullable := tt.Nullable && (ty != "any" || IsDeclaredUnion(ty, tt.Type))
+	if tt.Nullable && ty != "any" {
 		ty = "*" + ty
 	}
 	// A list element that is itself a list gets a nested plan, the same

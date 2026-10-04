@@ -1356,7 +1356,9 @@ func writeUnionElemArm(site listElemSite) {
 	}
 	fmt.Fprintf(site.b, "%sv, err := decode%s(%s)\n", site.indent, codegen.UnionHelperSuffix(site.e.Width), site.iterVar)
 	fmt.Fprintf(site.b, "%sif err != nil {\n%s\t%sfmt.Errorf(\"%s: decode column %%q element %%d: %%w\", %q, i, err)%s\n%s}\n", site.indent, site.indent, site.exit.open, site.p.MethodName, site.f.ColumnName, site.exit.close, site.indent)
-	fmt.Fprintf(site.b, "%s%s = append(%s, %s)\n", site.indent, site.accVar, site.accVar, addrIf(site.e.Nullable, "v"))
+	// Bare `v` whether or not the element is nullable: the accumulator is
+	// []any, where `&v` compiles and hands the caller a *any.
+	fmt.Fprintf(site.b, "%s%s = append(%s, v)\n", site.indent, site.accVar, site.accVar)
 }
 
 // addrIf prefixes an addressable local with `&` when the element it
