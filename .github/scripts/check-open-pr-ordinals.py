@@ -84,10 +84,17 @@ all five, with pulls/files again equal to git's set. With the eleven above,
 that is sixteen PRs, a floor. None of the latest 400 PR heads held a merge
 commit.
 
-A third difference is closed in code. The compare named both SHAs, but
-pulls/files names neither and answers for whatever head the PR has when it
-is read. So after reading the files, the head is read again
-(current_head()); if it moved since the list, no status is posted.
+A third difference is closed in code for ONE of its two shapes. The compare
+named both SHAs, but pulls/files names neither and answers for whatever it
+holds for the PR when it is read. So before a status is posted the head is
+read again (current_head(), after the files); if it moved since the list,
+no status is posted. That closes a head that moves DURING the read. It does
+not close the other shape: GitHub recomputing a PR's diff asynchronously
+after a push, so that the list and the re-read both show the new head while
+pulls/files still answers for the old one -- the SHAs match and the old
+head's verdict lands on the new head. Whether pulls/files lags a push at all
+is unmeasured here (bd gqlc-7tlg6, 2026-10-04); a witnessed lag falsifies
+"cannot happen" and is the reason this paragraph does not say it.
 
 THE pulls/files CAP. GitHub's REST documentation gives that endpoint a
 3000-file maximum. That is documented, not measured -- no PR here has come
@@ -317,22 +324,25 @@ def check_open_prs(directories):
             print(f"error: PR #{pr['number']}: {refusal}", file=sys.stderr)
             refused.append(pr["number"])
             continue
+        if not any(added.values()):
+            # Silent by design. Most PRs touch no enrolled series, and a
+            # success status on every one of them would put a context on every
+            # PR in the repository to say nothing happened.
+            print(f"PR #{pr['number']}: adds no enrolled document, no status posted")
+            continue
+
         # pulls/files names no SHA, so the files are pinned to the listed head
-        # by asking again AFTER reading them. On a mismatch nothing is posted:
-        # the push that moved the head rebuilt its merge ref, which ci.yml's
-        # tree check reads, and the next master push asks this again.
+        # by asking again AFTER reading them. Below the quiet branch because a
+        # PR that is posted nothing has no verdict to misattach. On a mismatch
+        # nothing is posted: the push that moved the head rebuilt its merge
+        # ref, which ci.yml's tree check reads, and the next master push asks
+        # this again.
         now = current_head(repo, pr["number"])
         if now != head:
             print(
                 f"PR #{pr['number']}: head moved from {head} to {now} during the "
                 "read, no status posted"
             )
-            continue
-        if not any(added.values()):
-            # Silent by design. Most PRs touch no enrolled series, and a
-            # success status on every one of them would put a context on every
-            # PR in the repository to say nothing happened.
-            print(f"PR #{pr['number']}: adds no enrolled document, no status posted")
             continue
 
         failures = []
@@ -693,11 +703,12 @@ def self_test_head_moved_during_read():
     """Files read from one head are not posted onto another (bd gqlc-rs3j).
 
     The PR list names each head SHA, but pulls/{n}/files names none: it
-    answers for whatever the head is when it is read. A push between the two
-    reads, or GitHub's own diff recompute after one, would attach a verdict
-    from one head's files to the other head. Here the head moves from 6... to
-    7... while the files are read, and the files collide; nothing may be
-    posted on either SHA.
+    answers for whatever the head is when it is read. A push between the list
+    and the read would attach a verdict from one head's files to the other
+    head. Here the head moves from 6... to 7... while the files are read, and
+    the files collide; nothing may be posted on either SHA. Not covered: a
+    pulls/files answer lagging a push that both head reads already show,
+    which is unmeasured (see the module docstring).
     """
     name = "a head that moved between the list and the read gets no verdict"
     adr = "docs/adr"
