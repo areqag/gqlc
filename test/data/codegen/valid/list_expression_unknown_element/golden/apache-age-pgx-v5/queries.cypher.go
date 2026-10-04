@@ -7,17 +7,17 @@ import (
 	"fmt"
 )
 
-const accountUnknownElementsQueryText = `MATCH (a:Account) RETURN [a.dates[0]] AS dated, [a.ul.u] AS field, [a.either, null] AS mixed ORDER BY a.id`
+const accountUnknownElementsQueryText = `MATCH (a:Account) RETURN [a.dates[0]] AS dated, [a.either, null] AS mixed, [a.n, null] AS mixed_scalar ORDER BY a.id`
 
 type AccountUnknownElementsRow struct {
-	Dated []any
-	Field []any
-	Mixed []any
+	Dated       []any
+	Mixed       []any
+	MixedScalar []any
 }
 
 // AccountUnknownElements executes the AccountUnknownElements query.
 //
-//	MATCH (a:Account) RETURN [a.dates[0]] AS dated, [a.ul.u] AS field, [a.either, null] AS mixed ORDER BY a.id
+//	MATCH (a:Account) RETURN [a.dates[0]] AS dated, [a.either, null] AS mixed, [a.n, null] AS mixed_scalar ORDER BY a.id
 func (q *queries) AccountUnknownElements(ctx context.Context) ([]AccountUnknownElementsRow, error) {
 	stmt, err := q.cypherStmt("$gqlc$", accountUnknownElementsQueryText, "v0 ag_catalog.agtype, v1 ag_catalog.agtype, v2 ag_catalog.agtype")
 	if err != nil {
@@ -44,23 +44,23 @@ func (q *queries) AccountUnknownElements(ctx context.Context) ([]AccountUnknownE
 			return nil, fmt.Errorf("AccountUnknownElements: decode column %q: %w", "dated", err)
 		}
 		if raw1 == nil {
-			return nil, fmt.Errorf("AccountUnknownElements: column %q is non-nullable but arrived null", "field")
+			return nil, fmt.Errorf("AccountUnknownElements: column %q is non-nullable but arrived null", "mixed")
 		}
 		value1, err := agtypeListOfAny(raw1)
 		if err != nil {
-			return nil, fmt.Errorf("AccountUnknownElements: decode column %q: %w", "field", err)
+			return nil, fmt.Errorf("AccountUnknownElements: decode column %q: %w", "mixed", err)
 		}
 		if raw2 == nil {
-			return nil, fmt.Errorf("AccountUnknownElements: column %q is non-nullable but arrived null", "mixed")
+			return nil, fmt.Errorf("AccountUnknownElements: column %q is non-nullable but arrived null", "mixed_scalar")
 		}
 		value2, err := agtypeListOfAny(raw2)
 		if err != nil {
-			return nil, fmt.Errorf("AccountUnknownElements: decode column %q: %w", "mixed", err)
+			return nil, fmt.Errorf("AccountUnknownElements: decode column %q: %w", "mixed_scalar", err)
 		}
 		out = append(out, AccountUnknownElementsRow{
-			Dated: value0,
-			Field: value1,
-			Mixed: value2,
+			Dated:       value0,
+			Mixed:       value1,
+			MixedScalar: value2,
 		})
 	}
 	if err := rows.Err(); err != nil {
