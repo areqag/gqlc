@@ -837,7 +837,12 @@ func TestEveryBoundUnionsEncoderIsDeclaredAndEveryDeclaredOneIsCalled(t *testing
 // dedupe was order-dependent and so is any mutant of it.
 //
 // Measured on origin/master 97fa7f34 before the fix: every row reaching
-// two distinct leaves failed, and "one union read twice" passed.
+// two distinct leaves failed, and "one union read twice" passed. Two
+// mutants of the fix, each measured: the union arm deleted from
+// listHelperName fails the three rows of two unions — the ANY VALUE rows
+// still pass, because the element's Nullable spelling keeps those two
+// names apart — and the dedupe keyed back on the Go type text fails every
+// row of two distinct leaves.
 func TestEachListOfAnyPropertyDecodesThroughItsOwnElementDecoder(t *testing.T) {
 	dates := graph.UnionOf([]graph.UnionMember{{Type: graph.TypeDate}, {Type: graph.TypeInt64}})
 	tags := graph.UnionOf([]graph.UnionMember{{Type: graph.TypeString}, {Type: graph.TypeInt32}})
@@ -914,6 +919,11 @@ func TestEachListOfAnyPropertyDecodesThroughItsOwnElementDecoder(t *testing.T) {
 // and fails these. The two share Go type text and a union, so this batch is
 // also where their wrappers have to carry two names.
 //
+// Mutants, each measured: the wrapper's nil arm withheld fails the
+// nullable decode row, the encoder's the nullable encode row; the NOT NULL
+// clause dropped from nullableUnionElem, and the Nullable dropped from the
+// wrapper's name, each fail the one-wrapper assertion ahead of the rows.
+//
 // What the arm DOES is executed elsewhere: the encode half against a nil
 // DBTX by TestAGEBindsANullElementInAUnionListParameter, and the decode
 // half only against a live AGE by TestAGERoundTripsANullElementInAUnionList,
@@ -954,7 +964,7 @@ func TestANullUnionElementIsPassedThroughAheadOfTheMemberDispatch(t *testing.T) 
 		{name: "NOT NULL elements, encode", bind: binds["P1"], nilArm: false},
 	} {
 		t.Run(row.name, func(t *testing.T) {
-			var site ast.Node = row.bind
+			site := row.bind
 			if row.decoder != nil {
 				site = row.decoder.Body
 			}
