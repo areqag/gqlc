@@ -49,6 +49,16 @@ type Query struct {
 	// StatementRead, so a pre-Stage-12 query wire shape is a strict additive
 	// extension.
 	StatementKind StatementKind `json:"statementKind"`
+
+	// ComprehensionPaths are the path variables bound inside pattern
+	// comprehensions ([p = (a)-->(b) | p]) at outer scope, in source order with
+	// duplicates kept. A comprehension is otherwise opaque to the model — its
+	// result is TypeUnknown and no ref inside it is recorded — so this is the
+	// one fact about its interior the model carries: without it the resolver
+	// cannot refuse the path as it refuses a PathBinding (bd gqlc-btge).
+	// Query-level because nothing reads which Part it sits in. Omitted from
+	// JSON when empty, so a query without one keeps its wire shape.
+	ComprehensionPaths []string `json:"comprehensionPaths,omitempty"`
 }
 
 // Branch is one UNION-joined arm of a query — one oC_SingleQuery — an

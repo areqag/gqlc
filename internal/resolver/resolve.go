@@ -24,6 +24,12 @@ func resolve(q query.Query, s schema.Schema, r procsig.Registry) (ValidatedQuery
 		// (Query is a builder-maintained product type). Unreachable via parse.
 		return ValidatedQuery{}, fmt.Errorf("%w: empty branches", ErrOutOfR0Scope)
 	}
+	// The pattern-comprehension spelling of admitLocalBindings' path-binding
+	// refusal: refused for the same reason, wherever the comprehension sits
+	// and whether or not p reaches a column.
+	if len(q.ComprehensionPaths) > 0 {
+		return ValidatedQuery{}, fmt.Errorf("%w: path binding %q in a pattern comprehension", ErrOutOfR0Scope, q.ComprehensionPaths[0])
+	}
 
 	branchCols := make([][]Column, len(q.Branches))
 	branchScopeTables := make([][]partScope, len(q.Branches))

@@ -90,6 +90,11 @@ type listener struct {
 	// at Stage 14.
 	writeSeen bool
 
+	// comprehensionPaths collects the path variables pattern comprehensions
+	// bind at outer scope, in walk order; build() copies them to
+	// Query.ComprehensionPaths.
+	comprehensionPaths []string
+
 	// registry is the per-parse procedure signature registry (Stage 14).
 	// The zero value is a valid empty registry — every lookup misses, so
 	// a CALL raises ErrUnknownProcedure at the fail-site. Populated by
@@ -351,6 +356,13 @@ func (l *listener) markWriteSeen() {
 		return
 	}
 	l.writeSeen = true
+}
+
+func (l *listener) recordComprehensionPath(name string) {
+	if l.suppressed() {
+		return
+	}
+	l.comprehensionPaths = append(l.comprehensionPaths, name)
 }
 
 // mintOptionalGroup returns 0 under suppression so ay9 §3.3's
@@ -857,5 +869,16 @@ func (l *listener) EnterOC_ExistentialSubquery(c *gen.OC_ExistentialSubqueryCont
 func (l *listener) ExitOC_ExistentialSubquery(*gen.OC_ExistentialSubqueryContext) {
 	if l.subqueryDepth > 0 {
 		l.subqueryDepth--
+	}
+}
+
+// EnterOC_PatternComprehension records the path variable a pattern
+// comprehension binds, if it names one. Nothing else inside the comprehension
+// is collected (typeBoundaryAtom types it TypeUnknown), so this is the only
+// way the resolver learns the path exists. Inside EXISTS { ... } it is
+// suppressed, as a MATCH p = ... there is.
+func (l *listener) EnterOC_PatternComprehension(c *gen.OC_PatternComprehensionContext) {
+	if v := c.OC_Variable(); v != nil {
+		l.recordComprehensionPath(variableName(v))
 	}
 }
