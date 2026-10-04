@@ -3,11 +3,7 @@
 package nullabletimestamplistelement
 
 import (
-	"fmt"
 	"time"
-
-	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
-	"github.com/neo4j/neo4j-go-driver/v5/neo4j/dbtype"
 )
 
 // Entry corresponds to the Entry node type.
@@ -16,76 +12,4 @@ type Entry struct {
 	Id     int64
 	Maybe  *[]*time.Time
 	Stamps []*time.Time
-}
-
-// decodeEntry decodes a driver dbtype.Node into a Entry struct,
-// enforcing the wire label and the per-property nullability the
-// schema declares.
-func decodeEntry(node dbtype.Node) (Entry, error) {
-	has0 := false
-	for _, label := range node.Labels {
-		if label == "Entry" {
-			has0 = true
-			break
-		}
-	}
-	if !has0 {
-		return Entry{}, fmt.Errorf("decode Entry: expected a node labelled %q, got labels %q", "Entry", node.Labels)
-	}
-	var out Entry
-	value0, err := neo4j.GetProperty[[]any](node, "fixed")
-	if err != nil {
-		return Entry{}, fmt.Errorf("decode Entry.Fixed: %w", err)
-	}
-	value0s := make([]time.Time, 0, len(value0))
-	for i0, elem0 := range value0 {
-		v0, ok := elem0.(time.Time)
-		if !ok {
-			return Entry{}, fmt.Errorf("decode Entry.Fixed: property %q element %d: expected time.Time, got %T", "fixed", i0, elem0)
-		}
-		value0s = append(value0s, v0)
-	}
-	out.Fixed = value0s
-	value1, err := neo4j.GetProperty[int64](node, "id")
-	if err != nil {
-		return Entry{}, fmt.Errorf("decode Entry.Id: %w", err)
-	}
-	out.Id = value1
-	if v, ok := node.Props["maybe"]; ok {
-		s, ok := v.([]any)
-		if !ok {
-			return Entry{}, fmt.Errorf("decode Entry.Maybe: property %q: expected []any, got %T", "maybe", v)
-		}
-		narrowed := make([]*time.Time, 0, len(s))
-		for i0, elem0 := range s {
-			if elem0 == nil {
-				narrowed = append(narrowed, nil)
-				continue
-			}
-			v0, ok := elem0.(time.Time)
-			if !ok {
-				return Entry{}, fmt.Errorf("decode Entry.Maybe: property %q element %d: expected time.Time, got %T", "maybe", i0, elem0)
-			}
-			narrowed = append(narrowed, &v0)
-		}
-		out.Maybe = &narrowed
-	}
-	value2, err := neo4j.GetProperty[[]any](node, "stamps")
-	if err != nil {
-		return Entry{}, fmt.Errorf("decode Entry.Stamps: %w", err)
-	}
-	value2s := make([]*time.Time, 0, len(value2))
-	for i0, elem0 := range value2 {
-		if elem0 == nil {
-			value2s = append(value2s, nil)
-			continue
-		}
-		v0, ok := elem0.(time.Time)
-		if !ok {
-			return Entry{}, fmt.Errorf("decode Entry.Stamps: property %q element %d: expected time.Time, got %T", "stamps", i0, elem0)
-		}
-		value2s = append(value2s, &v0)
-	}
-	out.Stamps = value2s
-	return out, nil
 }
