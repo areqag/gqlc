@@ -106,6 +106,26 @@ const (
 	// list-of-maps row above expects the same refusal rather than a
 	// different one.
 	mapPropertyRefusal = "can only be of primitive types"
+
+	// unionSlotIntWrite and unionSlotBoolWrite are the controls for the
+	// UNION-MEMBER rows below (bd gqlc-jt5u): one property key holding an
+	// INT64 on one node and a BOOL on another. A neo4j property key has no
+	// declared type, so "a slot whose other writes are INT64" is only a
+	// fact about this server if those writes land; the BOOL is the second
+	// member of a union the slot already holds two of.
+	unionSlotIntWrite  = "CREATE (:UnionSlotProbe {v: 1})"
+	unionSlotBoolWrite = "CREATE (:UnionSlotProbe {v: true})"
+
+	// unionSlotMapWrite overwrites the INT64 node's value with a map shaped
+	// like the bead's RECORD { opened_on :: DATE NOT NULL } member. SET on a
+	// node that already holds an INT64 is the narrowest form of the
+	// question: the same node, the same key, a different member's value.
+	unionSlotMapWrite = "MATCH (n:UnionSlotProbe) WHERE n.v = 1 SET n.v = {opened_on: date('2026-09-19')}"
+
+	// unionSlotNestedListWrite is the LIST<LIST<…>> member in the same
+	// slot. StorableProperty's union arm asks per MEMBER, and this is the
+	// member the record rows do not cover.
+	unionSlotNestedListWrite = "MATCH (n:UnionSlotProbe) WHERE n.v = 1 SET n.v = [[1], [2]]"
 )
 
 // TestNeo4jRefusesAMapValuedStoredProperty is the measurement §7 demands
@@ -188,6 +208,42 @@ func TestNeo4jRefusesAMapValuedStoredProperty(t *testing.T) {
 		require.Contains(t, err.Error(), mapPropertyRefusal,
 			"a list of maps must be refused by the same storage rule; a different refusal "+
 				"means this row is measuring something other than the property-value rule")
+	})
+
+	// The union-member rows (bd gqlc-jt5u). StorableProperty refuses a union
+	// any member of which the server will not store, and these are what that
+	// arm rests on: a slot that holds an INT64 and a BOOL still refuses a map
+	// and a nested list, each with the rule's own wording.
+	t.Run("a property key holds an INT64 and a BOOL across nodes", func(t *testing.T) {
+		require.NoError(t, writeProperty(ctx, t, driver, unionSlotIntWrite),
+			"the INT64 member must store, or the refusal below is not a fact about the RECORD member")
+		require.NoError(t, writeProperty(ctx, t, driver, unionSlotBoolWrite),
+			"a second member's value must store under the same key, or the slot is not a union slot")
+	})
+
+	t.Run("a map written into that slot is refused", func(t *testing.T) {
+		err := writeProperty(ctx, t, driver, unionSlotMapWrite)
+		if err != nil {
+			t.Logf("the server's answer to the map in a union slot, verbatim: %v", err)
+		}
+		require.Error(t, err,
+			"THIS RED IS A FINDING: the server stores a map into a key that holds an INT64, so a "+
+				"union with a RECORD member is storable on neo4j and StorableProperty's per-member "+
+				"union arm is over-broad")
+		require.Contains(t, err.Error(), mapPropertyRefusal,
+			"the refusal must be the property-value rule the bare map took")
+	})
+
+	t.Run("a nested list written into that slot is refused", func(t *testing.T) {
+		err := writeProperty(ctx, t, driver, unionSlotNestedListWrite)
+		if err != nil {
+			t.Logf("the server's answer to the nested list in a union slot, verbatim: %v", err)
+		}
+		require.Error(t, err,
+			"THIS RED IS A FINDING: the server stores a nested list into a key that holds an "+
+				"INT64, so a union with a LIST<LIST<…>> member is storable on neo4j")
+		require.Contains(t, err.Error(), nestedListRefusal,
+			"the refusal must be the nested-collection rule ADR 0035 rests on")
 	})
 }
 
