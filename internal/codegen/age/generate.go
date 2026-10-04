@@ -119,8 +119,10 @@ func generate(in codegen.Input, packageName string) (files []codegen.File, err e
 	}
 
 	pkg := prepared.Package
+	decoded := decodedEntities(entities, prepared)
 	var h helpers
-	h.forEntities(entities)
+	h.forStructs(entities)
+	h.forEntities(decoded)
 	h.forQueries(prepared.Queries)
 	hasOne := slices.ContainsFunc(prepared.Queries, func(p codegen.Query) bool {
 		return p.Cardinality == queryfile.CardinalityOne

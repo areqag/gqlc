@@ -3,7 +3,6 @@
 package uint64parameter
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"strconv"
@@ -17,45 +16,6 @@ type Counter struct {
 	Misses *uint64
 	Runs   []uint64
 	Spans  *[]uint64
-}
-
-// decodeCounter decodes an agtype vertex into a Counter struct, enforcing
-// the label and the per-property nullability the schema declares.
-func decodeCounter(raw []byte) (Counter, error) {
-	label, props, err := agtypeEntity(raw, "::vertex")
-	if err != nil {
-		return Counter{}, fmt.Errorf("decode Counter: %w", err)
-	}
-	if label != "Counter" {
-		return Counter{}, fmt.Errorf("decode Counter: expected label %q, got %q", "Counter", label)
-	}
-	var out Counter
-	value0, err := agtypeProperty(props, "hits", agtypeIntAs[uint64])
-	if err != nil {
-		return Counter{}, fmt.Errorf("decode Counter.Hits: %w", err)
-	}
-	out.Hits = value0
-	value1, err := agtypeProperty(props, "id", agtypeInt64)
-	if err != nil {
-		return Counter{}, fmt.Errorf("decode Counter.Id: %w", err)
-	}
-	out.Id = value1
-	value2, err := agtypeNullableProperty(props, "misses", agtypeIntAs[uint64])
-	if err != nil {
-		return Counter{}, fmt.Errorf("decode Counter.Misses: %w", err)
-	}
-	out.Misses = value2
-	value3, err := agtypeProperty(props, "runs", agtypeListOfUint64)
-	if err != nil {
-		return Counter{}, fmt.Errorf("decode Counter.Runs: %w", err)
-	}
-	out.Runs = value3
-	value4, err := agtypeNullableProperty(props, "spans", agtypeListOfUint64)
-	if err != nil {
-		return Counter{}, fmt.Errorf("decode Counter.Spans: %w", err)
-	}
-	out.Spans = value4
-	return out, nil
 }
 
 // agtypeArgs renders a query's bound parameters as the single agtype
@@ -72,26 +32,6 @@ func agtypeArgs(args map[string]any) (string, error) {
 	return string(out), nil
 }
 
-// agtypeString decodes an agtype string scalar. AGE renders one as a
-// JSON string, escapes included, so the JSON decoder reads it back
-// exactly; it also refuses every other agtype scalar, which is what
-// stops a mis-shaped projection arriving as a plausible value.
-//
-// The target is a pointer because that is what separates the two shapes
-// the decoder would otherwise agree on: unmarshalling a JSON null into a
-// string succeeds and leaves it empty, so an agtype null would reach a
-// non-nullable column as "".
-func agtypeString(raw []byte) (string, error) {
-	var out *string
-	if err := json.Unmarshal(raw, &out); err != nil {
-		return "", fmt.Errorf("gqlc: %q is not an agtype string: %w", raw, err)
-	}
-	if out == nil {
-		return "", fmt.Errorf("gqlc: %q is not an agtype string", raw)
-	}
-	return *out, nil
-}
-
 // agtypeInt64 decodes an agtype integer scalar, whose range is Go's
 // int64. A value carrying the ::numeric annotation is one AGE evaluated
 // in arbitrary precision: it is an integer only if it survives the parse
@@ -101,30 +41,6 @@ func agtypeInt64(raw []byte) (int64, error) {
 	out, err := strconv.ParseInt(strings.TrimSuffix(string(raw), "::numeric"), 10, 64)
 	if err != nil {
 		return 0, fmt.Errorf("gqlc: %q is not an agtype integer: %w", raw, err)
-	}
-	return out, nil
-}
-
-// agtypeIntAs decodes an agtype integer into a width narrower than the
-// int64 scalar it rides in, refusing a stored value that width cannot
-// hold rather than wrapping it.
-//
-// Two clauses, and both are load-bearing. The round-trip catches every
-// width whose range is a strict subset of int64's. It cannot catch
-// uint64, where the conversion is a bijection and int64(uint64(-1)) is
-// -1 again; there the sign comparison is the whole of the check. A
-// UINT64 property's readable set is therefore [0, MaxInt64], since
-// agtype's integer scalar is signed 64-bit and a larger value is
-// unstorable rather than unreadable.
-func agtypeIntAs[T ~int | ~int8 | ~int16 | ~int32 | ~int64 |
-	~uint | ~uint8 | ~uint16 | ~uint32 | ~uint64](raw []byte) (T, error) {
-	v, err := agtypeInt64(raw)
-	if err != nil {
-		return 0, err
-	}
-	out := T(v)
-	if int64(out) != v || (out < T(0)) != (v < 0) {
-		return 0, fmt.Errorf("gqlc: value %d does not fit the declared %T width", v, out)
 	}
 	return out, nil
 }
@@ -173,176 +89,4 @@ func agtypeEncodedList[T, E any](in []T, encode func(T) (E, error)) ([]E, error)
 		out[i] = encoded
 	}
 	return out, nil
-}
-
-// agtypeSpan reports where the value at the front of b ends: the offset
-// of the first stop byte outside any nested structure, or len(b) when
-// there is none. A string, a nested map and a nested list are each
-// stepped over whole, so a delimiter one of them contains ends nothing.
-func agtypeSpan(b []byte, stop byte) (int, error) {
-	depth := 0
-	for i := 0; i < len(b); i++ {
-		if b[i] == '"' {
-			for i++; i < len(b) && b[i] != '"'; i++ {
-				if b[i] == '\\' {
-					i++
-				}
-			}
-			if i >= len(b) {
-				return 0, fmt.Errorf("gqlc: %q leaves a string unterminated", b)
-			}
-			continue
-		}
-		if depth == 0 && b[i] == stop {
-			return i, nil
-		}
-		switch b[i] {
-		case '{', '[':
-			depth++
-		case '}', ']':
-			depth--
-			if depth < 0 {
-				return 0, fmt.Errorf("gqlc: %q closes a structure it never opened", b)
-			}
-		}
-	}
-	if depth != 0 {
-		return 0, fmt.Errorf("gqlc: %q leaves a structure open", b)
-	}
-	return len(b), nil
-}
-
-// agtypeObject splits an agtype map into its members, each key holding
-// the undecoded text of its value. A map carries more than the schema
-// declares: AGE stores whatever a writer wrote, so a value here may be of
-// a shape no helper in this package reads, and only the ones a field asks
-// for are ever decoded.
-func agtypeObject(raw []byte) (map[string][]byte, error) {
-	body := bytes.TrimSpace(raw)
-	if len(body) < 2 || body[0] != '{' || body[len(body)-1] != '}' {
-		return nil, fmt.Errorf("gqlc: %q is not an agtype map", raw)
-	}
-	body = bytes.TrimSpace(body[1 : len(body)-1])
-	out := make(map[string][]byte)
-	for len(body) > 0 {
-		end, err := agtypeSpan(body, ',')
-		if err != nil {
-			return nil, err
-		}
-		member := bytes.TrimSpace(body[:end])
-		body = bytes.TrimSpace(body[min(end+1, len(body)):])
-
-		at, err := agtypeSpan(member, ':')
-		if err != nil {
-			return nil, err
-		}
-		if at == len(member) {
-			return nil, fmt.Errorf("gqlc: %q is not a key and a value", member)
-		}
-		key, err := agtypeString(bytes.TrimSpace(member[:at]))
-		if err != nil {
-			return nil, err
-		}
-		out[key] = bytes.TrimSpace(member[at+1:])
-	}
-	return out, nil
-}
-
-// agtypeEntity splits an agtype vertex or edge into the label it carries
-// and the undecoded text of each of its properties. A vertex and an edge
-// are the same object but for the annotation, so requiring the one the
-// caller named is what stands between an edge's decoder and a vertex
-// whose label happens to match it.
-func agtypeEntity(raw []byte, annotation string) (string, map[string][]byte, error) {
-	body, ok := bytes.CutSuffix(bytes.TrimSpace(raw), []byte(annotation))
-	if !ok {
-		return "", nil, fmt.Errorf("gqlc: %q does not carry the %s annotation", raw, annotation)
-	}
-	fields, err := agtypeObject(body)
-	if err != nil {
-		return "", nil, err
-	}
-	rawLabel, ok := fields["label"]
-	if !ok {
-		return "", nil, fmt.Errorf("gqlc: %q carries no label", raw)
-	}
-	label, err := agtypeString(rawLabel)
-	if err != nil {
-		return "", nil, err
-	}
-	rawProps, ok := fields["properties"]
-	if !ok {
-		return "", nil, fmt.Errorf("gqlc: %q carries no properties", raw)
-	}
-	props, err := agtypeObject(rawProps)
-	if err != nil {
-		return "", nil, err
-	}
-	return label, props, nil
-}
-
-// agtypeList decodes an agtype list, reading each element through the
-// decoder the caller supplies. The split steps over a nested string, map
-// or list whole, so a comma inside one separates nothing; an element the
-// decoder refuses fails the whole list rather than being dropped or
-// zeroed, because a slice one element short is not the value the graph
-// holds.
-//
-// The empty list decodes to a slice of length zero and not to nil: AGE
-// stores it as a value, and a nil slice is what an absent property
-// reaches the caller as.
-func agtypeList[T any](raw []byte, decode func([]byte) (T, error)) ([]T, error) {
-	body := bytes.TrimSpace(raw)
-	if len(body) < 2 || body[0] != '[' || body[len(body)-1] != ']' {
-		return nil, fmt.Errorf("gqlc: %q is not an agtype list", raw)
-	}
-	body = bytes.TrimSpace(body[1 : len(body)-1])
-	out := make([]T, 0)
-	for len(body) > 0 {
-		end, err := agtypeSpan(body, ',')
-		if err != nil {
-			return nil, err
-		}
-		elem := bytes.TrimSpace(body[:end])
-		body = bytes.TrimSpace(body[min(end+1, len(body)):])
-		value, err := decode(elem)
-		if err != nil {
-			return nil, fmt.Errorf("gqlc: element %d of %q: %w", len(out), raw, err)
-		}
-		out = append(out, value)
-	}
-	return out, nil
-}
-
-// agtypeListOfUint64 decodes an agtype list of uint64 elements.
-func agtypeListOfUint64(raw []byte) ([]uint64, error) {
-	return agtypeList(raw, agtypeIntAs[uint64])
-}
-
-// agtypeProperty reads one property the schema declares NOT NULL out of a
-// split entity. AGE drops a property whose value is null, so an absent
-// key is how a null arrives, and taking the Go zero for one would report
-// absence as a value the graph holds.
-func agtypeProperty[T any](props map[string][]byte, key string, decode func([]byte) (T, error)) (T, error) {
-	raw, ok := props[key]
-	if !ok {
-		var zero T
-		return zero, fmt.Errorf("gqlc: property %q is absent", key)
-	}
-	return decode(raw)
-}
-
-// agtypeNullableProperty reads one nullable property out of a split
-// entity, where the absence agtypeProperty refuses is the schema's null
-// and reaches the caller as the nil pointer.
-func agtypeNullableProperty[T any](props map[string][]byte, key string, decode func([]byte) (T, error)) (*T, error) {
-	raw, ok := props[key]
-	if !ok {
-		return nil, nil
-	}
-	out, err := decode(raw)
-	if err != nil {
-		return nil, err
-	}
-	return &out, nil
 }

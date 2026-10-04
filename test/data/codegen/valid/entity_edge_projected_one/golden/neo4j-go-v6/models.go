@@ -14,55 +14,9 @@ type Movie struct {
 	Id int64
 }
 
-// decodeMovie decodes a driver dbtype.Node into a Movie struct,
-// enforcing the wire label and the per-property nullability the
-// schema declares.
-func decodeMovie(node dbtype.Node) (Movie, error) {
-	has0 := false
-	for _, label := range node.Labels {
-		if label == "Movie" {
-			has0 = true
-			break
-		}
-	}
-	if !has0 {
-		return Movie{}, fmt.Errorf("decode Movie: expected a node labelled %q, got labels %q", "Movie", node.Labels)
-	}
-	var out Movie
-	value0, err := neo4j.GetProperty[int64](node, "id")
-	if err != nil {
-		return Movie{}, fmt.Errorf("decode Movie.Id: %w", err)
-	}
-	out.Id = value0
-	return out, nil
-}
-
 // Person corresponds to the Person node type.
 type Person struct {
 	Id int64
-}
-
-// decodePerson decodes a driver dbtype.Node into a Person struct,
-// enforcing the wire label and the per-property nullability the
-// schema declares.
-func decodePerson(node dbtype.Node) (Person, error) {
-	has0 := false
-	for _, label := range node.Labels {
-		if label == "Person" {
-			has0 = true
-			break
-		}
-	}
-	if !has0 {
-		return Person{}, fmt.Errorf("decode Person: expected a node labelled %q, got labels %q", "Person", node.Labels)
-	}
-	var out Person
-	value0, err := neo4j.GetProperty[int64](node, "id")
-	if err != nil {
-		return Person{}, fmt.Errorf("decode Person.Id: %w", err)
-	}
-	out.Id = value0
-	return out, nil
 }
 
 // ActedIn corresponds to the ACTED_IN edge type (Person -> Movie).

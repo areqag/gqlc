@@ -324,7 +324,7 @@ func TestListColumnTextAgreesWithItsElementPlan(t *testing.T) {
 func payloadModels(t *testing.T, pt graph.PropertyType) string {
 	t.Helper()
 
-	files, err := age.New().Generate(codegen.Input{Schema: schemaWithPayload(pt)})
+	files, err := age.New().Generate(decodingEveryEntity(codegen.Input{Schema: schemaWithPayload(pt)}))
 	require.NoError(t, err)
 
 	for _, f := range files {

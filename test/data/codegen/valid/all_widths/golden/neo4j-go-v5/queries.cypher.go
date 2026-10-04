@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
+	"github.com/neo4j/neo4j-go-driver/v5/neo4j/dbtype"
 )
 
 const allWidthsQueryText = `MATCH (r:Row) RETURN r.s, r.b, r.i, r.i8, r.i16, r.i32, r.i64, r.u, r.u8, r.u16, r.u32, r.u64, r.f, r.f32, r.f64`
@@ -205,4 +206,32 @@ func (q *queries) AllWidths(ctx context.Context) (AllWidthsRow, error) {
 	}
 	row.F64 = value14
 	return row, nil
+}
+
+const allRowsQueryText = `MATCH (r:Row) RETURN r`
+
+// AllRows executes the AllRows query.
+//
+//	MATCH (r:Row) RETURN r
+func (q *queries) AllRows(ctx context.Context) ([]Row, error) {
+	records, err := q.db.run(ctx, allRowsQueryText, nil, neo4j.AccessModeRead)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Row, 0, len(records))
+	for _, record := range records {
+		node, isNil, err := neo4j.GetRecordValue[dbtype.Node](record, "r")
+		if err != nil {
+			return nil, fmt.Errorf("AllRows: decode column %q: %w", "r", err)
+		}
+		if isNil {
+			return nil, fmt.Errorf("AllRows: column %q is non-nullable but arrived null", "r")
+		}
+		value, err := decodeRow(node)
+		if err != nil {
+			return nil, fmt.Errorf("AllRows: decode column %q: %w", "r", err)
+		}
+		out = append(out, value)
+	}
+	return out, nil
 }

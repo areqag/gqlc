@@ -3,7 +3,6 @@
 package timestampnullableparam
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"strconv"
@@ -15,37 +14,6 @@ import (
 type Sample struct {
 	Id     int64
 	SeenAt *time.Time
-}
-
-// decodeSample decodes an agtype vertex into a Sample struct, enforcing
-// the label and the per-property nullability the schema declares.
-func decodeSample(raw []byte) (Sample, error) {
-	label, props, err := agtypeEntity(raw, "::vertex")
-	if err != nil {
-		return Sample{}, fmt.Errorf("decode Sample: %w", err)
-	}
-	if label != "Sample" {
-		return Sample{}, fmt.Errorf("decode Sample: expected label %q, got %q", "Sample", label)
-	}
-	var out Sample
-	value0, err := agtypeProperty(props, "id", agtypeInt64)
-	if err != nil {
-		return Sample{}, fmt.Errorf("decode Sample.Id: %w", err)
-	}
-	out.Id = value0
-	value1, err := agtypeNullableProperty(props, "seenAt", agtypeInstant)
-	if err != nil {
-		return Sample{}, fmt.Errorf("decode Sample.SeenAt: %w", err)
-	}
-	if value1 != nil {
-		zoned, err := agtypeZone(props, "seenAtOffset", *value1)
-		if err != nil {
-			return Sample{}, fmt.Errorf("decode Sample.SeenAt: %w", err)
-		}
-		value1 = &zoned
-	}
-	out.SeenAt = value1
-	return out, nil
 }
 
 // agtypeArgs renders a query's bound parameters as the single agtype
@@ -62,26 +30,6 @@ func agtypeArgs(args map[string]any) (string, error) {
 	return string(out), nil
 }
 
-// agtypeString decodes an agtype string scalar. AGE renders one as a
-// JSON string, escapes included, so the JSON decoder reads it back
-// exactly; it also refuses every other agtype scalar, which is what
-// stops a mis-shaped projection arriving as a plausible value.
-//
-// The target is a pointer because that is what separates the two shapes
-// the decoder would otherwise agree on: unmarshalling a JSON null into a
-// string succeeds and leaves it empty, so an agtype null would reach a
-// non-nullable column as "".
-func agtypeString(raw []byte) (string, error) {
-	var out *string
-	if err := json.Unmarshal(raw, &out); err != nil {
-		return "", fmt.Errorf("gqlc: %q is not an agtype string: %w", raw, err)
-	}
-	if out == nil {
-		return "", fmt.Errorf("gqlc: %q is not an agtype string", raw)
-	}
-	return *out, nil
-}
-
 // agtypeInt64 decodes an agtype integer scalar, whose range is Go's
 // int64. A value carrying the ::numeric annotation is one AGE evaluated
 // in arbitrary precision: it is an integer only if it survives the parse
@@ -95,96 +43,6 @@ func agtypeInt64(raw []byte) (int64, error) {
 	return out, nil
 }
 
-// agtypeInstant decodes an encoded instant: agtype has no temporal
-// value, so gqlc stores one as the integer scalar, counting
-// microseconds since the Unix epoch. Microseconds are the finest
-// resolution that spans the range without overflowing an int64, and the
-// count is the whole of the instant — the offset sidecar beside a
-// stored property decides only how it prints.
-//
-// The zone is UTC because that is what the count alone determines.
-//
-// The count is bounded to the four-digit calendar — year 1 through year
-// 9999 inclusive — before the instant is built. gqlc's own encode writes
-// the micros, but it writes them to an ordinary agtype integer property
-// on a vertex any writer can touch, so the count read back is whatever
-// the graph holds, on the same argument that bounds the offset sidecar
-// below. Unbounded, an int64's far end is a year near 294247, and that
-// is not a date any wire format beside this one spells: RFC 3339 has
-// four year digits, and so does every timestamp text a SQL client
-// prints. A caller who formats such an instant gets a string no other
-// system reads back. The bound is the widest four-digit range rather
-// than anything narrower, so every instant this encoding was designed
-// to carry — pre-epoch dates included — survives the read.
-func agtypeInstant(raw []byte) (time.Time, error) {
-	micros, err := agtypeInt64(raw)
-	if err != nil {
-		return time.Time{}, err
-	}
-	// Year 1 midnight UTC and the last microsecond of year 9999, as
-	// counts. Written as literals because they are the encoding, and a
-	// derivation from time.Date would put the bound behind the same
-	// calendar arithmetic it is checking.
-	if micros < -62135596800000000 || micros > 253402300799999999 {
-		return time.Time{}, fmt.Errorf(
-			"gqlc: %d microseconds since the epoch is outside the year 1 to year 9999 range this encoding admits", micros)
-	}
-	return time.UnixMicro(micros).UTC(), nil
-}
-
-// agtypeOffset reads the offset-seconds sidecar stored beside a zoned
-// value, with ok=false where the graph holds no such property. An absent
-// sidecar is not an error: the stored count is complete without it, so
-// the property stays readable by anything that never wrote one —
-// including this package, which binds the value alone. Where a sidecar
-// goes is the author's query text, and gqlc runs that text as written.
-//
-// Flat rather than a member of a map so the value stays the property
-// itself: ORDER BY n.at and WHERE n.at > $since are then answered by
-// agtype's integer ordering, with nothing for gqlc to rewrite.
-//
-// The offset is bounded at a day either way, exclusive, before it is
-// taken. gqlc derives no sidecar to bind — a parameter crosses as the
-// value alone — so the integer read here is whatever the graph holds: a
-// query that names the key binds it like any other property, whether or
-// not gqlc generated that query. Unbounded it names a zone no clock
-// keeps, and the wall clock the caller then reads is arbitrarily far
-// from the value stored beside it. The bound is a day rather than the
-// narrower range zone databases populate today, so a graph a future zone
-// database would accept is not refused here.
-//
-// Both zoned widths read their sidecar through this, so the bound is one
-// policy and not two agreeing by inspection.
-func agtypeOffset(props map[string][]byte, key string) (int, bool, error) {
-	raw, ok := props[key]
-	if !ok {
-		return 0, false, nil
-	}
-	offset, err := agtypeInt64(raw)
-	if err != nil {
-		return 0, false, fmt.Errorf("gqlc: offset %q: %w", key, err)
-	}
-	if offset <= -86400 || offset >= 86400 {
-		return 0, false, fmt.Errorf("gqlc: offset %q is %d seconds, which is not within a day of UTC", key, offset)
-	}
-	return int(offset), true, nil
-}
-
-// agtypeZone puts a decoded instant back in the zone it was written in.
-// An absent sidecar leaves it in UTC, which is the instant it was stored
-// at either way: the count is absolute, so the zone moves the wall clock
-// the caller reads and never the moment it names.
-func agtypeZone(props map[string][]byte, key string, at time.Time) (time.Time, error) {
-	offset, ok, err := agtypeOffset(props, key)
-	if err != nil {
-		return time.Time{}, err
-	}
-	if !ok {
-		return at, nil
-	}
-	return at.In(time.FixedZone("", offset)), nil
-}
-
 // agtypeNullableMicros is agtypeMicros over an absent instant, which
 // crosses as the agtype null a nullable property holds.
 func agtypeNullableMicros(at *time.Time) *int64 {
@@ -193,138 +51,4 @@ func agtypeNullableMicros(at *time.Time) *int64 {
 	}
 	micros := at.UnixMicro()
 	return &micros
-}
-
-// agtypeSpan reports where the value at the front of b ends: the offset
-// of the first stop byte outside any nested structure, or len(b) when
-// there is none. A string, a nested map and a nested list are each
-// stepped over whole, so a delimiter one of them contains ends nothing.
-func agtypeSpan(b []byte, stop byte) (int, error) {
-	depth := 0
-	for i := 0; i < len(b); i++ {
-		if b[i] == '"' {
-			for i++; i < len(b) && b[i] != '"'; i++ {
-				if b[i] == '\\' {
-					i++
-				}
-			}
-			if i >= len(b) {
-				return 0, fmt.Errorf("gqlc: %q leaves a string unterminated", b)
-			}
-			continue
-		}
-		if depth == 0 && b[i] == stop {
-			return i, nil
-		}
-		switch b[i] {
-		case '{', '[':
-			depth++
-		case '}', ']':
-			depth--
-			if depth < 0 {
-				return 0, fmt.Errorf("gqlc: %q closes a structure it never opened", b)
-			}
-		}
-	}
-	if depth != 0 {
-		return 0, fmt.Errorf("gqlc: %q leaves a structure open", b)
-	}
-	return len(b), nil
-}
-
-// agtypeObject splits an agtype map into its members, each key holding
-// the undecoded text of its value. A map carries more than the schema
-// declares: AGE stores whatever a writer wrote, so a value here may be of
-// a shape no helper in this package reads, and only the ones a field asks
-// for are ever decoded.
-func agtypeObject(raw []byte) (map[string][]byte, error) {
-	body := bytes.TrimSpace(raw)
-	if len(body) < 2 || body[0] != '{' || body[len(body)-1] != '}' {
-		return nil, fmt.Errorf("gqlc: %q is not an agtype map", raw)
-	}
-	body = bytes.TrimSpace(body[1 : len(body)-1])
-	out := make(map[string][]byte)
-	for len(body) > 0 {
-		end, err := agtypeSpan(body, ',')
-		if err != nil {
-			return nil, err
-		}
-		member := bytes.TrimSpace(body[:end])
-		body = bytes.TrimSpace(body[min(end+1, len(body)):])
-
-		at, err := agtypeSpan(member, ':')
-		if err != nil {
-			return nil, err
-		}
-		if at == len(member) {
-			return nil, fmt.Errorf("gqlc: %q is not a key and a value", member)
-		}
-		key, err := agtypeString(bytes.TrimSpace(member[:at]))
-		if err != nil {
-			return nil, err
-		}
-		out[key] = bytes.TrimSpace(member[at+1:])
-	}
-	return out, nil
-}
-
-// agtypeEntity splits an agtype vertex or edge into the label it carries
-// and the undecoded text of each of its properties. A vertex and an edge
-// are the same object but for the annotation, so requiring the one the
-// caller named is what stands between an edge's decoder and a vertex
-// whose label happens to match it.
-func agtypeEntity(raw []byte, annotation string) (string, map[string][]byte, error) {
-	body, ok := bytes.CutSuffix(bytes.TrimSpace(raw), []byte(annotation))
-	if !ok {
-		return "", nil, fmt.Errorf("gqlc: %q does not carry the %s annotation", raw, annotation)
-	}
-	fields, err := agtypeObject(body)
-	if err != nil {
-		return "", nil, err
-	}
-	rawLabel, ok := fields["label"]
-	if !ok {
-		return "", nil, fmt.Errorf("gqlc: %q carries no label", raw)
-	}
-	label, err := agtypeString(rawLabel)
-	if err != nil {
-		return "", nil, err
-	}
-	rawProps, ok := fields["properties"]
-	if !ok {
-		return "", nil, fmt.Errorf("gqlc: %q carries no properties", raw)
-	}
-	props, err := agtypeObject(rawProps)
-	if err != nil {
-		return "", nil, err
-	}
-	return label, props, nil
-}
-
-// agtypeProperty reads one property the schema declares NOT NULL out of a
-// split entity. AGE drops a property whose value is null, so an absent
-// key is how a null arrives, and taking the Go zero for one would report
-// absence as a value the graph holds.
-func agtypeProperty[T any](props map[string][]byte, key string, decode func([]byte) (T, error)) (T, error) {
-	raw, ok := props[key]
-	if !ok {
-		var zero T
-		return zero, fmt.Errorf("gqlc: property %q is absent", key)
-	}
-	return decode(raw)
-}
-
-// agtypeNullableProperty reads one nullable property out of a split
-// entity, where the absence agtypeProperty refuses is the schema's null
-// and reaches the caller as the nil pointer.
-func agtypeNullableProperty[T any](props map[string][]byte, key string, decode func([]byte) (T, error)) (*T, error) {
-	raw, ok := props[key]
-	if !ok {
-		return nil, nil
-	}
-	out, err := decode(raw)
-	if err != nil {
-		return nil, err
-	}
-	return &out, nil
 }

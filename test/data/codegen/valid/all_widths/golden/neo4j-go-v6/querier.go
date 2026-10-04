@@ -6,6 +6,7 @@ import "context"
 
 type ReadQuerier interface {
 	AllWidths(ctx context.Context) (AllWidthsRow, error)
+	AllRows(ctx context.Context) ([]Row, error)
 }
 
 type WriteQuerier interface {

@@ -2,7 +2,13 @@
 
 package entityedgeambiguouslabelnamed
 
+import "context"
+
 type ReadQuerier interface {
+	PersonKnowsEdges(ctx context.Context) ([]PersonKnows, error)
+	CompanyKnowsEdges(ctx context.Context) ([]CompanyKnows, error)
+	People(ctx context.Context) ([]Person, error)
+	Companies(ctx context.Context) ([]Company, error)
 }
 
 type WriteQuerier interface {

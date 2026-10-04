@@ -329,7 +329,7 @@ func emissionsUnderNarrowingGuard(t *testing.T) map[string]string {
 	probeSchema, err := gql.New().Parse(strings.NewReader(narrowingProbeSchema()))
 	require.NoError(t, err, "the probe schema does not parse:\n%s", narrowingProbeSchema())
 	probeFiles, err := age.New(age.WithPackageName("narrowingprobe")).
-		Generate(codegen.Input{Schema: probeSchema, Queries: narrowingProbeQueries()})
+		Generate(decodingEveryEntity(codegen.Input{Schema: probeSchema, Queries: narrowingProbeQueries()}))
 	require.NoError(t, err)
 	keep("probe/", probeFiles)
 
@@ -337,7 +337,7 @@ func emissionsUnderNarrowingGuard(t *testing.T) map[string]string {
 	require.NoError(t, err)
 	sch, err := gql.New().Parse(bytes.NewReader(src))
 	require.NoError(t, err)
-	corpusFiles, err := age.New(age.WithPackageName(corpusPackage)).Generate(codegen.Input{Schema: sch})
+	corpusFiles, err := age.New(age.WithPackageName(corpusPackage)).Generate(decodingEveryEntity(codegen.Input{Schema: sch}))
 	require.NoError(t, err)
 	keep("corpus/", corpusFiles)
 

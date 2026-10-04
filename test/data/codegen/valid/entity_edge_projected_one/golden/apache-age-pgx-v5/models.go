@@ -15,47 +15,9 @@ type Movie struct {
 	Id int64
 }
 
-// decodeMovie decodes an agtype vertex into a Movie struct, enforcing
-// the label and the per-property nullability the schema declares.
-func decodeMovie(raw []byte) (Movie, error) {
-	label, props, err := agtypeEntity(raw, "::vertex")
-	if err != nil {
-		return Movie{}, fmt.Errorf("decode Movie: %w", err)
-	}
-	if label != "Movie" {
-		return Movie{}, fmt.Errorf("decode Movie: expected label %q, got %q", "Movie", label)
-	}
-	var out Movie
-	value0, err := agtypeProperty(props, "id", agtypeInt64)
-	if err != nil {
-		return Movie{}, fmt.Errorf("decode Movie.Id: %w", err)
-	}
-	out.Id = value0
-	return out, nil
-}
-
 // Person corresponds to the Person node type.
 type Person struct {
 	Id int64
-}
-
-// decodePerson decodes an agtype vertex into a Person struct, enforcing
-// the label and the per-property nullability the schema declares.
-func decodePerson(raw []byte) (Person, error) {
-	label, props, err := agtypeEntity(raw, "::vertex")
-	if err != nil {
-		return Person{}, fmt.Errorf("decode Person: %w", err)
-	}
-	if label != "Person" {
-		return Person{}, fmt.Errorf("decode Person: expected label %q, got %q", "Person", label)
-	}
-	var out Person
-	value0, err := agtypeProperty(props, "id", agtypeInt64)
-	if err != nil {
-		return Person{}, fmt.Errorf("decode Person.Id: %w", err)
-	}
-	out.Id = value0
-	return out, nil
 }
 
 // ActedIn corresponds to the ACTED_IN edge type (Person -> Movie).

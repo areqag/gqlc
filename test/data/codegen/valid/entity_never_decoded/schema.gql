@@ -1,0 +1,10 @@
+CREATE PROPERTY GRAPH TYPE EntityNeverDecoded AS {
+    (:Person { id :: INT64 NOT NULL }),
+    (:Event {
+        id   :: INT64     NOT NULL,
+        seen :: TIMESTAMP NOT NULL,
+        born :: DATE      NOT NULL,
+        ref  :: UUID      NOT NULL,
+        pick :: ANY<INT32 | STRING>
+    })
+}

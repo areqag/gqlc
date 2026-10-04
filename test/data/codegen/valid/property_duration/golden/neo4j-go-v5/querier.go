@@ -2,7 +2,10 @@
 
 package propertyduration
 
+import "context"
+
 type ReadQuerier interface {
+	Spans(ctx context.Context) ([]Span, error)
 }
 
 type WriteQuerier interface {

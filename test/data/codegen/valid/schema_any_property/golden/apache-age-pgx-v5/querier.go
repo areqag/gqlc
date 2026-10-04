@@ -12,6 +12,7 @@ type ReadQuerier interface {
 	EventPropertyColumns(ctx context.Context) ([]EventPropertyColumnsRow, error)
 	EventBadge(ctx context.Context) (any, error)
 	EventTag(ctx context.Context) (*any, error)
+	AllEvents(ctx context.Context) ([]Event, error)
 }
 
 type WriteQuerier interface {

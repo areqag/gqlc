@@ -39,3 +39,33 @@ func (q *queries) OneMarker(ctx context.Context) (Marker, error) {
 	}
 	return value, nil
 }
+
+const oneLinkQueryText = `MATCH (:Marker)-[l:LINKS]->(:Marker) RETURN l`
+
+// OneLink executes the OneLink query.
+//
+//	MATCH (:Marker)-[l:LINKS]->(:Marker) RETURN l
+func (q *queries) OneLink(ctx context.Context) (Links, error) {
+	records, err := q.db.run(ctx, oneLinkQueryText, nil, neo4j.AccessModeRead)
+	if err != nil {
+		return Links{}, err
+	}
+	if len(records) == 0 {
+		return Links{}, ErrNoRows
+	}
+	if len(records) > 1 {
+		return Links{}, ErrMultipleResults
+	}
+	rel, isNil, err := neo4j.GetRecordValue[dbtype.Relationship](records[0], "l")
+	if err != nil {
+		return Links{}, fmt.Errorf("OneLink: decode column %q: %w", "l", err)
+	}
+	if isNil {
+		return Links{}, fmt.Errorf("OneLink: column %q is non-nullable but arrived null", "l")
+	}
+	value, err := decodeLinks(rel)
+	if err != nil {
+		return Links{}, fmt.Errorf("OneLink: decode column %q: %w", "l", err)
+	}
+	return value, nil
+}

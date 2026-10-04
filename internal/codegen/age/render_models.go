@@ -117,24 +117,34 @@ func carriesZone(goType string) bool {
 // helpers records which agtype encode / decode helpers a batch reaches
 // for. Each is emitted only when something calls it.
 //
-// Both directions of that are gated, the second with one limit. A helper
-// referenced but not declared fails to compile, which TestGoldenBuild and
-// TestEmittedHelpersAreClosedOverWhatTheyCall both catch. A helper
-// nothing calls, declared into a golden package, compiles, and is
-// reported by `unused` over the goldens (`just check-goldens-unused`,
-// part of the required fence, bd gqlc-ukzq). One called only by an
-// entity decoder that nothing calls is not reported, because entity
-// decoders are rooted there whether or not anything calls THEM (bd
-// gqlc-m1dk).
+// Both directions of that are gated. A helper referenced but not declared
+// fails to compile, which TestGoldenBuild and
+// TestEmittedHelpersAreClosedOverWhatTheyCall both catch. A helper nothing
+// calls, declared into a golden package, compiles, and is reported by
+// `unused` over the goldens (`just check-goldens-unused`, part of the
+// required fence, bd gqlc-ukzq).
 //
-// agtypeEntity, agtypeObject, agtypeSpan and agtypeString are not among
-// them. A graph type's element type list is one-or-more (GQL.g4
-// elementTypeList), so every schema declares at least one entity, every
-// entity decoder splits the wire value and reads its label, and those
-// four are in every emission this package can produce. A field standing
-// for a condition that cannot be false would report nothing.
+// Entity decoders are gated the same way (bd gqlc-m1dk): forEntities is
+// handed only the entities some query decodes, so a schema entity no
+// query returns whole marks nothing, and agtypeEntity, agtypeObject,
+// agtypeSpan and agtypeString are marked like any other helper.
 type helpers struct {
-	args    bool // agtypeArgs — some query binds at least one parameter
+	args bool // agtypeArgs — some query binds at least one parameter
+
+	// fmt — models.go names fmt. Marked by a bound parameter (agtypeArgs)
+	// and by any decode at all: every decoder of a column or entity
+	// reaches a helper that can fail. A batch that does neither — writes
+	// with no parameter and no RETURN — declares structs alone.
+	fmt bool
+
+	// entityDecoders holds the name of every entity some query decodes,
+	// each of which takes a decode<Name> calling agtypeEntity.
+	entityDecoders map[string]bool
+
+	object bool // agtypeObject — an entity, a record or a map is split
+	span   bool // agtypeSpan — agtypeObject or agtypeList steps over a value
+	str    bool // agtypeString — a string, or a helper that reads one
+
 	boolean bool
 	integer bool
 	float   bool
@@ -145,9 +155,7 @@ type helpers struct {
 	// otherwise carry agtypeFloat32 and the math import it alone names
 	// (bd gqlc-awtb). The unused import does not compile. The function
 	// alone compiles, and where nothing calls it is reported by `unused`
-	// over the goldens (`just check-goldens-unused`, bd gqlc-ukzq). Where
-	// only an entity decoder calls it, it is not, even if nothing calls
-	// the decoder: those are rooted there (bd gqlc-m1dk).
+	// over the goldens (`just check-goldens-unused`, bd gqlc-ukzq).
 	intAs       bool // agtypeIntAs — an integer width narrower than int64 decodes
 	narrowFloat bool // agtypeFloat32 — a FLOAT32 decodes
 
@@ -177,6 +185,8 @@ type helpers struct {
 	// agtypeOffset — the sidecar read the two zoned widths share. Marked
 	// by either of them, since it is the one place the bound lives.
 	offset bool
+
+	structTime bool // time — some entity struct names time.Time, decoded or not
 
 	date      bool // agtypeDate — something decodes a stored DATE
 	uuid      bool // agtypeUUID — something decodes a stored UUID
@@ -281,6 +291,16 @@ type listPlan struct {
 	width  graph.PropertyType
 }
 
+// importsBytes reports whether models.go names the bytes package: the
+// wire splitters, the list walk with agtypeIsNull beside it, and the union
+// dispatch. The value vocabulary and the record field read name it too,
+// and need no disjunct of their own: both mark object (needValue,
+// needRecord). union_column_sole_decode is the fixture whose only bytes
+// caller is a union decoder.
+func (h helpers) importsBytes() bool {
+	return h.object || h.list || len(h.unionDecoders) > 0
+}
+
 // importsTime reports whether models.go names the time package, which
 // is the whole of what it decides.
 //
@@ -294,35 +314,65 @@ type listPlan struct {
 // zone is not a disjunct. It is marked on an entity field whose Go type
 // is the instant, which is the same condition that marks instant, so a
 // batch reaching the sidecar read has already answered true here.
+//
+// structTime is the one disjunct no helper answers: an entity struct
+// names time.Time for an instant property whether or not anything
+// decodes the entity.
 func (h helpers) importsTime() bool {
-	return h.instant || h.micros || h.nullMicros || h.date || h.dateText
+	return h.structTime || h.instant || h.micros || h.nullMicros || h.date || h.dateText
 }
 
-// forEntities marks the helpers an entity emission reaches beyond the
-// four every emission carries.
-func (h *helpers) forEntities(entities []wiredEntity) {
+// forStructs marks what the entity struct declarations name, which is
+// every entity's whatever the batch decodes.
+func (h *helpers) forStructs(entities []wiredEntity) {
 	for _, e := range entities {
 		for _, f := range e.Fields {
-			h.need(f.GoType, f.Width)
-			// The offset sidecar is a second property of the same
-			// vertex, so only an entity decode has it in hand. Which
-			// re-zoning helper reads it depends on the carrier: an
-			// instant moves its Location, a TIME adds the offset back
-			// into the clock reading.
-			if _, ok := offsetSidecar(f); ok {
-				h.offset = true
-				if f.GoType == goTime {
-					h.timeZone = true
-				} else {
-					h.zone = true
-				}
-			}
-			if f.Nullable {
-				h.nullProp = true
-			} else {
-				h.prop = true
+			// Contains rather than a leaf match: a list, a nullable
+			// element and a record's struct text all spell the instant
+			// inside a longer type.
+			if strings.Contains(f.GoType, goInstant) {
+				h.structTime = true
 			}
 		}
+	}
+}
+
+// forEntities marks the helpers the decoders of entities reach. It is
+// handed the decoded entities alone (codegen.DecodedEntities).
+func (h *helpers) forEntities(entities []wiredEntity) {
+	if len(entities) == 0 {
+		return
+	}
+	h.fmt = true
+	h.needObject()
+	h.entityDecoders = map[string]bool{}
+	for _, e := range entities {
+		h.entityDecoders[e.Name] = true
+		for _, f := range e.Fields {
+			h.forEntityField(f)
+		}
+	}
+}
+
+// forEntityField marks the helpers one decoded property's read reaches.
+func (h *helpers) forEntityField(f codegen.EntityField) {
+	h.need(f.GoType, f.Width)
+	// The offset sidecar is a second property of the same vertex, so
+	// only an entity decode has it in hand. Which re-zoning helper reads
+	// it depends on the carrier: an instant moves its Location, a TIME
+	// adds the offset back into the clock reading.
+	if _, ok := offsetSidecar(f); ok {
+		h.offset = true
+		if f.GoType == goTime {
+			h.timeZone = true
+		} else {
+			h.zone = true
+		}
+	}
+	if f.Nullable {
+		h.nullProp = true
+	} else {
+		h.prop = true
 	}
 }
 
@@ -417,6 +467,10 @@ func (h *helpers) forQueries(queries []codegen.Query) {
 	for _, p := range queries {
 		if len(p.ParamFields) > 0 {
 			h.args = true
+			h.fmt = true
+		}
+		if len(p.RowFields) > 0 {
+			h.fmt = true
 		}
 		h.forParams(p.ParamFields)
 		for _, f := range p.RowFields {
@@ -490,6 +544,7 @@ func paramLeaf(p codegen.Param) (leaf string, leafWidth graph.PropertyType, list
 func (h *helpers) need(goType string, width graph.PropertyType) {
 	if elem, ok := strings.CutPrefix(goType, "[]"); ok {
 		h.list = true
+		h.span = true
 		// Deduplicated on the wrapper's NAME and not on the Go type text,
 		// because the text does not identify the wrapper: every list of a
 		// closed union, and LIST<ANY VALUE> too, is `[]any`, and keyed on
@@ -550,6 +605,8 @@ func (h *helpers) needCarrier(goType string) {
 		if goType != "float64" {
 			h.narrowFloat = true
 		}
+	case "string":
+		h.str = true
 	default:
 		h.needTemporalCarrier(carrier)
 	}
@@ -565,14 +622,15 @@ func (h *helpers) needTemporalCarrier(carrier string) {
 		h.instant = true
 		h.integer = true
 	case goDate:
-		// The date rides the string scalar, which every emission
-		// declares, so there is no second helper to mark here.
+		// The date rides the string scalar.
 		h.date = true
+		h.str = true
 	case goUUID:
 		// Not a temporal, and here because this is the switch over the
 		// carriers that decode through a helper of their own. It rides
 		// the string scalar too.
 		h.uuid = true
+		h.str = true
 	case goLocalTime:
 		h.localTime = true
 		h.integer = true
@@ -590,9 +648,17 @@ func (h *helpers) needTemporalCarrier(carrier string) {
 // of no declared shape is read through agtype's own vocabulary, so every
 // arm of that vocabulary has to be in the file whatever the rest of the
 // batch declares.
+//
+// agtypeMap, emitted beside agtypeValue, splits through agtypeObject.
 func (h *helpers) needValue() {
 	h.value = true
-	h.integer, h.float, h.list = true, true, true
+	h.integer, h.float, h.list, h.span, h.str = true, true, true, true, true
+	h.needObject()
+}
+
+// needObject marks agtypeObject and the two helpers it is built on.
+func (h *helpers) needObject() {
+	h.object, h.span, h.str = true, true, true
 }
 
 // needRecord marks one declared record's carrier alias and its DECODER,
@@ -620,6 +686,8 @@ func (h *helpers) needRecord(width graph.PropertyType) {
 	}
 	h.markRecord(width)
 	h.recordDecoders[width] = true
+	// Every record decoder splits its map, a record of no fields too.
+	h.needObject()
 	for _, f := range width.Fields() {
 		fieldTy, ok := typeMap{}.Property(f.Type)
 		if !ok {
@@ -931,7 +999,7 @@ func renderModels(pkg string, entities []wiredEntity, h helpers) []byte {
 	var b strings.Builder
 	writeModelsPreamble(&b, pkg, h)
 
-	writeEntities(&b, entities)
+	writeEntities(&b, entities, h.entityDecoders)
 
 	// The carriers sit with the entity structs because they are part of
 	// the type surface; their helpers sit below with the other decoders.
@@ -983,25 +1051,48 @@ func writeModelsPreamble(b *strings.Builder, pkg string, h helpers) {
 	b.WriteString(codegen.Header())
 	b.WriteString("package " + pkg + "\n")
 
+	imports := h.imports()
+	if len(imports) == 0 {
+		return
+	}
 	b.WriteString("\nimport (\n")
-	b.WriteString("\t\"bytes\"\n")
-	b.WriteString("\t\"encoding/json\"\n")
-	b.WriteString("\t\"fmt\"\n")
+	for _, path := range imports {
+		b.WriteString("\t\"" + path + "\"\n")
+	}
+	b.WriteString(")\n")
+}
+
+// imports is models.go's import paths, in order. Each is gated on what
+// names it, since a schema entity no query decodes no longer brings the
+// wire splitters with it (bd gqlc-m1dk). A file of entity structs alone
+// imports nothing, or time alone for an instant property.
+func (h helpers) imports() []string {
+	var imports []string
+	if h.importsBytes() {
+		imports = append(imports, "bytes")
+	}
+	// agtypeArgs and agtypeString are the two json callers.
+	if h.args || h.str {
+		imports = append(imports, "encoding/json")
+	}
+	if h.fmt {
+		imports = append(imports, "fmt")
+	}
 	// agtypeFloat32 is the only thing here that names math, so the import
 	// gates on it alone rather than on any narrowing.
 	if h.narrowFloat {
-		b.WriteString("\t\"math\"\n")
+		imports = append(imports, "math")
 	}
 	if h.integer || h.float {
-		b.WriteString("\t\"strconv\"\n\t\"strings\"\n")
+		imports = append(imports, "strconv", "strings")
 	}
 	if h.importsTime() {
-		b.WriteString("\t\"time\"\n")
+		imports = append(imports, "time")
 	}
 	if h.uuid {
-		b.WriteString("\t\"uuid\"\n")
+		imports = append(imports, "uuid")
 	}
-	b.WriteString(")\n")
+	return imports
 }
 
 // writeScalarDecoders emits the argument encoder and the scalar decoders,
@@ -1024,7 +1115,8 @@ func agtypeArgs(args map[string]any) (string, error) {
 }
 `)
 	}
-	b.WriteString(`
+	if h.str {
+		b.WriteString(`
 // agtypeString decodes an agtype string scalar. AGE renders one as a
 // JSON string, escapes included, so the JSON decoder reads it back
 // exactly; it also refuses every other agtype scalar, which is what
@@ -1045,6 +1137,7 @@ func agtypeString(raw []byte) (string, error) {
 	return *out, nil
 }
 `)
+	}
 	if h.boolean {
 		b.WriteString(`
 // agtypeBool decodes an agtype boolean scalar. The two spellings are the
@@ -1717,7 +1810,8 @@ func agtypeEncodedList[T, E any](in []T, encode func(T) (E, error)) ([]E, error)
 // writeWireDecoders emits the agtype wire readers the typed decoders are
 // built on, agtypeSpan through agtypeIsNull.
 func writeWireDecoders(b *strings.Builder, h helpers) {
-	b.WriteString(`
+	if h.span {
+		b.WriteString(`
 // agtypeSpan reports where the value at the front of b ends: the offset
 // of the first stop byte outside any nested structure, or len(b) when
 // there is none. A string, a nested map and a nested list are each
@@ -1755,7 +1849,9 @@ func agtypeSpan(b []byte, stop byte) (int, error) {
 	return len(b), nil
 }
 `)
-	b.WriteString(`
+	}
+	if h.object {
+		b.WriteString(`
 // agtypeObject splits an agtype map into its members, each key holding
 // the undecoded text of its value. A map carries more than the schema
 // declares: AGE stores whatever a writer wrote, so a value here may be of
@@ -1792,7 +1888,9 @@ func agtypeObject(raw []byte) (map[string][]byte, error) {
 	return out, nil
 }
 `)
-	b.WriteString(`
+	}
+	if len(h.entityDecoders) > 0 {
+		b.WriteString(`
 // agtypeEntity splits an agtype vertex or edge into the label it carries
 // and the undecoded text of each of its properties. A vertex and an edge
 // are the same object but for the annotation, so requiring the one the
@@ -1826,6 +1924,7 @@ func agtypeEntity(raw []byte, annotation string) (string, map[string][]byte, err
 	return label, props, nil
 }
 `)
+	}
 	if h.list {
 		b.WriteString(`
 // agtypeList decodes an agtype list, reading each element through the
@@ -2103,8 +2202,8 @@ func nullableUnionElem(goType string, width graph.PropertyType) bool {
 }
 
 // writeEntities emits the schema's entity surface: one exported struct
-// per node and edge type in Phase Z order, followed by the decoder that
-// fills it.
+// per node and edge type in Phase Z order, each followed by the decoder
+// that fills it where some query decodes it (bd gqlc-m1dk).
 //
 // No sealed edge-union interface comes out here, and no marker method.
 // Those belong to a column binding more than one candidate edge type,
@@ -2112,13 +2211,28 @@ func nullableUnionElem(goType string, width graph.PropertyType) bool {
 // batch reaching emission carries none: a prepared query's EdgeUnions
 // is filled only from a ResolvedEdgeUnion column or from a list with
 // one at its leaf, and unservedColumn refuses both.
-func writeEntities(b *strings.Builder, entities []wiredEntity) {
+func writeEntities(b *strings.Builder, entities []wiredEntity, decoded map[string]bool) {
 	for _, e := range entities {
 		b.WriteString("\n")
 		writeEntityStruct(b, e.Entity)
-		b.WriteString("\n")
-		writeEntityDecoder(b, e)
+		if decoded[e.Name] {
+			b.WriteString("\n")
+			writeEntityDecoder(b, e)
+		}
 	}
+}
+
+// decodedEntities is the subset of entities, in their order, that some
+// query of prepared decodes (codegen.DecodedEntities).
+func decodedEntities(entities []wiredEntity, prepared codegen.Prepared) []wiredEntity {
+	decoded := codegen.DecodedEntities(prepared)
+	var out []wiredEntity
+	for _, e := range entities {
+		if slices.ContainsFunc(decoded, func(d codegen.Entity) bool { return d.Name == e.Name }) {
+			out = append(out, e)
+		}
+	}
+	return out
 }
 
 // writeEntityStruct emits one entity's exported struct declaration. A

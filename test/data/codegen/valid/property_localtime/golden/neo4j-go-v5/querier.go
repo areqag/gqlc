@@ -2,7 +2,10 @@
 
 package propertylocaltime
 
+import "context"
+
 type ReadQuerier interface {
+	Events(ctx context.Context) ([]Event, error)
 }
 
 type WriteQuerier interface {

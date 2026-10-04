@@ -797,7 +797,7 @@ func (s *DecoderSuite) emitClosureModels(prop string, depth int) (string, error)
 	if err != nil {
 		return "", err
 	}
-	files, err := neo4j.New().Generate(codegen.Input{Schema: sch})
+	files, err := neo4j.New().Generate(decodingEveryEntity(codegen.Input{Schema: sch}))
 	s.Require().NoError(err)
 	for _, f := range files {
 		if f.Path == "models.go" {
@@ -817,7 +817,7 @@ func (s *DecoderSuite) emitModels(prop string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	files, err := neo4j.New().Generate(codegen.Input{Schema: sch})
+	files, err := neo4j.New().Generate(decodingEveryEntity(codegen.Input{Schema: sch}))
 	s.Require().NoError(err)
 	for _, f := range files {
 		if f.Path == "models.go" {
@@ -1028,7 +1028,7 @@ func emissionsUnderNarrowingGuard(t *testing.T) map[string]string {
 
 	probe, err := gql.New().Parse(strings.NewReader(decoderProbeSchema(unclaimedProperty)))
 	require.NoError(t, err, "the probe schema does not parse")
-	probeFiles, err := neo4j.New().Generate(codegen.Input{Schema: probe})
+	probeFiles, err := neo4j.New().Generate(decodingEveryEntity(codegen.Input{Schema: probe}))
 	require.NoError(t, err)
 	keep("probe/", probeFiles)
 
@@ -1037,7 +1037,7 @@ func emissionsUnderNarrowingGuard(t *testing.T) map[string]string {
 	sch, err := gql.New().Parse(bytes.NewReader(src))
 	require.NoError(t, err)
 	corpusFiles, err := neo4j.New(neo4j.WithPackageName(corpusPackage)).
-		Generate(codegen.Input{Schema: sch, Queries: corpusNamedQueries(t, sch)})
+		Generate(decodingEveryEntity(codegen.Input{Schema: sch, Queries: corpusNamedQueries(t, sch)}))
 	require.NoError(t, err)
 	keep("corpus/", corpusFiles)
 
@@ -1093,7 +1093,7 @@ var positionalLocal = regexp.MustCompile(`^value(\d+)$`)
 func (s *DecoderSuite) TestPositionalDecoderLocalsAreDense() {
 	sch, err := gql.New().Parse(strings.NewReader(densityProbeSchema))
 	s.Require().NoError(err)
-	files, err := neo4j.New().Generate(codegen.Input{Schema: sch})
+	files, err := neo4j.New().Generate(decodingEveryEntity(codegen.Input{Schema: sch}))
 	s.Require().NoError(err)
 
 	var models string

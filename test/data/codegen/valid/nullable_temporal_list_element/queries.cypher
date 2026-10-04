@@ -29,3 +29,6 @@
 MATCH (s:Slot)
 WHERE s.days = $days AND s.spans = $spans AND s.maybe = $maybe
 RETURN s.id AS id
+
+// name: AllSlots :many
+MATCH (s:Slot) RETURN s
