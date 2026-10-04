@@ -1,8 +1,8 @@
 //go:build codegen_live
 
 // The live half of bd gqlc-2omj, through the emitted packages of the
-// list_expression_unknown_element and list_expression_record_field_element
-// fixtures against the digest-pinned AGE image.
+// list_expression_unknown_element, list_expression_record_field_element and
+// unknown_entity_value fixtures against the digest-pinned AGE image.
 //
 // A bare column the resolver types as unknown — an index into a list
 // property, a field of a record property — used to be refused by this
@@ -26,6 +26,7 @@ import (
 
 	recordfieldage "github.com/areqag/gqlc/test/data/codegen/valid/list_expression_record_field_element/golden/apache-age-pgx-v5"
 	unknownelemage "github.com/areqag/gqlc/test/data/codegen/valid/list_expression_unknown_element/golden/apache-age-pgx-v5"
+	unknownentityage "github.com/areqag/gqlc/test/data/codegen/valid/unknown_entity_value/golden/apache-age-pgx-v5"
 )
 
 // TestAGEServesAnUnknownColumnAsAny reads bare unknown-typed columns back from
@@ -75,6 +76,44 @@ func TestAGEServesAnUnknownColumnAsAny(t *testing.T) {
 		got, err := q.AccountBareRecordField(ctx)
 		require.NoError(t, err)
 		require.Equal(t, []any{"x", int64(9)}, got)
+	})
+
+	// head(collect(p)) and startNode(k) are typed unknown and hold a whole
+	// vertex, which AGE sends annotated ::vertex. As a column and as a list
+	// element alike it reads back as the map the object carries; before
+	// agtypeValue read the annotation, both failed every row.
+	t.Run("an unknown holding a vertex reads back as its map, as a column and as an element", func(t *testing.T) {
+		const graph = "gqlc_unknown_column_entity"
+		q := unknownentityage.New(pool, graph)
+		ownGraph(t, graph, `CREATE (:Person {id: 1})-[:KNOWS {since: 2019}]->(:Person {id: 2})`, q)
+
+		requirePerson := func(t *testing.T, got any, id int64) {
+			t.Helper()
+			m, ok := got.(map[string]any)
+			require.Truef(t, ok, "want map[string]any, got %#v", got)
+			require.Equal(t, "Person", m["label"])
+			require.IsType(t, int64(0), m["id"], "the graphid")
+			require.Equal(t, map[string]any{"id": id}, m["properties"])
+		}
+
+		first, err := q.FirstPerson(ctx)
+		require.NoError(t, err)
+		requirePerson(t, first, 1)
+
+		knows, err := q.FirstKnows(ctx)
+		require.NoError(t, err)
+		k, ok := knows.(map[string]any)
+		require.Truef(t, ok, "want map[string]any, got %#v", knows)
+		require.Equal(t, "KNOWS", k["label"])
+		require.Equal(t, map[string]any{"since": int64(2019)}, k["properties"])
+		require.IsType(t, int64(0), k["start_id"])
+		require.IsType(t, int64(0), k["end_id"])
+
+		origins, err := q.KnowsStarts(ctx)
+		require.NoError(t, err)
+		require.Len(t, origins, 1)
+		require.Len(t, origins[0], 1)
+		requirePerson(t, origins[0][0], 1)
 	})
 
 	// The unknown column carries no nullability, and the row field is

@@ -583,10 +583,11 @@ func unservedScalar(ct resolver.ResolvedScalar) string {
 // enough to fill the entity struct the schema declares — and a list
 // expression whose every element is served, which unservedListElement
 // decides, and a value of unknown type, read through agtype's own value
-// vocabulary as neo4j reads it through the driver's. What remains is a width no emitted helper can fill, an
-// expression the resolver typed as something other than a property, or —
-// for the edge union — a column that could only arrive in answer to a
-// statement this server will not parse.
+// vocabulary as neo4j reads it through the driver's. What remains is a
+// width no emitted helper can fill, an expression the resolver typed as
+// something other than a property, or — for the edge union — a column
+// that could only arrive in answer to a statement this server will not
+// parse.
 func unservedColumn(t resolver.ResolvedType) string {
 	switch ct := t.(type) {
 	case resolver.ResolvedProperty:
@@ -617,11 +618,22 @@ func unservedColumn(t resolver.ResolvedType) string {
 		// Served as `any`, decoded through agtypeValue — the arm a property
 		// of no declared shape and an unknown list element already take.
 		// codegen.Prepare plans the row field as ColumnAny with Go type
-		// "any", and decodeFunc answers that text with agtypeValue, so
-		// nothing is missing between the gate and the decode. The refusal
-		// that stood here dated from the scalar-only read path (#657),
-		// whose decoder had no arm for a value of unknown shape; that
-		// helper has existed since (bd gqlc-2omj, GH #2997).
+		// "any", and decodeFunc answers that text with agtypeValue. The
+		// refusal that stood here dated from the scalar-only read path
+		// (#657), whose decoder had no arm for a value of unknown shape
+		// (bd gqlc-2omj, GH #2997).
+		//
+		// "Unknown" is the resolver's word for the TYPE, not a promise
+		// that the value is a scalar: head(collect(p)), startNode(k) and
+		// coalesce(p, q) are typed unknown and hold a whole vertex or
+		// edge, which AGE sends with its ::vertex / ::edge annotation.
+		// agtypeValue reads those too, as the map[string]any the object
+		// carries, so the value reaches the caller in agtype's vocabulary
+		// rather than as the entity struct a typed column would get. The
+		// dynamic type differs by backend — neo4j hands back a
+		// dbtype.Node — which ADR 0025 records. Fixture
+		// unknown_entity_value and TestAgtypeValueReadsAnAnnotatedEntity
+		// are the witnesses.
 		return ""
 	}
 	// Reached without a ninth variant. resolver.ResolvedType's unexported
@@ -815,7 +827,9 @@ func unservedListElement(t resolver.ResolvedType) string {
 		// Decodes through agtype's own value vocabulary, the same arm a
 		// property of no declared shape and a top-level unknown column
 		// take: the element rides the "any" carrier the list wrapper is
-		// built around.
+		// built around. A whole vertex or edge typed unknown —
+		// [startNode(k)] — is read as agtypeValue reads one at the top
+		// level; see unservedColumn's unknown arm.
 		return ""
 	case resolver.ResolvedList:
 		return unservedListElement(et.Element)

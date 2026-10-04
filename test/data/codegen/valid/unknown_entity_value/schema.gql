@@ -1,0 +1,4 @@
+CREATE PROPERTY GRAPH TYPE UnknownEntityValue AS {
+    (:Person { id :: INT64 NOT NULL }),
+    (:Person) -[:KNOWS { since :: INT64 NOT NULL }]-> (:Person)
+}
