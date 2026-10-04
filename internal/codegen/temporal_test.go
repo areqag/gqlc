@@ -107,7 +107,13 @@ func TestCarrierTriggersReadUnionMembers(t *testing.T) {
 			name := fmt.Sprintf("either%d", i)
 			fields = append(fields, codegen.EntityField{PropName: name, Field: name, GoType: goType, Width: width})
 		}
-		return codegen.Prepared{Entities: []codegen.Entity{{Name: "Account", Fields: fields}}}
+		// One query returns the node whole, so Account is decoded and its
+		// unions get the helper pair that names their members.
+		whole := codegen.Query{RowFields: []codegen.Row{{Kind: codegen.ColumnNode, GoType: "Account"}}}
+		return codegen.Prepared{
+			Entities: []codegen.Entity{{Name: "Account", Fields: fields}},
+			Queries:  []codegen.Query{whole},
+		}
 	}
 
 	temporal, plain := unionOf(graph.TypeDate, graph.TypeInt64), unionOf(graph.TypeInt64, graph.TypeString)
@@ -135,6 +141,20 @@ func TestCarrierTriggersReadUnionMembers(t *testing.T) {
 			require.Equal(t, row.wantUUID, codegen.ReferencesUUIDCarrier(p, carrier))
 		})
 	}
+
+	// The same unions on an entity no query decodes. It has no decoder, so
+	// no helper pair is emitted for them and nothing names a member's
+	// carrier (bd gqlc-r2dp). The control is the decoded batch of the rows
+	// above, so what flips the answer is the decode alone.
+	t.Run("a union only an undecoded entity reaches", func(t *testing.T) {
+		for _, width := range []graph.PropertyType{temporal, unionOf(graph.TypeUUID, graph.TypeInt64)} {
+			p := batch(width)
+			require.True(t, codegen.ReferencesTemporalCarrier(p, carrier) || codegen.ReferencesUUIDCarrier(p, carrier))
+			p.Queries = nil
+			require.False(t, codegen.ReferencesTemporalCarrier(p, carrier))
+			require.False(t, codegen.ReferencesUUIDCarrier(p, carrier))
+		}
+	})
 
 	// Two unions, with the carrier in the one UnionEncodings hands over
 	// LAST. A reading that stopped after the first encoding answers false
