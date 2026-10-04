@@ -3,7 +3,7 @@
 // gives: a.ul.u is not literally a ref, so spec model-change-f45qn mints no
 // certificate and the element stays unknown. The bare a.ul.u resolves to the
 // same unknown, which this backend refuses as a column it has no Go type to
-// declare.
+// declare (measured 2026-10-04 on 9ad4813e; bd gqlc-2omj may change this).
 //
 // What would type these wrongly is reading a.ul.u as the ref a.ul: the
 // element would take the whole RECORD's shape. u is a union field and n an

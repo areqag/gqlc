@@ -89,6 +89,24 @@ func TestCertificateMintPredicate(t *testing.T) {
 			want: false,
 		},
 		{
+			name: "a null beside a ref does not mint",
+			src:  "MATCH (p:Person) RETURN [p.id, null] AS xs",
+			want: false,
+		},
+		{
+			// It touches a ref without being its value (§2 clause 1).
+			name: "a subscripted ref does not mint",
+			src:  "MATCH (p:Person) RETURN [p.tags[0]] AS xs",
+			want: false,
+		},
+		{
+			// Reading this as the ref p.ul would fill the element with the
+			// whole record's shape.
+			name: "a field of a property does not mint",
+			src:  "MATCH (p:Person) RETURN [p.ul.u] AS xs",
+			want: false,
+		},
+		{
 			// A fold is not a lookup. The refs are p.id and p.age either
 			// way, which is exactly why the certificate exists.
 			name: "arithmetic over refs does not mint",
