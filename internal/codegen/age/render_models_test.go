@@ -927,6 +927,11 @@ func TestEachListOfAnyPropertyDecodesThroughItsOwnElementDecoder(t *testing.T) {
 // nilArmBeforeDispatch read the condition alone; the NOT NULL
 // clause dropped from nullableUnionElem, and the Nullable dropped from the
 // wrapper's name, each fail the one-wrapper assertion ahead of the rows.
+// Three dead arms of the right shape fail a nullable row too, all three of
+// which these rows passed while the helper read neither operand nor
+// position (bd gqlc-x7on): the decode arm testing the outer list's raw and
+// not the element, the decode arm nested under `if len(elem) < 0`, and the
+// encode arm comparing `any(&v)` with nil.
 //
 // What the arm DOES is executed elsewhere: the encode half against a nil
 // DBTX by TestAGEBindsANullElementInAUnionListParameter, and the decode
@@ -1069,8 +1074,9 @@ func bindSites(file *ast.File) map[string]ast.Node {
 	return out
 }
 
-// nilArmBeforeDispatch reports whether a site has an if whose condition IS
-// a null test — an agtypeIsNull call or an `== nil` comparison — and whose
+// nilArmBeforeDispatch reports whether a site has a closure whose FIRST
+// statement is an if testing the closure's own parameter for null — an
+// agtypeIsNull call on it or an `== nil` comparison of it — and whose
 // block ends in `return nil, nil`, AHEAD of the first mention of a union's
 // decoder or encoder. After the dispatch the test would come too late: the
 // dispatch has already refused the null.
@@ -1078,8 +1084,11 @@ func bindSites(file *ast.File) map[string]ast.Node {
 // The block is read as well as the condition because an arm that tests
 // and then falls through reaches the dispatch with the null all the same.
 // A `continue` would not do either, though it skips the dispatch: it drops
-// the element, and the list is to hand the null back in its place. And the
-// condition is matched whole, so a negated or conjoined test is no arm.
+// the element, and the list is to hand the null back in its place. The
+// condition is matched whole, so a negated or conjoined test is no arm;
+// its operand must be the parameter, so a test of the outer list or of a
+// value that is never nil is none either; and the if must open the body,
+// so one nested under a guard that may not hold is none (bd gqlc-x7on).
 func nilArmBeforeDispatch(site ast.Node) bool {
 	armed, dispatched := false, false
 	ast.Inspect(site, func(n ast.Node) bool {
@@ -1091,24 +1100,39 @@ func nilArmBeforeDispatch(site ast.Node) bool {
 			if strings.HasPrefix(n.Name, "decodeUnion") || strings.HasPrefix(n.Name, "encodeUnion") {
 				dispatched = true
 			}
-		case *ast.IfStmt:
-			armed = isNullTest(n.Cond) && returnsNilNil(n.Body)
+		case *ast.FuncLit:
+			armed = opensWithNilArm(n)
 		}
 		return true
 	})
 	return armed
 }
 
-// isNullTest reports whether an expression is, whole, `agtypeIsNull(…)` or
-// `… == nil`.
-func isNullTest(cond ast.Expr) bool {
+// opensWithNilArm reports whether a closure of one parameter opens with
+// `if <null test of that parameter> { … return nil, nil }`.
+func opensWithNilArm(fn *ast.FuncLit) bool {
+	params := fn.Type.Params.List
+	if len(params) != 1 || len(params[0].Names) != 1 || len(fn.Body.List) == 0 {
+		return false
+	}
+	arm, ok := fn.Body.List[0].(*ast.IfStmt)
+	return ok && arm.Init == nil && isNullTestOf(arm.Cond, params[0].Names[0].Name) && returnsNilNil(arm.Body)
+}
+
+// isNullTestOf reports whether an expression is, whole, `agtypeIsNull(x)`
+// or `x == nil`, for x the named identifier.
+func isNullTestOf(cond ast.Expr, x string) bool {
+	is := func(e ast.Expr) bool {
+		id, ok := ast.Unparen(e).(*ast.Ident)
+		return ok && id.Name == x
+	}
 	switch c := ast.Unparen(cond).(type) {
 	case *ast.CallExpr:
 		id, ok := c.Fun.(*ast.Ident)
-		return ok && id.Name == "agtypeIsNull"
+		return ok && id.Name == "agtypeIsNull" && len(c.Args) == 1 && is(c.Args[0])
 	case *ast.BinaryExpr:
 		id, ok := c.Y.(*ast.Ident)
-		return ok && c.Op == token.EQL && id.Name == "nil"
+		return ok && c.Op == token.EQL && id.Name == "nil" && is(c.X)
 	}
 	return false
 }
