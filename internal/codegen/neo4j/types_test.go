@@ -487,6 +487,30 @@ func TestStorablePropertyRefusesAUnionWithAnUnstorableMember(t *testing.T) {
 		})
 	}
 
+	// A member that is itself a union, which the arm must recurse into
+	// rather than pass. graph.UnionOf splices an unqualified nested union
+	// into its parent, so only a NOT NULL one stays nested, and schema text
+	// cannot produce that: neither closed-union alternative admits an outer
+	// NOT NULL (GQL.g4:1731-1732) and resolveUnionMembers lowers every
+	// nested union nullable. The row is constructor-built for that reason
+	// and holds the recursion for StorableProperty's direct callers (bd
+	// gqlc-hpp6). It asserts only one axis: the nested union carries as
+	// `any`, which is wire-indistinct and collides with its sibling, so
+	// Property refuses the width before generation could ask this one.
+	nested := graph.UnionOf([]graph.UnionMember{
+		{Type: graph.UnionOf([]graph.UnionMember{{Type: record}, {Type: graph.TypeInt64}}), NotNull: true},
+		{Type: graph.TypeBool},
+	})
+	t.Run("refused/"+string(nested), func(t *testing.T) {
+		require.Falsef(t, neo4j.TypeMap{}.StorableProperty(nested),
+			"%s nests a union with a RECORD member, which no write could store", nested)
+
+		_, ok := neo4j.TypeMap{}.Property(nested)
+		require.Falsef(t, ok,
+			"%s carries its nested union as wire-indistinct `any`; if this ever carries, assert the "+
+				"carrier axis here as the rows above do", nested)
+	})
+
 	admitted := []graph.PropertyType{
 		graph.UnionOf([]graph.UnionMember{{Type: graph.TypeBool}, {Type: graph.TypeInt64}}),
 		graph.UnionOf([]graph.UnionMember{{Type: graph.ListOf(graph.TypeInt32, false)}, {Type: graph.TypeString}}),

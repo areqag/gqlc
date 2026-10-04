@@ -267,12 +267,12 @@ func wireFamily(goType string) string {
 // RECORD arm no write could fill.
 //
 // THE UNION-VALUED LIST rests on its own measurement rather than on the
-// record one next door. What the server refuses is the ARRAY: a stored property array must be
-// homogeneous in its storage type, and every union gqlc admits is
-// heterogeneous by construction, because codegen.UnionMemberCollision
-// already refuses at declaration any union whose members share a wire
-// family. So a LIST<UNION<…>> that reaches here spans two or more
-// families and is exactly the shape measured by
+// record one next door. What the server refuses is the ARRAY: a stored
+// property array must be homogeneous in its storage type, and every union
+// gqlc admits is heterogeneous by construction, because
+// codegen.UnionMemberCollision already refuses at declaration any union
+// whose members share a wire family. So a LIST<UNION<…>> that reaches here
+// spans two or more families and is exactly the shape measured by
 // TestNeo4jRefusesAHeterogeneousArrayStoredProperty, against Neo4j Kernel
 // 5.26.28 community, which answered:
 //
