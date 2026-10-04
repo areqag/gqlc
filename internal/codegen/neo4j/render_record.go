@@ -465,16 +465,21 @@ func writeCarrierNarrow(site decodeSite, depth int, goType string, width graph.P
 		acc, idx, elem := site.next(), site.next(), site.next()
 		fmt.Fprintf(site.b, "%s%s := make(%s, len(%s))\n", indent, acc, goType, held)
 		fmt.Fprintf(site.b, "%sfor %s, %s := range %s {\n", indent, idx, elem, held)
-		if unionElementIsNullable(goType, width) {
-			// The one element shape whose null cannot be left to the
-			// value walk: a union's decode dispatches on the wire shape,
-			// and a nil element belongs to no member. On every other
-			// element type the null is either impossible or already
-			// carried by a star this walk asserts through.
+		// The element is decoded at its BASE and its address taken after,
+		// because the star is the schema's NULL and no Bolt wire value is
+		// a pointer: `elem.(*Date)` is false for every element the driver
+		// can hand back (bd gqlc-oo5p). A union element carries no star —
+		// `any` holds its own null — so its nullability is read off the
+		// width instead; either way a nil element belongs to no carrier
+		// and is left as the zero the make already put there.
+		elemType := strings.TrimPrefix(goType, "[]")
+		base := elemBase(elemType)
+		starred := base != elemType
+		if starred || unionElementIsNullable(goType, width) {
 			fmt.Fprintf(site.b, "%s\tif %s == nil {\n%s\t\tcontinue\n%s\t}\n", indent, elem, indent, indent)
 		}
-		got := writeValueDecode(site, depth+1, strings.TrimPrefix(goType, "[]"), width.Elem(), elem, indent+"\t")
-		fmt.Fprintf(site.b, "%s\t%s[%s] = %s\n", indent, acc, idx, got)
+		got := writeValueDecode(site, depth+1, base, width.Elem(), elem, indent+"\t")
+		fmt.Fprintf(site.b, "%s\t%s[%s] = %s\n", indent, acc, idx, addrIf(starred, got))
 		fmt.Fprintf(site.b, "%s}\n", indent)
 		return acc
 	case isTemporalCarrier(goType):

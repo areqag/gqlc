@@ -413,3 +413,33 @@ func TestARecordUUIDFieldRidesTheStringWire(t *testing.T) {
 		})
 	}
 }
+
+// A record field whose LIST elements the schema lets be NULL carries as a
+// slice of pointers, and the decode walk asserts the driver element at its
+// BASE: no Bolt wire value is a pointer, so `elem.(*int32)` or
+// `elem.(*Date)` is false for every element the driver can hand back. The
+// union decode shares this walk and is held over the corpus
+// (union_list_nullable_member, union_list_temporal_member); this is the
+// record half, which no on-disk fixture can reach on neo4j for
+// TestARecordUUIDFieldRidesTheStringWire's reason (bd gqlc-oo5p).
+func TestARecordNullableListElementIsAssertedAtItsBase(t *testing.T) {
+	rec := graph.RecordOf([]graph.RecordField{
+		{Name: "days", Type: graph.ListOf(graph.TypeDate, false), NotNull: true},
+		{Name: "seqs", Type: graph.ListOf(graph.TypeInt32, false), NotNull: true},
+	})
+	use := neo4j.CarrierUseFlags{Decode: true}
+
+	for name, target := range map[string]neo4j.DriverTarget{"v5": neo4j.TargetV5, "v6": neo4j.TargetV6} {
+		t.Run(name, func(t *testing.T) {
+			_, ok := target.Types().Property(rec)
+			require.True(t, ok, "the premise: this major's table carries a record of nullable-element lists")
+
+			out := string(neo4j.RenderRecordHelpers("db", []graph.PropertyType{rec},
+				map[graph.PropertyType]neo4j.CarrierUseFlags{rec: use}, target))
+			assert.NotContains(t, out, ".(*", "an element is asserted to a pointer the driver never produces")
+			assert.Contains(t, out, ".(dbtype.Date)", "a DATE element is asserted at its driver carrier")
+			assert.Contains(t, out, ".(int64)", "an INT32 element is asserted at its widened driver carrier")
+			assert.Contains(t, out, "== nil {\n\t\t\tcontinue", "a NULL element is skipped before the assertion")
+		})
+	}
+}

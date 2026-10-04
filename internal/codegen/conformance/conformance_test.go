@@ -1405,6 +1405,12 @@ var driverSliceCarriers = map[string]bool{
 // before. dbtype.Duration flipped that way: temporal_list_param declares
 // LIST<DURATION> for its nullable list parameter, and the property side
 // of that declaration walks the list and asserts the element.
+// dbtype.LocalTime and dbtype.Time flipped the same way, from inside a
+// union member: union_list_temporal_member declares ANY<LIST<LOCAL TIME>
+// | INT64> and its ZONED TIME sibling, and the union's decode walks the
+// member list and asserts each element (bd gqlc-oo5p). dbtype.LocalDateTime
+// has no such route — LOCAL DATETIME folds to TIMESTAMP as a declared
+// property width — so only a projected list could flip it.
 //
 // dbtype.UUID is the one unwitnessed entry that IS settled, and settled
 // the other way: v6's driver can produce it, so it belongs to the
@@ -1421,15 +1427,15 @@ var driverScalarCarriers = map[string]bool{
 	"time.Time":           true,
 	"dbtype.Date":         true,
 	"dbtype.Duration":     true,
+	"dbtype.LocalTime":    true,
+	"dbtype.Time":         true,
 	"dbtype.Relationship": true,
 
 	"map[string]any":       false,
 	"dbtype.UUID":          false,
 	"dbtype.Point2D":       false,
 	"dbtype.Point3D":       false,
-	"dbtype.LocalTime":     false,
 	"dbtype.LocalDateTime": false,
-	"dbtype.Time":          false,
 	"dbtype.Node":          false,
 	"dbtype.Path":          false,
 }
