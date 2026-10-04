@@ -88,7 +88,8 @@ A third difference is closed in code for ONE of its two shapes. The compare
 named both SHAs, but pulls/files names neither and answers for whatever it
 holds for the PR when it is read. So before a status is posted the head is
 read again (current_head(), after the files); if it moved since the list,
-no status is posted. That closes a head that moves DURING the read. It does
+no status is posted. That closes a head that moves between the `pr list`
+read and that re-read, which brackets the files read. It does
 not close the other shape: GitHub recomputing a PR's diff asynchronously
 after a push, so that the list and the re-read both show the new head while
 pulls/files still answers for the old one -- the SHAs match and the old
@@ -705,32 +706,41 @@ def self_test_head_moved_during_read():
     The PR list names each head SHA, but pulls/{n}/files names none: it
     answers for whatever the head is when it is read. A push between the list
     and the read would attach a verdict from one head's files to the other
-    head. Here the head moves from 6... to 7... while the files are read, and
-    the files collide; nothing may be posted on either SHA. Not covered: a
-    pulls/files answer lagging a push that both head reads already show,
-    which is unmeasured (see the module docstring).
+    head. Here the head moves from the listed SHA to another while the files
+    are read; nothing may be posted on either SHA. Driven on BOTH posting
+    paths (bd gqlc-rquz3): with colliding files the guard stops a failure, and
+    with a free ordinal it stops a success -- a re-read made only on the
+    failure path survives the first case and is caught by the second. Not
+    covered: a pulls/files answer lagging a push that both head reads already
+    show, which is unmeasured (see the module docstring).
     """
-    name = "a head that moved between the list and the read gets no verdict"
     adr = "docs/adr"
-    listed, moved = "6" * 40, "7" * 40
-    world = {
-        "prs": [{"number": 6, "headRefOid": listed}],
-        "heads": {"6": moved},
-        "files": {"6": [{"status": "added", "filename": f"{adr}/0012-a-claim.md"}]},
-    }
-    rc, posts, out = run_against_fake_gh(
-        world, [adr], {adr: ["0012-an-ordinal-master-already-holds.md"]}
-    )
-    if rc != 0 or posts:
-        print(
-            f"self-test FAILED: {name}\n"
-            f"  wanted rc=0 and no status, got rc={rc!r}, posted {posts!r}\n"
-            "  output was:\n    " + out.replace("\n", "\n    "),
-            file=sys.stderr,
+    cases = [
+        ("a head that moved between the list and the read gets no failure", "6", "0012-a-claim.md"),
+        ("a head that moved between the list and the read gets no success", "9", "0014-a-free-ordinal.md"),
+    ]
+    failed = False
+    for name, number, claimed in cases:
+        listed, moved = number * 40, "7" * 40
+        world = {
+            "prs": [{"number": int(number), "headRefOid": listed}],
+            "heads": {number: moved},
+            "files": {number: [{"status": "added", "filename": f"{adr}/{claimed}"}]},
+        }
+        rc, posts, out = run_against_fake_gh(
+            world, [adr], {adr: ["0012-an-ordinal-master-already-holds.md"]}
         )
-        return True
-    print(f"self-test ok: {name}")
-    return False
+        if rc != 0 or posts:
+            failed = True
+            print(
+                f"self-test FAILED: {name}\n"
+                f"  wanted rc=0 and no status, got rc={rc!r}, posted {posts!r}\n"
+                "  output was:\n    " + out.replace("\n", "\n    "),
+                file=sys.stderr,
+            )
+            continue
+        print(f"self-test ok: {name}")
+    return failed
 
 
 def self_test():
