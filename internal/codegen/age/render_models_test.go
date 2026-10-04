@@ -921,7 +921,10 @@ func TestEachListOfAnyPropertyDecodesThroughItsOwnElementDecoder(t *testing.T) {
 // also where their wrappers have to carry two names.
 //
 // Mutants, each measured: the wrapper's nil arm withheld fails the
-// nullable decode row, the encoder's the nullable encode row; the NOT NULL
+// nullable decode row, the encoder's the nullable encode row, and so does
+// either arm kept with its return replaced, or the decode arm's test
+// negated (bd gqlc-5hey), all three of which these rows passed while
+// nilArmBeforeDispatch read the condition alone; the NOT NULL
 // clause dropped from nullableUnionElem, and the Nullable dropped from the
 // wrapper's name, each fail the one-wrapper assertion ahead of the rows.
 //
@@ -999,9 +1002,14 @@ func TestANullUnionElementIsPassedThroughAheadOfTheMemberDispatch(t *testing.T) 
 //   - the mark written as an assignment, so the LAST list registered
 //     decides, fails the union list read before a plain one;
 //   - the mark taken only for the FIRST list registered fails the plain
-//     list read before a union one;
+//     list read before a union one, and the list of lists, whose outer
+//     list registers first;
 //   - the mark taken for a bound union list as well fails the bind-only
 //     row: an encode-side nil arm compares with nil and calls nothing.
+//
+// The NOT NULL clause dropped from nullableUnionElem moves the caller and
+// the mark together, so it is no mutant of the mark; it fails the NOT NULL
+// row on its premise, and the test above on its one-wrapper assertion.
 func TestTheNullTestHelperIsDeclaredExactlyWhereSomethingCallsIt(t *testing.T) {
 	const helper = "agtypeIsNull"
 	pick := graph.UnionOf([]graph.UnionMember{{Type: graph.TypeString}, {Type: graph.TypeInt32}})
