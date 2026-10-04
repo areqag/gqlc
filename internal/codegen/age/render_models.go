@@ -158,6 +158,13 @@ type helpers struct {
 	// pointer for the literal null every other element decoder refuses.
 	nullableElem bool
 
+	// agtypeIsNull without agtypeNullableElem — some list's elements are
+	// closed unions the schema lets be NULL. A union carries as `any`,
+	// which holds a null as nil with no star to lift it to, so its list
+	// wrapper tests for the null itself ahead of the member dispatch
+	// rather than through the combinator (bd gqlc-3jhv).
+	nullUnionElem bool
+
 	value    bool // agtypeValue / agtypeMap — something decodes a value of no declared shape
 	prop     bool // agtypeProperty — some entity declares a non-nullable property
 	nullProp bool // agtypeNullableProperty — some entity declares a nullable property
@@ -483,8 +490,17 @@ func paramLeaf(p codegen.Param) (leaf string, leafWidth graph.PropertyType, list
 func (h *helpers) need(goType string, width graph.PropertyType) {
 	if elem, ok := strings.CutPrefix(goType, "[]"); ok {
 		h.list = true
-		if !slices.ContainsFunc(h.lists, func(p listPlan) bool { return p.goType == goType }) {
+		// Deduplicated on the wrapper's NAME and not on the Go type text,
+		// because the text does not identify the wrapper: every list of a
+		// closed union, and LIST<ANY VALUE> too, is `[]any`, and keyed on
+		// that text they shared one wrapper bound to the element decoder
+		// of whichever was registered first (bd gqlc-3s7q).
+		name := listHelperName(goType, width)
+		if !slices.ContainsFunc(h.lists, func(p listPlan) bool { return listHelperName(p.goType, p.width) == name }) {
 			h.lists = append(h.lists, listPlan{goType: goType, width: width})
+		}
+		if nullableUnionElem(goType, width) {
+			h.nullUnionElem = true
 		}
 		h.need(elem, elemWidth(width))
 		return
@@ -761,7 +777,10 @@ func (h helpers) listHelpers() []listPlan {
 		if d := cmp.Compare(listDepth(a.goType), listDepth(b.goType)); d != 0 {
 			return d
 		}
-		return cmp.Compare(a.goType, b.goType)
+		if d := cmp.Compare(a.goType, b.goType); d != 0 {
+			return d
+		}
+		return cmp.Compare(listHelperName(a.goType, a.width), listHelperName(b.goType, b.width))
 	})
 	return out
 }
@@ -786,6 +805,7 @@ func listDepth(goType string) int {
 // The element is named by exporting its Go type text, which every leaf
 // the property table produces admits because those leaves are Go
 // identifiers — except TWO, and both are named here rather than exported.
+// A third leaf is named here for a different reason, below them.
 //
 // A declared record's leaf carrier is an anonymous struct, and exporting
 // its first letter would spell `agtypeListOfStruct {`, which is not an
@@ -802,6 +822,16 @@ func listDepth(goType string) int {
 // template bug, for a LIST<RECORD> property they were entitled to
 // declare. It is named AnyRecord, which is what the width is called and
 // what tells it apart from the digest-named records above.
+//
+// A closed union's leaf is an identifier, `any`, and exporting it spells
+// a valid name. It is named from its width's digest anyway, because the
+// text does not identify the wrapper: every list of a union carries as
+// `[]any`, LIST<ANY VALUE> too, and each binds a different element
+// decoder. Named from the text, they were one wrapper bound to whichever
+// width helpers.need registered first, and every other one decoded
+// through that width's dispatcher (bd gqlc-3s7q). So a list of unions
+// reads agtypeListOfNullableUnion<digest>, after the name its element
+// decoder carries.
 //
 // KEYED ON THE TEXT rather than on the width, unlike the record arm
 // beside it. The text is what gets emitted into the wrapper's signature,
@@ -823,6 +853,13 @@ func listDepth(goType string) int {
 // `agtypeListOf*String`, which is not an identifier and gives a package
 // that does not parse — so the star mangles to `Nullable`, once per
 // level, decided by that level's own qualifier.
+//
+// A union element has no star to read, `any` holding its own null, so its
+// `Nullable` is read off the width instead (nullableUnionElem). The two
+// wrappers bind different element decoders — one passes a null through,
+// the other refuses it — so they need two names for the reason two
+// starred texts do. Only the nullable one is spellable in a schema; the
+// NOT NULL one is constructor-only, and is what the bare name is left for.
 func listHelperName(goType string, width graph.PropertyType) string {
 	name := "agtype"
 	for {
@@ -830,14 +867,20 @@ func listHelperName(goType string, width graph.PropertyType) string {
 		if !ok {
 			break
 		}
+		nullUnion := nullableUnionElem(goType, width)
 		name, goType = name+"ListOf", elem
 		width = elemWidth(width)
 		if bare, nullable := strings.CutPrefix(goType, "*"); nullable {
 			name, goType = name+"Nullable", bare
+		} else if nullUnion {
+			name += "Nullable"
 		}
 	}
 	if codegen.IsDeclaredRecord(goType, width) {
 		return name + codegen.RecordHelperSuffix(width)
+	}
+	if codegen.IsDeclaredUnion(goType, width) {
+		return name + codegen.UnionHelperSuffix(width)
 	}
 	if goType == goAnyRecord {
 		return name + "AnyRecord"
@@ -1844,10 +1887,13 @@ func agtypeNullableElem[T any](decode func([]byte) (T, error)) func([]byte) (*T,
 		return &out, nil
 	}
 }
-
+`)
+	}
+	if h.nullableElem || h.nullUnionElem {
+		b.WriteString(`
 // agtypeIsNull reports whether a raw span is agtype's null. It is a
-// named helper rather than a comparison inside the closure above so that
-// the spelling the wire uses is one thing with one name.
+// named helper rather than a comparison inside the closures that read it
+// so that the spelling the wire uses is one thing with one name.
 func agtypeIsNull(raw []byte) bool {
 	return string(bytes.TrimSpace(raw)) == "null"
 }
@@ -2021,9 +2067,39 @@ func writeListHelper(b *strings.Builder, p listPlan) {
 			shown = "*" + shown
 		}
 	}
+	// A union element is named by its width, because its text is `any`
+	// and so is every other union's and ANY VALUE's: the doc lines of two
+	// wrappers would otherwise read the same.
+	if codegen.IsDeclaredUnion(elem, elemW) {
+		shown = string(elemW)
+	}
 	fmt.Fprintf(b, "\n// %s decodes an agtype list of %s elements.\n", name, shown)
 	fmt.Fprintf(b, "func %s(raw []byte) (%s, error) {\n", name, p.goType)
+	if nullableUnionElem(p.goType, p.width) {
+		// The null is tested here and not by the union's decoder, which
+		// refuses it, because a NOT NULL union position must go on
+		// refusing it and the decoder is shared with those.
+		fmt.Fprintf(b, "\treturn agtypeList(raw, func(elem []byte) (any, error) {\n\t\tif agtypeIsNull(elem) {\n\t\t\treturn nil, nil\n\t\t}\n\t\treturn %s(elem)\n\t})\n}\n",
+			decodeFunc(elem, elemW))
+		return
+	}
 	fmt.Fprintf(b, "\treturn agtypeList(raw, %s)\n}\n", decodeFunc(elem, elemW))
+}
+
+// nullableUnionElem reports whether a list's elements are closed unions the
+// schema lets be NULL, which is every list of unions a schema can spell:
+// the closed-union alternatives take no NOT NULL. Read off the width,
+// because the element carries no star to say so — `any` holds its own null
+// and typeMap.Property deliberately does not star it (ADR 0041).
+//
+// A nil element belongs to no member, so both directions pass it through
+// as nil ahead of the member dispatch, which would refuse it (bd
+// gqlc-3jhv). neo4j's record-field walk asks the same question for the
+// same reason (unionElementIsNullable).
+func nullableUnionElem(goType string, width graph.PropertyType) bool {
+	elem, ok := strings.CutPrefix(goType, "[]")
+	return ok && width.Kind() == graph.KindList && !width.ElemNotNull() &&
+		codegen.IsDeclaredUnion(elem, width.Elem())
 }
 
 // writeEntities emits the schema's entity surface: one exported struct

@@ -644,7 +644,7 @@ func fallibleParamEncoder(f codegen.Param, access string) (string, bool) {
 	case f.Nullable:
 		return fmt.Sprintf("agtypeEncodedNullable(%s, %s)", access, paramEncoder(f.GoType, f.Width, encoder)), true
 	case list:
-		return fmt.Sprintf("agtypeEncodedList(%s, %s)", access, paramEncoder(elem, elemWidth(f.Width), encoder)), true
+		return fmt.Sprintf("agtypeEncodedList(%s, %s)", access, elemEncoder(f.GoType, f.Width, elem, encoder)), true
 	default:
 		return fmt.Sprintf("%s(%s)", encoder, access), true
 	}
@@ -750,7 +750,7 @@ func encodedText(leaf string, width graph.PropertyType) string {
 func paramEncoder(goType string, width graph.PropertyType, encoder string) string {
 	if elem, ok := strings.CutPrefix(goType, "[]"); ok {
 		return fmt.Sprintf("func(in %s) (%s, error) {\n\treturn agtypeEncodedList(in, %s)\n}",
-			goType, encodedParamType(goType, width), paramEncoder(elem, elemWidth(width), encoder))
+			goType, encodedParamType(goType, width), elemEncoder(goType, width, elem, encoder))
 	}
 	if elem, ok := strings.CutPrefix(goType, "*"); ok {
 		// agtypeEncodedNullable is the whole-value combinator, reused here
@@ -761,6 +761,22 @@ func paramEncoder(goType string, width graph.PropertyType, encoder string) strin
 			goType, encodedParamType(goType, width), paramEncoder(elem, width, encoder))
 	}
 	return encoder
+}
+
+// elemEncoder is the encoder function value for the elements of one bound
+// list: paramEncoder one level in, with a nil element passed through ahead
+// of a union's member switch. The switch refuses nil as carrying no member,
+// which is right for a NOT NULL union and wrong for a list's element, whose
+// null every spellable list of unions admits (nullableUnionElem, bd
+// gqlc-3jhv). Not folded into the union's encoder for that first reason: a
+// NOT NULL union parameter shares it and must go on refusing nil.
+func elemEncoder(listType string, width graph.PropertyType, elem, encoder string) string {
+	inner := paramEncoder(elem, elemWidth(width), encoder)
+	if !nullableUnionElem(listType, width) {
+		return inner
+	}
+	return fmt.Sprintf("func(v %s) (%s, error) {\n\tif v == nil {\n\t\treturn nil, nil\n\t}\n\treturn %s(v)\n}",
+		codegen.UnionCarrierText, codegen.UnionCarrierText, inner)
 }
 
 // encodedParamType is the agtype-side Go type one bound Go type encodes

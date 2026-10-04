@@ -98,7 +98,8 @@ func unionMemberCarrier(pt graph.PropertyType) (string, bool) {
 // A member's NOT NULL has no effect here and that is a recorded decision
 // rather than an omission (spec §4): whether nil is legal is the CALL
 // SITE's question — a nullable position nil-checks through
-// agtypeEncodedNullable before this is reached, and a non-nullable one
+// agtypeEncodedNullable before this is reached, a nullable list element
+// through elemEncoder's closure (bd gqlc-3jhv), and a non-nullable one
 // lets the refusal below report it, since no member's carrier is nil.
 func writeUnionEncoders(b *strings.Builder, plans []unionPlan) {
 	for _, p := range plans {
@@ -156,9 +157,10 @@ func writeUnionEncoders(b *strings.Builder, plans []unionPlan) {
 // A null is refused rather than answered as nil, and every site that can
 // legitimately deliver one has already dealt with it before this is
 // called: a nullable property through agtypeNullableProperty, a record
-// field through agtypeRecordField, a nullable list element through
-// agtypeNullableElem. What reaches here is a null the schema did not
-// declare, which is a decode failure naming the union.
+// field through agtypeRecordField, a nullable list element through the
+// list wrapper's own null test (writeListHelper, bd gqlc-3jhv). What
+// reaches here is a null the schema did not declare, which is a decode
+// failure naming the union.
 func writeUnionDecoders(b *strings.Builder, plans []unionPlan) {
 	for _, p := range plans {
 		if !p.decode {

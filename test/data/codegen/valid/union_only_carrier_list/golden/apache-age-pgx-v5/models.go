@@ -28,7 +28,7 @@ func decodeLedger(raw []byte) (Ledger, error) {
 		return Ledger{}, fmt.Errorf("decode Ledger: expected label %q, got %q", "Ledger", label)
 	}
 	var out Ledger
-	value0, err := agtypeNullableProperty(props, "entries", agtypeListOfAny)
+	value0, err := agtypeNullableProperty(props, "entries", agtypeListOfNullableUnion0aa394d5)
 	if err != nil {
 		return Ledger{}, fmt.Errorf("decode Ledger.Entries: %w", err)
 	}
@@ -327,9 +327,21 @@ func agtypeList[T any](raw []byte, decode func([]byte) (T, error)) ([]T, error) 
 	return out, nil
 }
 
-// agtypeListOfAny decodes an agtype list of any elements.
-func agtypeListOfAny(raw []byte) ([]any, error) {
-	return agtypeList(raw, decodeUnion0aa394d5)
+// agtypeIsNull reports whether a raw span is agtype's null. It is a
+// named helper rather than a comparison inside the closures that read it
+// so that the spelling the wire uses is one thing with one name.
+func agtypeIsNull(raw []byte) bool {
+	return string(bytes.TrimSpace(raw)) == "null"
+}
+
+// agtypeListOfNullableUnion0aa394d5 decodes an agtype list of UNION<DATE|INT64> elements.
+func agtypeListOfNullableUnion0aa394d5(raw []byte) ([]any, error) {
+	return agtypeList(raw, func(elem []byte) (any, error) {
+		if agtypeIsNull(elem) {
+			return nil, nil
+		}
+		return decodeUnion0aa394d5(elem)
+	})
 }
 
 // decodeUnion0aa394d5 dispatches an agtype value onto the member of

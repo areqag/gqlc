@@ -816,6 +816,280 @@ func TestEveryBoundUnionsEncoderIsDeclaredAndEveryDeclaredOneIsCalled(t *testing
 	}
 }
 
+// TestEachListOfAnyPropertyDecodesThroughItsOwnElementDecoder holds that a
+// list property whose element carries as `any` decodes through a wrapper
+// bound to ITS OWN element decoder (bd gqlc-3s7q).
+//
+// Every list of a closed union is `[]any`, and so is LIST<ANY VALUE>. The
+// wrappers were deduplicated and named on that text, so one entity holding
+// two of them emitted ONE agtypeListOfAny bound to whichever width
+// helpers.need met first, and every other property decoded through it: a
+// STRING|INT32 list offered to a DATE|INT64 dispatcher, or a union list
+// handed back undispatched through agtypeValue, or a LIST<ANY VALUE>
+// refusing every element outside some union's member set. It compiled, and
+// the losing union's decoder was declared with no caller.
+//
+// Two checks per row, because each misses what the other sees. The walk
+// follows each property's call site down through the wrappers it names
+// to the leaf decoder, which is what a SWAP of two wrappers fails and the
+// name sets cannot see. requireDeclaredIffCalled is what an orphaned
+// decodeUnion<h> fails. Both orders of each pair, because the first-wins
+// dedupe was order-dependent and so is any mutant of it.
+//
+// Measured on origin/master 97fa7f34 before the fix: every row reaching
+// two distinct leaves failed, and "one union read twice" passed. Two
+// mutants of the fix, each measured: the union arm deleted from
+// listHelperName fails the three rows of two unions — the ANY VALUE rows
+// still pass, because the element's Nullable spelling keeps those two
+// names apart — and the dedupe keyed back on the Go type text fails every
+// row of two distinct leaves.
+func TestEachListOfAnyPropertyDecodesThroughItsOwnElementDecoder(t *testing.T) {
+	dates := graph.UnionOf([]graph.UnionMember{{Type: graph.TypeDate}, {Type: graph.TypeInt64}})
+	tags := graph.UnionOf([]graph.UnionMember{{Type: graph.TypeString}, {Type: graph.TypeInt32}})
+	listOf := func(elem graph.PropertyType) graph.PropertyType { return graph.ListOf(elem, false) }
+	bag := listOf(graph.TypeAnyPropertyValue)
+
+	for _, row := range []struct {
+		name     string
+		reads    []graph.PropertyType
+		decoders []graph.PropertyType
+	}{
+		{name: "two unions", reads: []graph.PropertyType{listOf(dates), listOf(tags)}, decoders: []graph.PropertyType{dates, tags}},
+		{name: "two unions, the other order", reads: []graph.PropertyType{listOf(tags), listOf(dates)}, decoders: []graph.PropertyType{dates, tags}},
+		{name: "ANY VALUE then a union", reads: []graph.PropertyType{bag, listOf(dates)}, decoders: []graph.PropertyType{dates}},
+		{name: "a union then ANY VALUE", reads: []graph.PropertyType{listOf(dates), bag}, decoders: []graph.PropertyType{dates}},
+		{name: "one union read twice", reads: []graph.PropertyType{listOf(dates), listOf(dates)}, decoders: []graph.PropertyType{dates}},
+		{
+			name:     "two unions two lists deep",
+			reads:    []graph.PropertyType{listOf(listOf(dates)), listOf(listOf(tags))},
+			decoders: []graph.PropertyType{dates, tags},
+		},
+	} {
+		t.Run(row.name, func(t *testing.T) {
+			files := renderBoundBatch(t, row.reads, nil)
+			requireDeclaredIffCalled(t, files, nil, row.decoders)
+
+			file, err := parser.ParseFile(token.NewFileSet(), "models.go", files[0], parser.SkipObjectResolution)
+			require.NoError(t, err, "the emitted models.go does not parse:\n%s", files[0])
+			funcs := map[string]*ast.FuncDecl{}
+			for _, d := range file.Decls {
+				if fn, ok := d.(*ast.FuncDecl); ok && fn.Recv == nil {
+					funcs[fn.Name.Name] = fn
+				}
+			}
+			bound := propertyDecoders(t, funcs["decodeE"])
+
+			for i, width := range row.reads {
+				prop := "p" + strconv.Itoa(i)
+				name, ok := bound[prop]
+				require.True(t, ok, "decodeE reads no property %q", prop)
+				for width.Kind() == graph.KindList {
+					fn, ok := funcs[name]
+					require.True(t, ok, "property %q decodes through %s, which models.go does not declare", prop, name)
+					name = elementDecoder(t, fn, width.Elem())
+					width = width.Elem()
+				}
+				want := "agtypeValue"
+				if width.Kind() == graph.KindUnion {
+					want = "decode" + codegen.UnionHelperSuffix(width)
+				}
+				require.Equal(t, want, name,
+					"property %q is a list of %s and its wrappers bind %s at the leaf: it decodes through another "+
+						"property's element decoder", prop, width, name)
+			}
+		})
+	}
+}
+
+// TestANullUnionElementIsPassedThroughAheadOfTheMemberDispatch holds that
+// a list whose elements are NULLABLE closed unions passes a null element
+// through as nil in both directions, and that a list of NOT NULL ones does
+// not (bd gqlc-3jhv).
+//
+// Every list of unions a schema can spell has nullable elements, since the
+// closed-union alternatives take no NOT NULL. The union's own decoder and
+// encoder refuse a null — rightly, at a NOT NULL position — and the list
+// handed every element straight to them, so a legal [1, null] could be
+// neither bound ("no member carries <nil>") nor read back ("\"null\" is no
+// member's wire shape").
+//
+// The NOT NULL twin is constructor-only, and it is here because it is the
+// half that says the nil arm is conditional rather than everywhere: a nil
+// test put into the union's own decoder or encoder passes the nullable rows
+// and fails these. The two share Go type text and a union, so this batch is
+// also where their wrappers have to carry two names.
+//
+// Mutants, each measured: the wrapper's nil arm withheld fails the
+// nullable decode row, the encoder's the nullable encode row; the NOT NULL
+// clause dropped from nullableUnionElem, and the Nullable dropped from the
+// wrapper's name, each fail the one-wrapper assertion ahead of the rows.
+//
+// What the arm DOES is executed elsewhere: the encode half against a nil
+// DBTX by TestAGEBindsANullElementInAUnionListParameter, and the decode
+// half only against a live AGE by TestAGERoundTripsANullElementInAUnionList,
+// since nothing short of a server reaches an emitted list wrapper.
+func TestANullUnionElementIsPassedThroughAheadOfTheMemberDispatch(t *testing.T) {
+	pick := graph.UnionOf([]graph.UnionMember{{Type: graph.TypeString}, {Type: graph.TypeInt32}})
+	nullable, notNull := graph.ListOf(pick, false), graph.ListOf(pick, true)
+
+	files := renderBoundBatch(t, []graph.PropertyType{nullable, notNull}, []boundWidth{{width: nullable}, {width: notNull}})
+	requireDeclaredIffCalled(t, files, []graph.PropertyType{pick}, []graph.PropertyType{pick})
+
+	models, err := parser.ParseFile(token.NewFileSet(), "models.go", files[0], parser.SkipObjectResolution)
+	require.NoError(t, err, "the emitted models.go does not parse:\n%s", files[0])
+	funcs := map[string]*ast.FuncDecl{}
+	for _, d := range models.Decls {
+		if fn, ok := d.(*ast.FuncDecl); ok && fn.Recv == nil {
+			funcs[fn.Name.Name] = fn
+		}
+	}
+	bound := propertyDecoders(t, funcs["decodeE"])
+	require.NotEqual(t, bound["p0"], bound["p1"],
+		"a list of nullable unions and a list of NOT NULL ones decode through one wrapper, so one of them "+
+			"takes the other's answer to a null element")
+
+	queries, err := parser.ParseFile(token.NewFileSet(), "queries.go", files[1], parser.SkipObjectResolution)
+	require.NoError(t, err, "the emitted query file does not parse:\n%s", files[1])
+	binds := bindSites(queries)
+
+	for _, row := range []struct {
+		name    string
+		decoder *ast.FuncDecl
+		bind    ast.Node
+		nilArm  bool
+	}{
+		{name: "nullable elements, decode", decoder: funcs[bound["p0"]], nilArm: true},
+		{name: "NOT NULL elements, decode", decoder: funcs[bound["p1"]], nilArm: false},
+		{name: "nullable elements, encode", bind: binds["P0"], nilArm: true},
+		{name: "NOT NULL elements, encode", bind: binds["P1"], nilArm: false},
+	} {
+		t.Run(row.name, func(t *testing.T) {
+			site := row.bind
+			if row.decoder != nil {
+				site = row.decoder.Body
+			}
+			require.NotNil(t, site, "the batch has no such site")
+			require.Equal(t, row.nilArm, nilArmBeforeDispatch(site),
+				"the element's null test ahead of the union's member dispatch is %s, and wanted %s",
+				presence(nilArmBeforeDispatch(site)), presence(row.nilArm))
+		})
+	}
+}
+
+// bindSites answers each `paramN, err := …arg.PN…` statement of an emitted
+// query file, by parameter field.
+func bindSites(file *ast.File) map[string]ast.Node {
+	out := map[string]ast.Node{}
+	ast.Inspect(file, func(n ast.Node) bool {
+		bind, ok := n.(*ast.AssignStmt)
+		if !ok || len(bind.Rhs) != 1 {
+			return true
+		}
+		ast.Inspect(bind.Rhs[0], func(m ast.Node) bool {
+			if sel, ok := m.(*ast.SelectorExpr); ok {
+				if x, ok := sel.X.(*ast.Ident); ok && x.Name == codegen.ParamArg {
+					out[sel.Sel.Name] = bind
+				}
+			}
+			return true
+		})
+		return true
+	})
+	return out
+}
+
+// nilArmBeforeDispatch reports whether a site tests for a null — an
+// agtypeIsNull call or an `== nil` comparison — inside an if whose block
+// returns, AHEAD of the first mention of a union's decoder or encoder.
+// After the dispatch the test would come too late: the dispatch has
+// already refused the null.
+func nilArmBeforeDispatch(site ast.Node) bool {
+	armed, dispatched := false, false
+	ast.Inspect(site, func(n ast.Node) bool {
+		if dispatched {
+			return false
+		}
+		switch n := n.(type) {
+		case *ast.Ident:
+			if strings.HasPrefix(n.Name, "decodeUnion") || strings.HasPrefix(n.Name, "encodeUnion") {
+				dispatched = true
+			}
+		case *ast.IfStmt:
+			ast.Inspect(n.Cond, func(c ast.Node) bool {
+				switch c := c.(type) {
+				case *ast.CallExpr:
+					if id, ok := c.Fun.(*ast.Ident); ok && id.Name == "agtypeIsNull" {
+						armed = true
+					}
+				case *ast.BinaryExpr:
+					if id, ok := c.Y.(*ast.Ident); ok && c.Op == token.EQL && id.Name == "nil" {
+						armed = true
+					}
+				}
+				return true
+			})
+		}
+		return true
+	})
+	return armed
+}
+
+func presence(b bool) string {
+	if b {
+		return "present"
+	}
+	return "absent"
+}
+
+// propertyDecoders reads an entity decoder's property reads — both
+// nullabilities' — and answers the decoder each names, by property key.
+func propertyDecoders(t *testing.T, fn *ast.FuncDecl) map[string]string {
+	t.Helper()
+	require.NotNil(t, fn, "models.go declares no entity decoder")
+
+	out := map[string]string{}
+	ast.Inspect(fn.Body, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpr)
+		if !ok || len(call.Args) != 3 {
+			return true
+		}
+		if callee, ok := call.Fun.(*ast.Ident); !ok || callee.Name != "agtypeProperty" && callee.Name != "agtypeNullableProperty" {
+			return true
+		}
+		key, keyOK := call.Args[1].(*ast.BasicLit)
+		decoder, decOK := call.Args[2].(*ast.Ident)
+		require.True(t, keyOK && decOK, "a property read is not (props, \"key\", decoder)")
+		unquoted, err := strconv.Unquote(key.Value)
+		require.NoError(t, err)
+		out[unquoted] = decoder.Name
+		return true
+	})
+	return out
+}
+
+// elementDecoder answers the one element decoder a list wrapper's body
+// names: the next wrapper in when elem is itself a list, the union's
+// dispatcher or agtypeValue at the leaf. Exactly one, so a wrapper naming
+// two candidates fails here rather than passing on whichever came first.
+func elementDecoder(t *testing.T, wrapper *ast.FuncDecl, elem graph.PropertyType) string {
+	t.Helper()
+
+	var named []string
+	ast.Inspect(wrapper.Body, func(n ast.Node) bool {
+		id, ok := n.(*ast.Ident)
+		if !ok {
+			return true
+		}
+		if elem.Kind() == graph.KindList && strings.HasPrefix(id.Name, "agtypeListOf") ||
+			elem.Kind() != graph.KindList && (id.Name == "agtypeValue" || strings.HasPrefix(id.Name, "decodeUnion")) {
+			named = append(named, id.Name)
+		}
+		return true
+	})
+	require.Len(t, named, 1, "%s names %v as its element decoder, and wants exactly one", wrapper.Name.Name, named)
+	return named[0]
+}
+
 // requireEachBindSiteNamesItsOwnEncoder reads the query file's bind
 // statements, `paramN, err := …arg.PN…`, and requires the one encoder each
 // names to be the one derived from THAT parameter's width. The name sets
