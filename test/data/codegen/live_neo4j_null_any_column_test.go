@@ -13,6 +13,9 @@
 // One driver major: the null gate is written by one codegen path for v5 and
 // v6, and the subject is that path, not the driver.
 //
+// The second row is bd gqlc-gem1p's: RETURN null AS n, a column that holds
+// nothing but null and was planned non-nullable the same way.
+//
 // The name is spelled into the justfile recipe and internal/liverecipes, which
 // TestEveryLiveTestIsRunByARecipeThatNamesIt holds.
 
@@ -28,11 +31,12 @@ import (
 	"github.com/stretchr/testify/require"
 
 	unknownelemv5 "github.com/areqag/gqlc/test/data/codegen/valid/list_expression_unknown_element/golden/neo4j-go-v5"
+	scalarnullv5 "github.com/areqag/gqlc/test/data/codegen/valid/scalar_null/golden/neo4j-go-v5"
 )
 
-// TestNeo4jPassesANullUnknownColumnAsNil reads a null through an
-// unknown-typed column from a live neo4j server.
-func TestNeo4jPassesANullUnknownColumnAsNil(t *testing.T) {
+// TestNeo4jPassesANullAnyColumnAsNil reads a null through an
+// unknown-typed column and a literal-null column from a live neo4j server.
+func TestNeo4jPassesANullAnyColumnAsNil(t *testing.T) {
 	if os.Getenv("GQLC_SKIP_LIVE") != "" {
 		t.Skip("GQLC_SKIP_LIVE set; skipping live backend containers")
 	}
@@ -51,14 +55,24 @@ func TestNeo4jPassesANullUnknownColumnAsNil(t *testing.T) {
 	})
 	require.NoError(t, driver.VerifyConnectivity(ctx), "verify connectivity")
 
-	require.NoError(t, writeProperty(ctx, t, driver,
-		"CREATE (:Account {id: 1, dates: [date('2024-01-02')]}), (:Account {id: 2}), (:Account {id: 3, dates: []})"),
-		"seed the probe nodes")
+	t.Run("an index past what the graph holds reads back as nil", func(t *testing.T) {
+		require.NoError(t, writeProperty(ctx, t, driver,
+			"CREATE (:Account {id: 1, dates: [date('2024-01-02')]}), (:Account {id: 2}), (:Account {id: 3, dates: []})"),
+			"seed the probe nodes")
 
-	got, err := unknownelemv5.New(driver).AccountBareUnknown(ctx)
-	require.NoError(t, err, "a null in an unknown column is a value the graph holds, not a broken NOT NULL")
-	require.Len(t, got, 3)
-	require.NotNil(t, got[0], "id 1 holds a date at index 0")
-	require.Nil(t, got[1], "id 2 has no dates property")
-	require.Nil(t, got[2], "id 3 has an empty dates list, so index 0 is out of range")
+		got, err := unknownelemv5.New(driver).AccountBareUnknown(ctx)
+		require.NoError(t, err, "a null in an unknown column is a value the graph holds, not a broken NOT NULL")
+		require.Len(t, got, 3)
+		require.NotNil(t, got[0], "id 1 holds a date at index 0")
+		require.Nil(t, got[1], "id 2 has no dates property")
+		require.Nil(t, got[2], "id 3 has an empty dates list, so index 0 is out of range")
+	})
+
+	// The same planning arm's other untyped column (bd gqlc-gem1p): a literal
+	// null can only ever arrive null, so a null gate on it fails every call.
+	t.Run("a literal null column reads back as nil", func(t *testing.T) {
+		got, err := scalarnullv5.New(driver).OneNull(ctx)
+		require.NoError(t, err, "RETURN null AS n holds nothing but null")
+		require.Nil(t, got)
+	})
 }
