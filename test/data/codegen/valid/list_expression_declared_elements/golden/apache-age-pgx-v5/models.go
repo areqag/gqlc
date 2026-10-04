@@ -30,60 +30,6 @@ type Account struct {
 	}
 }
 
-// decodeAccount decodes an agtype vertex into a Account struct, enforcing
-// the label and the per-property nullability the schema declares.
-func decodeAccount(raw []byte) (Account, error) {
-	label, props, err := agtypeEntity(raw, "::vertex")
-	if err != nil {
-		return Account{}, fmt.Errorf("decode Account: %w", err)
-	}
-	if label != "Account" {
-		return Account{}, fmt.Errorf("decode Account: expected label %q, got %q", "Account", label)
-	}
-	var out Account
-	value0, err := agtypeNullableProperty(props, "dates", agtypeListOfNullableUnion0aa394d5)
-	if err != nil {
-		return Account{}, fmt.Errorf("decode Account.Dates: %w", err)
-	}
-	out.Dates = value0
-	value1, err := agtypeNullableProperty(props, "either", decodeUnion0aa394d5)
-	if err != nil {
-		return Account{}, fmt.Errorf("decode Account.Either: %w", err)
-	}
-	out.Either = value1
-	value2, err := agtypeNullableProperty(props, "home", decodeRecord4329c440)
-	if err != nil {
-		return Account{}, fmt.Errorf("decode Account.Home: %w", err)
-	}
-	out.Home = value2
-	value3, err := agtypeProperty(props, "id", agtypeInt64)
-	if err != nil {
-		return Account{}, fmt.Errorf("decode Account.Id: %w", err)
-	}
-	out.Id = value3
-	value4, err := agtypeNullableProperty(props, "moves", agtypeListOfNullableRecord80303c46)
-	if err != nil {
-		return Account{}, fmt.Errorf("decode Account.Moves: %w", err)
-	}
-	out.Moves = value4
-	value5, err := agtypeNullableProperty(props, "n32", agtypeIntAs[int32])
-	if err != nil {
-		return Account{}, fmt.Errorf("decode Account.N32: %w", err)
-	}
-	out.N32 = value5
-	value6, err := agtypeNullableProperty(props, "narrow", decodeUnion2f53465c)
-	if err != nil {
-		return Account{}, fmt.Errorf("decode Account.Narrow: %w", err)
-	}
-	out.Narrow = value6
-	value7, err := agtypeNullableProperty(props, "nest", agtypeListOfNullableListOfNullableRecord80303c46)
-	if err != nil {
-		return Account{}, fmt.Errorf("decode Account.Nest: %w", err)
-	}
-	out.Nest = value7
-	return out, nil
-}
-
 // record4329c440 is the carrier for RECORD<note STRING,zip_code INT32 NOT NULL>.
 type record4329c440 = struct {
 	Note    *string
@@ -343,39 +289,6 @@ func agtypeObject(raw []byte) (map[string][]byte, error) {
 		out[key] = bytes.TrimSpace(member[at+1:])
 	}
 	return out, nil
-}
-
-// agtypeEntity splits an agtype vertex or edge into the label it carries
-// and the undecoded text of each of its properties. A vertex and an edge
-// are the same object but for the annotation, so requiring the one the
-// caller named is what stands between an edge's decoder and a vertex
-// whose label happens to match it.
-func agtypeEntity(raw []byte, annotation string) (string, map[string][]byte, error) {
-	body, ok := bytes.CutSuffix(bytes.TrimSpace(raw), []byte(annotation))
-	if !ok {
-		return "", nil, fmt.Errorf("gqlc: %q does not carry the %s annotation", raw, annotation)
-	}
-	fields, err := agtypeObject(body)
-	if err != nil {
-		return "", nil, err
-	}
-	rawLabel, ok := fields["label"]
-	if !ok {
-		return "", nil, fmt.Errorf("gqlc: %q carries no label", raw)
-	}
-	label, err := agtypeString(rawLabel)
-	if err != nil {
-		return "", nil, err
-	}
-	rawProps, ok := fields["properties"]
-	if !ok {
-		return "", nil, fmt.Errorf("gqlc: %q carries no properties", raw)
-	}
-	props, err := agtypeObject(rawProps)
-	if err != nil {
-		return "", nil, err
-	}
-	return label, props, nil
 }
 
 // agtypeList decodes an agtype list, reading each element through the
@@ -647,32 +560,4 @@ func encodeUnion2f53465c(v any) (any, error) {
 		return t, nil
 	}
 	return nil, fmt.Errorf("encode UNION<INT32|STRING>: no member carries %T", v)
-}
-
-// agtypeProperty reads one property the schema declares NOT NULL out of a
-// split entity. AGE drops a property whose value is null, so an absent
-// key is how a null arrives, and taking the Go zero for one would report
-// absence as a value the graph holds.
-func agtypeProperty[T any](props map[string][]byte, key string, decode func([]byte) (T, error)) (T, error) {
-	raw, ok := props[key]
-	if !ok {
-		var zero T
-		return zero, fmt.Errorf("gqlc: property %q is absent", key)
-	}
-	return decode(raw)
-}
-
-// agtypeNullableProperty reads one nullable property out of a split
-// entity, where the absence agtypeProperty refuses is the schema's null
-// and reaches the caller as the nil pointer.
-func agtypeNullableProperty[T any](props map[string][]byte, key string, decode func([]byte) (T, error)) (*T, error) {
-	raw, ok := props[key]
-	if !ok {
-		return nil, nil
-	}
-	out, err := decode(raw)
-	if err != nil {
-		return nil, err
-	}
-	return &out, nil
 }
