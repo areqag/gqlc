@@ -210,18 +210,28 @@ var invalidFixtures = map[string]error{
 	"parameter_across_with_alias_shadow_reversed.cypher": ErrUnknownProperty,
 	"list_of_nodes_projection.cypher":                    ErrOutOfR0Scope,
 	"list_of_edges_projection.cypher":                    ErrOutOfR0Scope,
-	"ambiguous_edge_orientation.cypher":                  ErrAmbiguousEdgeOrientation,
-	"ambiguous_edge_orientation_after_inference.cypher":  ErrAmbiguousEdgeOrientation,
-	"path_binding.cypher":                                ErrOutOfR0Scope,
-	"unwind_binding.cypher":                              ErrOutOfR0Scope,
-	"unknown_edge_undirected.cypher":                     ErrUnknownEdge,
-	"unknown_edge_multi_type_all_miss.cypher":            ErrUnknownEdge,
-	"unknown_property_union_missing.cypher":              ErrUnknownProperty,
-	"unknown_property_union_type_differs.cypher":         ErrUnknownProperty,
-	"unknown_property_union_nullability_differs.cypher":  ErrUnknownProperty,
-	"unknown_property_union_sibling_branch.cypher":       ErrUnknownProperty,
-	"untyped_edge.cypher":                                ErrOutOfR0Scope,
-	"var_length_edge_property_projection.cypher":         ErrOutOfR0Scope,
+	// A rich expression whose value is a whole entity rather than a list of
+	// them (bd gqlc-ruql). These panicked the resolver before: resolveType
+	// treated a bare TypeNode/TypeEdge as reachable only through a
+	// RefProjection, which never calls it.
+	"case_over_nodes_projection.cypher":                 ErrOutOfR0Scope,
+	"case_over_edges_projection.cypher":                 ErrOutOfR0Scope,
+	"case_over_mixed_label_nodes_projection.cypher":     ErrOutOfR0Scope,
+	"parenthesized_node_projection.cypher":              ErrOutOfR0Scope,
+	"list_index_node_projection.cypher":                 ErrOutOfR0Scope,
+	"case_over_nodes_carried_through_with.cypher":       ErrOutOfR0Scope,
+	"ambiguous_edge_orientation.cypher":                 ErrAmbiguousEdgeOrientation,
+	"ambiguous_edge_orientation_after_inference.cypher": ErrAmbiguousEdgeOrientation,
+	"path_binding.cypher":                               ErrOutOfR0Scope,
+	"unwind_binding.cypher":                             ErrOutOfR0Scope,
+	"unknown_edge_undirected.cypher":                    ErrUnknownEdge,
+	"unknown_edge_multi_type_all_miss.cypher":           ErrUnknownEdge,
+	"unknown_property_union_missing.cypher":             ErrUnknownProperty,
+	"unknown_property_union_type_differs.cypher":        ErrUnknownProperty,
+	"unknown_property_union_nullability_differs.cypher": ErrUnknownProperty,
+	"unknown_property_union_sibling_branch.cypher":      ErrUnknownProperty,
+	"untyped_edge.cypher":                               ErrOutOfR0Scope,
+	"var_length_edge_property_projection.cypher":        ErrOutOfR0Scope,
 	// R5 additions:
 	"union_column_count_mismatch.cypher":       ErrUnionColumnMismatch,
 	"union_column_name_mismatch.cypher":        ErrUnionColumnMismatch,
@@ -729,6 +739,16 @@ var invalidFixtures = map[string]error{
 // alone cannot distinguish which branch of a validator fired. Only entries
 // where arm discrimination matters are listed; absent entries skip the check.
 var invalidFixtureContains = map[string]string{
+	// resolveType's bare-entity arms (bd gqlc-ruql). The edges fixture is what
+	// separates the two arms; the rest pin the node arm through each spelling
+	// that reaches it.
+	"case_over_nodes_projection.cypher":             "node-valued expression",
+	"case_over_edges_projection.cypher":             "edge-valued expression",
+	"case_over_mixed_label_nodes_projection.cypher": "node-valued expression",
+	"parenthesized_node_projection.cypher":          "node-valued expression",
+	"list_index_node_projection.cypher":             "node-valued expression",
+	"case_over_nodes_carried_through_with.cypher":   "node-valued expression",
+
 	// Effect validators: alias arm vs edge arm vs scope-miss arm all return
 	// ErrInvalidEffectTarget, so errors.Is does not distinguish them.
 	"set_property_on_projection_alias.cypher":    "projection alias",

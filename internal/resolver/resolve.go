@@ -2025,9 +2025,13 @@ func formatNodeTypeKeys(nts []schema.NodeType) string {
 // the default takes an in-module code change and not a query. Routing it to
 // ErrOutOfR0Scope instead would put a programming mistake into the channel the
 // resolver's callers render to the user as a diagnostic about their Cypher,
-// where it would read as "your query is unsupported". The three arms below it
-// (TypeNode, TypeEdge, TypePath) already take that reading. Pinned by
-// TestResolveTypeDefaultPanicsOnAForeignType.
+// where it would read as "your query is unsupported". The TypePath arm below
+// takes that reading too. Pinned by TestResolveTypeDefaultPanicsOnAForeignType.
+//
+// TypeNode and TypeEdge are not that case: a RefProjection never reaches this
+// mapper, but a rich expression whose arms are all one entity kind does —
+// `CASE WHEN … THEN a ELSE b END`, `(a)`, `[a][0]` — so they refuse like the
+// list-of-entities arm instead of panicking (bd gqlc-ruql).
 func resolveType(t query.Type) (ResolvedType, error) {
 	if k, ok := scalarKindOfType(t); ok {
 		return ResolvedScalar{Kind: k}, nil
@@ -2048,9 +2052,9 @@ func resolveType(t query.Type) (ResolvedType, error) {
 	case query.TypeUnknown:
 		return ResolvedUnknown{}, nil
 	case query.TypeNode:
-		panic("resolver bug: resolveType reached bare TypeNode (RefProjection bypasses this mapper)")
+		return nil, fmt.Errorf("%w: node-valued expression", ErrOutOfR0Scope)
 	case query.TypeEdge:
-		panic("resolver bug: resolveType reached bare TypeEdge (RefProjection bypasses this mapper)")
+		return nil, fmt.Errorf("%w: edge-valued expression", ErrOutOfR0Scope)
 	case query.TypePath:
 		panic("resolver bug: resolveType reached TypePath (R5 does not admit path bindings)")
 	default:
