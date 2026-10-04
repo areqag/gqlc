@@ -4,6 +4,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -976,6 +977,68 @@ func TestANullUnionElementIsPassedThroughAheadOfTheMemberDispatch(t *testing.T) 
 	}
 }
 
+// TestTheNullTestHelperIsDeclaredExactlyWhereSomethingCallsIt holds the
+// nullUnionElem mark at unit level: agtypeIsNull declared means
+// agtypeIsNull called, and the reverse, batch by batch (bd gqlc-5hey).
+//
+// It has two callers behind two marks: agtypeNullableElem, behind
+// nullableElem, and the wrapper of a list of nullable unions, behind
+// nullUnionElem. Unset, this mark failed only TestGoldenBuild
+// (`undefined: agtypeIsNull`); set for every list, only the unused lint
+// over the goldens. The rows here are about the second mark, and the
+// nullable-integer row is there to say the first still declares it on
+// its own.
+//
+// What each row holds, each measured as a mutant of the mark:
+//
+//   - the mark deleted fails every row reading a list of nullable unions;
+//   - the mark set for every list fails the NOT NULL union list, the
+//     LIST<ANY VALUE> and the NOT NULL integer list;
+//   - the mark keyed on the element's Go text `any` and not on the width
+//     fails the NOT NULL union list and the LIST<ANY VALUE>, both `[]any`;
+//   - the mark written as an assignment, so the LAST list registered
+//     decides, fails the union list read before a plain one;
+//   - the mark taken only for the FIRST list registered fails the plain
+//     list read before a union one;
+//   - the mark taken for a bound union list as well fails the bind-only
+//     row: an encode-side nil arm compares with nil and calls nothing.
+func TestTheNullTestHelperIsDeclaredExactlyWhereSomethingCallsIt(t *testing.T) {
+	const helper = "agtypeIsNull"
+	pick := graph.UnionOf([]graph.UnionMember{{Type: graph.TypeString}, {Type: graph.TypeInt32}})
+	unions, notNullUnions := graph.ListOf(pick, false), graph.ListOf(pick, true)
+	ints := graph.ListOf(graph.TypeInt32, true)
+	holder := graph.RecordOf([]graph.RecordField{{Name: "tags", Type: unions, NotNull: true}})
+
+	for _, row := range []struct {
+		name  string
+		reads []graph.PropertyType
+		binds []boundWidth
+		calls bool
+	}{
+		{name: "a list of nullable unions", reads: []graph.PropertyType{unions}, calls: true},
+		{name: "a list of NOT NULL unions", reads: []graph.PropertyType{notNullUnions}},
+		{name: "a list of ANY VALUE", reads: []graph.PropertyType{graph.TypeList}},
+		{name: "a list of NOT NULL integers", reads: []graph.PropertyType{ints}},
+		{name: "a list of nullable integers", reads: []graph.PropertyType{graph.ListOf(graph.TypeInt32, false)}, calls: true},
+		{name: "a bare union", reads: []graph.PropertyType{pick}},
+		{name: "a union list then a plain list", reads: []graph.PropertyType{unions, ints}, calls: true},
+		{name: "a plain list then a union list", reads: []graph.PropertyType{ints, unions}, calls: true},
+		{name: "a list of lists of nullable unions", reads: []graph.PropertyType{graph.ListOf(unions, true)}, calls: true},
+		{name: "a list of nullable unions as a record field", reads: []graph.PropertyType{holder}, calls: true},
+		{name: "a list of nullable unions bound only", binds: []boundWidth{{width: unions}}},
+	} {
+		t.Run(row.name, func(t *testing.T) {
+			declared, called := helpersDeclaredAndCalledUnder(t, helper, renderBoundBatch(t, row.reads, row.binds))
+			require.Equal(t, row.calls, slices.Contains(called, helper),
+				"the row's own premise is off: the batch was expected to call %s %t", helper, row.calls)
+			require.ElementsMatch(t, called, declared,
+				"the batch calls %v and models.go declares %v. Declared with no caller compiles and only the "+
+					"unused lint over the goldens would record it; called with no declaration does not compile",
+				called, declared)
+		})
+	}
+}
+
 // bindSites answers each `paramN, err := …arg.PN…` statement of an emitted
 // query file, by parameter field.
 func bindSites(file *ast.File) map[string]ast.Node {
@@ -998,15 +1061,21 @@ func bindSites(file *ast.File) map[string]ast.Node {
 	return out
 }
 
-// nilArmBeforeDispatch reports whether a site tests for a null — an
-// agtypeIsNull call or an `== nil` comparison — inside an if whose block
-// returns, AHEAD of the first mention of a union's decoder or encoder.
-// After the dispatch the test would come too late: the dispatch has
-// already refused the null.
+// nilArmBeforeDispatch reports whether a site has an if whose condition IS
+// a null test — an agtypeIsNull call or an `== nil` comparison — and whose
+// block ends in `return nil, nil`, AHEAD of the first mention of a union's
+// decoder or encoder. After the dispatch the test would come too late: the
+// dispatch has already refused the null.
+//
+// The block is read as well as the condition because an arm that tests
+// and then falls through reaches the dispatch with the null all the same.
+// A `continue` would not do either, though it skips the dispatch: it drops
+// the element, and the list is to hand the null back in its place. And the
+// condition is matched whole, so a negated or conjoined test is no arm.
 func nilArmBeforeDispatch(site ast.Node) bool {
 	armed, dispatched := false, false
 	ast.Inspect(site, func(n ast.Node) bool {
-		if dispatched {
+		if dispatched || armed {
 			return false
 		}
 		switch n := n.(type) {
@@ -1015,23 +1084,43 @@ func nilArmBeforeDispatch(site ast.Node) bool {
 				dispatched = true
 			}
 		case *ast.IfStmt:
-			ast.Inspect(n.Cond, func(c ast.Node) bool {
-				switch c := c.(type) {
-				case *ast.CallExpr:
-					if id, ok := c.Fun.(*ast.Ident); ok && id.Name == "agtypeIsNull" {
-						armed = true
-					}
-				case *ast.BinaryExpr:
-					if id, ok := c.Y.(*ast.Ident); ok && c.Op == token.EQL && id.Name == "nil" {
-						armed = true
-					}
-				}
-				return true
-			})
+			armed = isNullTest(n.Cond) && returnsNilNil(n.Body)
 		}
 		return true
 	})
 	return armed
+}
+
+// isNullTest reports whether an expression is, whole, `agtypeIsNull(…)` or
+// `… == nil`.
+func isNullTest(cond ast.Expr) bool {
+	switch c := ast.Unparen(cond).(type) {
+	case *ast.CallExpr:
+		id, ok := c.Fun.(*ast.Ident)
+		return ok && id.Name == "agtypeIsNull"
+	case *ast.BinaryExpr:
+		id, ok := c.Y.(*ast.Ident)
+		return ok && c.Op == token.EQL && id.Name == "nil"
+	}
+	return false
+}
+
+// returnsNilNil reports whether a block's last statement is a return of
+// nothing but nils.
+func returnsNilNil(body *ast.BlockStmt) bool {
+	if len(body.List) == 0 {
+		return false
+	}
+	ret, ok := body.List[len(body.List)-1].(*ast.ReturnStmt)
+	if !ok || len(ret.Results) == 0 {
+		return false
+	}
+	for _, r := range ret.Results {
+		if id, ok := r.(*ast.Ident); !ok || id.Name != "nil" {
+			return false
+		}
+	}
+	return true
 }
 
 func presence(b bool) string {
