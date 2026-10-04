@@ -2797,8 +2797,9 @@ gates:
     # All three lists must move together; the checker names them when it refuses.
     run tidy           python3 .github/scripts/check-doc-ordinals.py docs/adr
     # The moved-base half's decision core (bd gqlc-4plwf). Its own rows, not a
-    # scan of the tree — the network path cannot run here, and it is the LOGIC
-    # that would otherwise be exercised by nothing until a real collision. This
+    # scan of the tree — the real network path cannot run here (the rows drive
+    # it through a stand-in `gh`), and it is the LOGIC that would otherwise be
+    # exercised by nothing until a real collision. This
     # repository has no Python test runner, so this is where those rows live.
     #
     # ci.yml's tidy job runs the same command, unlike `fmt-check` above: an arm
