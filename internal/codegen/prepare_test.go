@@ -2688,3 +2688,29 @@ func TestPreparedWidthIsEmptyWhereNoPropertyTypeWasResolved(t *testing.T) {
 		require.NotEmpty(t, row.GoType, "column %q lost its carrier text", row.ColumnName)
 	}
 }
+
+// An unknown column carries no NOT NULL for a null gate to enforce:
+// a.dates[0] over a node with no dates is a null the graph holds, so the
+// row field is nullable on every target (bd gqlc-14u0l).
+func TestAnUnknownColumnIsPlannedNullable(t *testing.T) {
+	in := codegen.Input{
+		Schema: schema.Schema{Name: "Test"},
+		Queries: []codegen.NamedQuery{{
+			Name:        "Fetch",
+			Cardinality: queryfile.CardinalityOne,
+			SourceText:  "RETURN foo(1) AS u",
+			Validated: resolver.ValidatedQuery{
+				Statement: resolver.StatementRead,
+				Columns:   []resolver.Column{{Name: "u", Type: resolver.ResolvedUnknown{}}},
+			},
+		}},
+	}
+
+	prepared, err := codegen.Prepare(in, stubTypeMap{}, "")
+	require.NoError(t, err)
+	require.Len(t, prepared.Queries[0].RowFields, 1)
+	row := prepared.Queries[0].RowFields[0]
+	require.Equal(t, codegen.ColumnAny, row.Kind)
+	require.Equal(t, "any", row.GoType)
+	require.True(t, row.Nullable, "a non-nullable unknown column fails the row on a null the graph holds")
+}

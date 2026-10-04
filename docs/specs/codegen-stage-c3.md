@@ -623,7 +623,7 @@ adds the five new column-shape rows.
 | `ResolvedScalar{String}` | `string` | `*string` |
 | `ResolvedScalar{Null}` | `any` | `any` (pointer-to-any is silly; nullable stays `any`) |
 | `ResolvedScalar{Map}` | `map[string]any` | `map[string]any` (nil-map is null-map; pointer redundant) |
-| `ResolvedUnknown` | `any` | `any` (same reasoning as null; nullable stays `any`) |
+| `ResolvedUnknown` | `any` | `any` (same reasoning as null; nullable stays `any`) *Note (2026-10-04, bd gqlc-14u0l):* superseded — an unknown column is now planned nullable and emits `*any`, the spelling a nullable `ANY VALUE` column has had since #767 and ADR 0041 records for row fields. |
 | `ResolvedList{Element}` | `[]` + recurse via §4.7 | `*[]T` |
 
 - **`any` and `map[string]any` do not accept the nullable-pointer

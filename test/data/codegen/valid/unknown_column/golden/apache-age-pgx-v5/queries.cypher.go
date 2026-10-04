@@ -12,7 +12,7 @@ const oneUnknownQueryText = `MATCH (p:Person) RETURN foo(p.id) AS r`
 // OneUnknown executes the OneUnknown query.
 //
 //	MATCH (p:Person) RETURN foo(p.id) AS r
-func (q *queries) OneUnknown(ctx context.Context) (any, error) {
+func (q *queries) OneUnknown(ctx context.Context) (*any, error) {
 	stmt, err := q.cypherStmt("$gqlc$", oneUnknownQueryText, "v0 ag_catalog.agtype")
 	if err != nil {
 		return nil, err
@@ -38,12 +38,13 @@ func (q *queries) OneUnknown(ctx context.Context) (any, error) {
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("OneUnknown: %w", err)
 	}
-	if raw0 == nil {
-		return nil, fmt.Errorf("OneUnknown: column %q is non-nullable but arrived null", "r")
-	}
-	value0, err := agtypeValue(raw0)
-	if err != nil {
-		return nil, fmt.Errorf("OneUnknown: decode column %q: %w", "r", err)
+	var value0 *any
+	if raw0 != nil {
+		decoded, err := agtypeValue(raw0)
+		if err != nil {
+			return nil, fmt.Errorf("OneUnknown: decode column %q: %w", "r", err)
+		}
+		value0 = &decoded
 	}
 	return value0, nil
 }

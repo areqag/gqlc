@@ -1253,10 +1253,14 @@ func appendRowField(p *Query, ci int, col resolver.Column, field string, entitie
 			Kind:       kind,
 		})
 	case resolver.ResolvedUnknown:
+		// An unknown carries no NOT NULL to enforce, and a.dates[0] over
+		// a node with no dates is a null the graph holds, so the column
+		// is nullable like a nullable ANY VALUE column (bd gqlc-14u0l).
 		p.RowFields = append(p.RowFields, Row{
 			ColumnName: col.Name,
 			Field:      field,
 			GoType:     "any",
+			Nullable:   true,
 			Kind:       ColumnAny,
 		})
 	case resolver.ResolvedEdgeUnion:

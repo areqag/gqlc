@@ -65,7 +65,7 @@ func TestAGEServesAnUnknownColumnAsAny(t *testing.T) {
 
 		got, err := q.AccountBareUnknown(ctx)
 		require.NoError(t, err)
-		require.Equal(t, []any{"2024-01-02"}, got)
+		require.Equal(t, []*any{ptr[any]("2024-01-02")}, got)
 	})
 
 	t.Run("a field of a record property reads back as agtype's value", func(t *testing.T) {
@@ -75,7 +75,7 @@ func TestAGEServesAnUnknownColumnAsAny(t *testing.T) {
 
 		got, err := q.AccountBareRecordField(ctx)
 		require.NoError(t, err)
-		require.Equal(t, []any{"x", int64(9)}, got)
+		require.Equal(t, []*any{ptr[any]("x"), ptr[any](int64(9))}, got)
 	})
 
 	// head(collect(p)) and startNode(k) are typed unknown and hold a whole
