@@ -1,0 +1,6 @@
+CREATE PROPERTY GRAPH TYPE UnionOnlyCarrierUnderUndecodedRecord AS {
+    (:Account {
+        id :: INT64 NOT NULL,
+        ul :: RECORD { u :: ANY<DATE | INT64> }
+    })
+}
