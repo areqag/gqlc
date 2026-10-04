@@ -15,11 +15,18 @@ func decodeUnion47606938(v any) (any, error) {
 	case []any:
 		v1 := make([]*UUID, len(t))
 		for v2, v3 := range t {
-			v4, ok := v3.(*UUID)
-			if !ok {
-				return nil, fmt.Errorf("decode %s element: expected *UUID, got %T", "UNION<INT64|LIST<UUID>>", v3)
+			if v3 == nil {
+				continue
 			}
-			v1[v2] = v4
+			v4, ok := v3.(string)
+			if !ok {
+				return nil, fmt.Errorf("decode %s element: expected string, got %T", "UNION<INT64|LIST<UUID>>", v3)
+			}
+			v5, err := toUUID(v4)
+			if err != nil {
+				return nil, fmt.Errorf("decode %s element: %w", "UNION<INT64|LIST<UUID>>", err)
+			}
+			v1[v2] = &v5
 		}
 		return v1, nil
 	}
@@ -33,11 +40,18 @@ func decodeUnion0b44ccb3(v any) (any, error) {
 	case []any:
 		v1 := make([]*int32, len(t))
 		for v2, v3 := range t {
-			v4, ok := v3.(*int32)
-			if !ok {
-				return nil, fmt.Errorf("decode %s element: expected *int32, got %T", "UNION<LIST<INT32>|STRING>", v3)
+			if v3 == nil {
+				continue
 			}
-			v1[v2] = v4
+			v4, ok := v3.(int64)
+			if !ok {
+				return nil, fmt.Errorf("decode %s element: expected int64, got %T", "UNION<LIST<INT32>|STRING>", v3)
+			}
+			v5, err := narrowInt[int32](v4)
+			if err != nil {
+				return nil, fmt.Errorf("decode %s element: %w", "UNION<LIST<INT32>|STRING>", err)
+			}
+			v1[v2] = &v5
 		}
 		return v1, nil
 	case string:

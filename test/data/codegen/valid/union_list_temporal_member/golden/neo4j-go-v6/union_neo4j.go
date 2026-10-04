@@ -43,11 +43,15 @@ func decodeUnion0e27813e(v any) (any, error) {
 	case []any:
 		v1 := make([]*Date, len(t))
 		for v2, v3 := range t {
-			v4, ok := v3.(*Date)
-			if !ok {
-				return nil, fmt.Errorf("decode %s element: expected *Date, got %T", "UNION<INT64|LIST<DATE>>", v3)
+			if v3 == nil {
+				continue
 			}
-			v1[v2] = v4
+			v4, ok := v3.(dbtype.Date)
+			if !ok {
+				return nil, fmt.Errorf("decode %s element: expected dbtype.Date, got %T", "UNION<INT64|LIST<DATE>>", v3)
+			}
+			v5 := toDate(v4)
+			v1[v2] = &v5
 		}
 		return v1, nil
 	}
@@ -88,11 +92,15 @@ func decodeUnionc2966418(v any) (any, error) {
 	case []any:
 		v1 := make([]*Duration, len(t))
 		for v2, v3 := range t {
-			v4, ok := v3.(*Duration)
-			if !ok {
-				return nil, fmt.Errorf("decode %s element: expected *Duration, got %T", "UNION<INT64|LIST<DURATION>>", v3)
+			if v3 == nil {
+				continue
 			}
-			v1[v2] = v4
+			v4, ok := v3.(dbtype.Duration)
+			if !ok {
+				return nil, fmt.Errorf("decode %s element: expected dbtype.Duration, got %T", "UNION<INT64|LIST<DURATION>>", v3)
+			}
+			v5 := toDuration(v4)
+			v1[v2] = &v5
 		}
 		return v1, nil
 	}
@@ -133,11 +141,15 @@ func decodeUnion0763cc73(v any) (any, error) {
 	case []any:
 		v1 := make([]*LocalTime, len(t))
 		for v2, v3 := range t {
-			v4, ok := v3.(*LocalTime)
-			if !ok {
-				return nil, fmt.Errorf("decode %s element: expected *LocalTime, got %T", "UNION<INT64|LIST<LOCALTIME>>", v3)
+			if v3 == nil {
+				continue
 			}
-			v1[v2] = v4
+			v4, ok := v3.(dbtype.LocalTime)
+			if !ok {
+				return nil, fmt.Errorf("decode %s element: expected dbtype.LocalTime, got %T", "UNION<INT64|LIST<LOCALTIME>>", v3)
+			}
+			v5 := toLocalTime(v4)
+			v1[v2] = &v5
 		}
 		return v1, nil
 	}
@@ -178,11 +190,15 @@ func decodeUnion93c7cf4f(v any) (any, error) {
 	case []any:
 		v1 := make([]*Time, len(t))
 		for v2, v3 := range t {
-			v4, ok := v3.(*Time)
-			if !ok {
-				return nil, fmt.Errorf("decode %s element: expected *Time, got %T", "UNION<INT64|LIST<TIME>>", v3)
+			if v3 == nil {
+				continue
 			}
-			v1[v2] = v4
+			v4, ok := v3.(dbtype.Time)
+			if !ok {
+				return nil, fmt.Errorf("decode %s element: expected dbtype.Time, got %T", "UNION<INT64|LIST<TIME>>", v3)
+			}
+			v5 := toTime(v4)
+			v1[v2] = &v5
 		}
 		return v1, nil
 	}
@@ -223,11 +239,14 @@ func decodeUnion4563e5a7(v any) (any, error) {
 	case []any:
 		v1 := make([]*time.Time, len(t))
 		for v2, v3 := range t {
-			v4, ok := v3.(*time.Time)
-			if !ok {
-				return nil, fmt.Errorf("decode %s element: expected *time.Time, got %T", "UNION<INT64|LIST<TIMESTAMP>>", v3)
+			if v3 == nil {
+				continue
 			}
-			v1[v2] = v4
+			v4, ok := v3.(time.Time)
+			if !ok {
+				return nil, fmt.Errorf("decode %s element: expected time.Time, got %T", "UNION<INT64|LIST<TIMESTAMP>>", v3)
+			}
+			v1[v2] = &v4
 		}
 		return v1, nil
 	}
