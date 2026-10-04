@@ -4,10 +4,18 @@ package unionlisttemporalmember
 
 import "time"
 
+// fromTimestamp binds a TIMESTAMP as its instant in a fixed zone named
+// "Offset" at the offset it reads in its own location, which is the one
+// name the driver sends as an offset rather than as a zone id. The
+// instant and the offset are kept; an IANA location's region is not.
+func fromTimestamp(v time.Time) time.Time {
+	_, offset := v.Zone()
+	return v.In(time.FixedZone("Offset", offset))
+}
+
 // fromNullableTimestampList binds a list of nullable TIMESTAMPs element
-// by element. The driver packs a time.Time but not a *time.Time inside a
-// list, so each element is dereferenced; a nil element binds the Cypher
-// null the schema's element nullability declared.
+// by element; a nil element binds the Cypher null the schema's element
+// nullability declared.
 func fromNullableTimestampList(v []*time.Time) []any {
 	out := make([]any, len(v))
 	for i := range v {
@@ -15,7 +23,7 @@ func fromNullableTimestampList(v []*time.Time) []any {
 			out[i] = nil
 			continue
 		}
-		out[i] = *v[i]
+		out[i] = fromTimestamp(*v[i])
 	}
 	return out
 }

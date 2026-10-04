@@ -22,7 +22,7 @@ type AddEventParams struct {
 //
 //	CREATE (e:Event {id: $id, occurredAt: $occurredAt})
 func (q *queries) AddEvent(ctx context.Context, arg AddEventParams) error {
-	_, err := q.db.run(ctx, addEventQueryText, map[string]any{"id": arg.Id, "occurredAt": arg.OccurredAt}, neo4j.AccessModeWrite)
+	_, err := q.db.run(ctx, addEventQueryText, map[string]any{"id": arg.Id, "occurredAt": fromTimestamp(arg.OccurredAt)}, neo4j.AccessModeWrite)
 	return err
 }
 
@@ -32,7 +32,7 @@ const eventsAfterQueryText = `MATCH (e:Event) WHERE e.occurredAt > $since RETURN
 //
 //	MATCH (e:Event) WHERE e.occurredAt > $since RETURN e.id AS id ORDER BY e.occurredAt
 func (q *queries) EventsAfter(ctx context.Context, arg time.Time) ([]int64, error) {
-	records, err := q.db.run(ctx, eventsAfterQueryText, map[string]any{"since": arg}, neo4j.AccessModeRead)
+	records, err := q.db.run(ctx, eventsAfterQueryText, map[string]any{"since": fromTimestamp(arg)}, neo4j.AccessModeRead)
 	if err != nil {
 		return nil, err
 	}
@@ -56,7 +56,7 @@ const eventsSeenAfterQueryText = `MATCH (e:Event) WHERE e.seenAt > $seenAfter RE
 //
 //	MATCH (e:Event) WHERE e.seenAt > $seenAfter RETURN e.id AS id ORDER BY e.seenAt
 func (q *queries) EventsSeenAfter(ctx context.Context, arg *time.Time) ([]int64, error) {
-	records, err := q.db.run(ctx, eventsSeenAfterQueryText, map[string]any{"seenAfter": arg}, neo4j.AccessModeRead)
+	records, err := q.db.run(ctx, eventsSeenAfterQueryText, map[string]any{"seenAfter": fromTimestampPtr(arg)}, neo4j.AccessModeRead)
 	if err != nil {
 		return nil, err
 	}
