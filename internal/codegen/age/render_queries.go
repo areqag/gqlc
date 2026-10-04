@@ -943,14 +943,15 @@ func rowWidth(f codegen.Row) graph.PropertyType {
 // listOfElem is the list width whose element is e, or the empty width
 // when e carries none.
 //
-// Only the `any` term decides a wrapper. propertyListElemPlan never
-// stars `any`, because it holds a null as nil, so Nullable reads false
-// for a union element that is nullable — and every union a schema can
-// spell is, its alternatives taking no NOT NULL. Read as NOT NULL it
-// would name the constructor-only wrapper that refuses a null element
-// (nullableUnionElem). Every other element's Nullable is already the
-// star in its text, which is what listHelperName reads there, so the
-// plan's Nullable only keeps the rebuilt width agreeing with the text.
+// The element's NOT NULL is read off its plan. For a declared union it
+// is the only place that answer lives: the `any` text carries no star,
+// but the plan's Nullable does say whether the element may be null (bd
+// gqlc-dkcz, #2986), and nullableUnionElem reads it back off this width
+// to choose between the wrapper that passes a null through and the
+// constructor-only one that refuses it. Every other element's Nullable
+// is already the star in its text, which is what listHelperName reads
+// there, so for those the plan's Nullable only keeps the rebuilt width
+// agreeing with the text.
 func listOfElem(e *codegen.ListElem) graph.PropertyType {
 	elem := e.Width
 	if elem == "" && e.Kind == codegen.ColumnList && e.Nested != nil {
@@ -959,7 +960,7 @@ func listOfElem(e *codegen.ListElem) graph.PropertyType {
 	if elem == "" {
 		return ""
 	}
-	return graph.ListOf(elem, !e.Nullable && e.GoType != "any")
+	return graph.ListOf(elem, !e.Nullable)
 }
 
 // decodeFunc names the models.go helper that decodes one value of an
