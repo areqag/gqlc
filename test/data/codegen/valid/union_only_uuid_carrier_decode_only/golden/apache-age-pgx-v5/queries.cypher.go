@@ -76,7 +76,7 @@ func (q *queries) AccountEithers(ctx context.Context) ([][]any, error) {
 		if raw0 == nil {
 			return nil, fmt.Errorf("AccountEithers: column %q is non-nullable but arrived null", "eithers")
 		}
-		value0, err := agtypeListOfAny(raw0)
+		value0, err := agtypeListOfNullableUnion26f53c9e(raw0)
 		if err != nil {
 			return nil, fmt.Errorf("AccountEithers: decode column %q: %w", "eithers", err)
 		}

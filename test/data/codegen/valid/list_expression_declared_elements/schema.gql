@@ -1,0 +1,12 @@
+CREATE PROPERTY GRAPH TYPE ListExpressionDeclaredElements AS {
+    (:Account {
+        id     :: INT64 NOT NULL,
+        either :: ANY<DATE | INT64>,
+        narrow :: ANY<INT32 | STRING>,
+        n32    :: INT32,
+        home   :: RECORD { zip_code :: INT32 NOT NULL, note :: STRING },
+        moves  :: LIST<RECORD { zip_code :: INT32 NOT NULL }>,
+        dates  :: LIST<ANY<DATE | INT64>>,
+        nest   :: LIST<LIST<RECORD { zip_code :: INT32 NOT NULL }>>
+    })
+}

@@ -911,7 +911,52 @@ func columnDecoder(f codegen.Row) string {
 	if f.Kind == codegen.ColumnNode || f.Kind == codegen.ColumnEdge {
 		return "decode" + f.GoType
 	}
-	return decodeFunc(f.GoType, f.Width)
+	return decodeFunc(f.GoType, rowWidth(f))
+}
+
+// rowWidth is the width a column decodes by. A schema property's Row
+// carries the width the author declared; a list EXPRESSION column — a
+// list literal or collect() — carries none, because what it projects is
+// not a property, so its width is rebuilt from the element plans, which
+// do carry one per depth.
+//
+// Without it the column decoded by its Go text alone, and two element
+// texts do not name their decoder: a closed union's `any`, which is ANY
+// VALUE's text too, and a record's anonymous struct. A list of unions
+// read through agtypeValue and handed back a DATE member as its ISO
+// string and an INT32 member as int64, and a list of records failed
+// generation with decodeFunc's codegen-bug panic (bd gqlc-k1dg). Every
+// other element's text names its decoder, so the rebuilt width changes
+// nothing for it.
+//
+// A level whose element resolved no property type — a scalar, a
+// temporal expression, a value of unknown type — has no width to give,
+// and the column falls back to the empty width and the text, as before.
+func rowWidth(f codegen.Row) graph.PropertyType {
+	if f.Width != "" || f.Kind != codegen.ColumnList || f.ListElem == nil {
+		return f.Width
+	}
+	return listOfElem(f.ListElem)
+}
+
+// listOfElem is the list width whose element is e, or the empty width
+// when e carries none.
+//
+// The element's NOT NULL is read off its plan, with the `any` carrier
+// taken as nullable whatever the plan says: propertyListElemPlan never
+// stars `any`, because it holds a null as nil, so Nullable reads false
+// for a union element that is nullable — and every union a schema can
+// spell is, its alternatives taking no NOT NULL. Read as NOT NULL it
+// would name the constructor-only wrapper that refuses a null element.
+func listOfElem(e *codegen.ListElem) graph.PropertyType {
+	elem := e.Width
+	if elem == "" && e.Kind == codegen.ColumnList && e.Nested != nil {
+		elem = listOfElem(e.Nested)
+	}
+	if elem == "" {
+		return ""
+	}
+	return graph.ListOf(elem, !e.Nullable && e.GoType != "any")
 }
 
 // decodeFunc names the models.go helper that decodes one value of an
@@ -928,9 +973,9 @@ func columnDecoder(f codegen.Row) string {
 // encoding's digest — cannot be recovered from the argument the rest of
 // this switch reads. width is the one the prepared surface carries
 // beside the carrier it was derived from, and it is available at every
-// call site: Param.Width and Row.Width are set for every value this
-// backend serves, and the one Row construction that leaves Width empty
-// is the list EXPRESSION column unservedColumn refuses here.
+// call site: Param.Width and Row.Width are set for every schema property
+// this backend serves, and the one Row construction that leaves Width
+// empty, the list EXPRESSION column, has it rebuilt by rowWidth.
 //
 // A width that is empty or that disagrees with the text takes no arm and
 // falls through to the panic below, which is the right failure: the
