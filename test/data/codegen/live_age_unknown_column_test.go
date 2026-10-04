@@ -116,15 +116,17 @@ func TestAGEServesAnUnknownColumnAsAny(t *testing.T) {
 		requirePerson(t, origins[0][0], 1)
 	})
 
-	// The unknown column carries no nullability, and the row field is
-	// planned non-nullable on every target, so a null is refused here as
-	// neo4j refuses it. Pinned so a change to that is deliberate.
-	t.Run("a null unknown column is refused as non-nullable", func(t *testing.T) {
+	// The unknown column says nothing about nullability (bd gqlc-14u0l): a
+	// missing property and an out-of-range index are nulls the graph holds.
+	t.Run("a null unknown column reads back as nil", func(t *testing.T) {
 		const graph = "gqlc_unknown_column_null"
 		q := unknownelemage.New(pool, graph)
-		ownGraph(t, graph, `CREATE (:Account {id: 1})`, q)
+		ownGraph(t, graph, `CREATE (:Account {id: 1}), (:Account {id: 2, dates: []})`, q)
 
-		_, err := q.AccountBareUnknown(ctx)
-		require.ErrorContains(t, err, `column "dated" is non-nullable but arrived null`)
+		got, err := q.AccountBareUnknown(ctx)
+		require.NoError(t, err)
+		require.Len(t, got, 2)
+		require.Nil(t, got[0], "id 1 has no dates property")
+		require.Nil(t, got[1], "id 2 has an empty dates list, so index 0 is out of range")
 	})
 }

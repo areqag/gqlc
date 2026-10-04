@@ -100,4 +100,6 @@ var LiveArms = map[string]Arm{
 	"TestAGEDecodesAListExpressionElementByItsWidth": ArmAGE,
 	// A bare column the resolver types as unknown (bd gqlc-2omj).
 	"TestAGEServesAnUnknownColumnAsAny": ArmAGE,
+	// A null through a bare unknown column (bd gqlc-14u0l).
+	"TestNeo4jPassesANullUnknownColumnAsNil": ArmNeo4j,
 }
