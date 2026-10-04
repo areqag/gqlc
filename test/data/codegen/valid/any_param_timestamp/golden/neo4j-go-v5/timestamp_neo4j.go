@@ -56,20 +56,47 @@ func timestampZoneIsSendable(v time.Time, offset int) bool {
 	return want == offset
 }
 
+// fromTimestampPtr binds a nullable TIMESTAMP parameter: a nil pointer is
+// the Cypher null the schema's nullability declared.
+func fromTimestampPtr(v *time.Time) any {
+	if v == nil {
+		return nil
+	}
+	return fromTimestamp(*v)
+}
+
+// fromTimestampList binds a list of TIMESTAMPs element by element.
+func fromTimestampList(v []time.Time) []any {
+	out := make([]any, len(v))
+	for i := range v {
+		out[i] = fromTimestamp(v[i])
+	}
+	return out
+}
+
+// fromNullableTimestampList binds a list of nullable TIMESTAMPs element
+// by element; a nil element binds the Cypher null the schema's element
+// nullability declared.
+func fromNullableTimestampList(v []*time.Time) []any {
+	out := make([]any, len(v))
+	for i := range v {
+		if v[i] == nil {
+			out[i] = nil
+			continue
+		}
+		out[i] = fromTimestamp(*v[i])
+	}
+	return out
+}
+
 // fromAnyValue binds an ANY VALUE or LIST<ANY VALUE> parameter, whose
-// value has no declared width to choose a conversion by. A TIMESTAMP in
-// it is bound through fromTimestamp: bare, behind a pointer, or as an
-// element of a []time.Time, a []*time.Time or a []any at any depth. A nil
-// pointer binds the Cypher null, and every other value is bound as it is.
+// value has no declared width to choose a conversion by. A carrier in it
+// is bound through its own helper wherever it sits: bare, behind a
+// pointer, or as an element of a list of it or of a []any at any depth.
+// A nil pointer binds the Cypher null, and every other value is bound as
+// it is.
 func fromAnyValue(v any) any {
 	switch t := v.(type) {
-	case time.Time:
-		return fromTimestamp(t)
-	case *time.Time:
-		if t == nil {
-			return nil
-		}
-		return fromTimestamp(*t)
 	case *any:
 		if t == nil {
 			return nil
@@ -80,24 +107,68 @@ func fromAnyValue(v any) any {
 			return nil
 		}
 		return fromAnyValue(*t)
-	case []time.Time:
-		out := make([]any, len(t))
-		for i := range t {
-			out[i] = fromTimestamp(t[i])
-		}
-		return out
-	case []*time.Time:
-		out := make([]any, len(t))
-		for i := range t {
-			out[i] = fromAnyValue(t[i])
-		}
-		return out
 	case []any:
 		out := make([]any, len(t))
 		for i := range t {
 			out[i] = fromAnyValue(t[i])
 		}
 		return out
+	case time.Time:
+		return fromTimestamp(t)
+	case *time.Time:
+		return fromTimestampPtr(t)
+	case []time.Time:
+		return fromTimestampList(t)
+	case []*time.Time:
+		return fromNullableTimestampList(t)
+	case Date:
+		return fromDate(t)
+	case *Date:
+		return fromDatePtr(t)
+	case []Date:
+		return fromDateList(t)
+	case []*Date:
+		return fromNullableDateList(t)
+	case LocalTime:
+		return fromLocalTime(t)
+	case *LocalTime:
+		return fromLocalTimePtr(t)
+	case []LocalTime:
+		return fromLocalTimeList(t)
+	case []*LocalTime:
+		return fromNullableLocalTimeList(t)
+	case Time:
+		return fromTime(t)
+	case *Time:
+		return fromTimePtr(t)
+	case []Time:
+		return fromTimeList(t)
+	case []*Time:
+		return fromNullableTimeList(t)
+	case LocalDateTime:
+		return fromLocalDateTime(t)
+	case *LocalDateTime:
+		return fromLocalDateTimePtr(t)
+	case []LocalDateTime:
+		return fromLocalDateTimeList(t)
+	case []*LocalDateTime:
+		return fromNullableLocalDateTimeList(t)
+	case Duration:
+		return fromDuration(t)
+	case *Duration:
+		return fromDurationPtr(t)
+	case []Duration:
+		return fromDurationList(t)
+	case []*Duration:
+		return fromNullableDurationList(t)
+	case UUID:
+		return fromUUID(t)
+	case *UUID:
+		return fromUUIDPtr(t)
+	case []UUID:
+		return fromUUIDList(t)
+	case []*UUID:
+		return fromNullableUUIDList(t)
 	}
 	return v
 }

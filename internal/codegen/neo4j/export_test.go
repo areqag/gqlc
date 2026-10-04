@@ -14,6 +14,7 @@ package neo4j
 // projections need the argument and result types they name.
 import (
 	"slices"
+	"strings"
 
 	"github.com/areqag/gqlc/internal/codegen"
 	"github.com/areqag/gqlc/internal/graph"
@@ -166,4 +167,12 @@ func TemporalUseNames(prepared codegen.Prepared, tm TypeMap) []string {
 	}
 	slices.Sort(out)
 	return out
+}
+
+// RenderAnyValueWalk emits fromAnyValue for a chosen set of declared
+// neutral carriers.
+func RenderAnyValueWalk(neutral []string) string {
+	var b strings.Builder
+	writeAnyValueWalk(&b, neutral)
+	return b.String()
 }

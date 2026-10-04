@@ -83,13 +83,14 @@ func generate(in codegen.Input, target driverTarget, packageName string) ([]code
 	}
 
 	// TIMESTAMP's encode helpers (bd gqlc-m3ax), gated on a parameter
-	// binding one, or binding an ANY value that may hold one (bd
-	// gqlc-nvb4). Every other helper calls fromTimestamp, so the bits
-	// that mark it answer for the file.
-	if timestampUse.encode || timestampUse.encodePtr || timestampUse.anyValue {
+	// binding one. Every other helper calls fromTimestamp, so the two bits
+	// that mark it answer for the file. An ANY parameter marks them too,
+	// for fromAnyValue, whose arms name only the neutral carriers this
+	// package declares (bd gqlc-nvb4).
+	if timestampUse.encode || timestampUse.encodePtr {
 		files = append(files, codegen.File{
 			Path:     "timestamp_neo4j.go",
-			Contents: renderTimestampConversions(pkg, timestampUse),
+			Contents: renderTimestampConversions(pkg, timestampUse, declaredNeutralCarriers(prepared, target)),
 		})
 	}
 
@@ -123,4 +124,17 @@ func batchCardinalities(queries []codegen.Query) (hasOne, hasIter bool) {
 		}
 	}
 	return hasOne, hasIter
+}
+
+// declaredNeutralCarriers names the neutral carriers this package
+// declares, on the same tests that emit temporal.go and uuid.go.
+func declaredNeutralCarriers(prepared codegen.Prepared, target driverTarget) []string {
+	var out []string
+	if codegen.ReferencesTemporalCarrier(prepared, target.types().Property) {
+		out = append(out, codegen.TemporalCarriers...)
+	}
+	if codegen.ReferencesUUIDCarrier(prepared, target.types().Property) {
+		out = append(out, codegen.UUIDCarrier)
+	}
+	return out
 }
