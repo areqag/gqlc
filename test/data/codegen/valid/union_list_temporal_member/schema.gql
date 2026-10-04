@@ -1,0 +1,10 @@
+CREATE PROPERTY GRAPH TYPE UnionListTemporalMember AS {
+    (:Diary {
+        id       :: INT64 NOT NULL,
+        days     :: ANY<LIST<DATE> | INT64>,
+        offsets  :: ANY<LIST<ZONED TIME> | INT64>,
+        locals   :: ANY<LIST<LOCAL TIME> | INT64>,
+        stamps   :: ANY<LIST<TIMESTAMP> | INT64>,
+        spans    :: ANY<LIST<DURATION(DAY TO SECOND)> | INT64>
+    })
+}
