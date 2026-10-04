@@ -76,7 +76,11 @@ type carrierUse struct {
 // the leafType the carrier side marks on hands back the whole struct
 // and no carrier inside it is ever named — while the record's emitted
 // helper pair calls those carriers' conversions by name.
-func conversionUses(prepared codegen.Prepared, tm typeMap) (map[string]carrierUse, map[graph.PropertyType]carrierUse, map[graph.PropertyType]carrierUse) {
+//
+// The fourth answer is TIMESTAMP's, which is no neutral carrier and so
+// has no place in the first map: renderTimestampConversions reads its
+// element-nullable list bits and nothing else.
+func conversionUses(prepared codegen.Prepared, tm typeMap) (map[string]carrierUse, map[graph.PropertyType]carrierUse, map[graph.PropertyType]carrierUse, carrierUse) {
 	w := conversionUseWalk{
 		tm:      tm,
 		neutral: make(map[string]carrierUse),
@@ -101,20 +105,25 @@ func conversionUses(prepared codegen.Prepared, tm typeMap) (map[string]carrierUs
 			w.markEncode(f.GoType, f.Width, f.Nullable)
 		}
 	}
-	return w.neutral, w.records, w.unions
+	return w.neutral, w.records, w.unions, w.timestamp
 }
 
-// conversionUseWalk accumulates conversionUses' three answers as the
+// conversionUseWalk accumulates conversionUses' four answers as the
 // walk marks each position.
 type conversionUseWalk struct {
-	tm      typeMap
-	neutral map[string]carrierUse
-	records map[graph.PropertyType]carrierUse
-	unions  map[graph.PropertyType]carrierUse
+	tm        typeMap
+	neutral   map[string]carrierUse
+	records   map[graph.PropertyType]carrierUse
+	unions    map[graph.PropertyType]carrierUse
+	timestamp carrierUse
 }
 
 func (w *conversionUseWalk) markCarrier(goType string, set func(*carrierUse)) {
 	name := leafType(goType)
+	if name == timestampCarrier {
+		set(&w.timestamp)
+		return
+	}
 	if !isNeutralCarrier(name) {
 		return
 	}
@@ -375,6 +384,66 @@ func temporalListHelper(leaf string, elemNullable bool) string {
 		return "fromNullable" + leaf + "List"
 	}
 	return "from" + leaf + "List"
+}
+
+// timestampCarrier is TIMESTAMP's carrier text. The driver packs it by
+// value and hands it back as itself, so it binds and decodes bare at every
+// position but one: an element of a list, behind the star a nullable
+// element carries (see sliceParamBindExpr).
+const timestampCarrier = "time.Time"
+
+// nullableTimestampListHelper names that position's helper, in
+// temporalListHelper's spelling with the width's name standing in for a
+// carrier's: "Time" is taken, by ZONED TIME's carrier. The bodies
+// renderTimestampConversions emits spell it literally.
+const nullableTimestampListHelper = "fromNullableTimestampList"
+
+// renderTimestampConversions emits timestamp_neo4j.go: the helper pair a
+// list of nullable TIMESTAMPs binds through, for whichever of the two the
+// batch calls. use is conversionUses' timestamp answer, and only its
+// element-nullable list bits are read; the other bits are marked by the
+// same walk and name nothing, because time.Time is bound bare there.
+//
+// Its own file for the reason uuid_neo4j.go has one: the trigger is
+// independent of the temporal pair, since TIMESTAMP is no neutral carrier
+// and a batch reaching this helper may name none of them.
+func renderTimestampConversions(pkg string, use carrierUse) []byte {
+	var b strings.Builder
+	b.WriteString(codegen.Header())
+	b.WriteString("package ")
+	b.WriteString(pkg)
+	b.WriteString("\n\nimport \"time\"\n")
+	b.WriteString(`
+// fromNullableTimestampList binds a list of nullable TIMESTAMPs element
+// by element. The driver packs a time.Time but not a *time.Time inside a
+// list, so each element is dereferenced; a nil element binds the Cypher
+// null the schema's element nullability declared.
+func fromNullableTimestampList(v []*time.Time) []any {
+	out := make([]any, len(v))
+	for i := range v {
+		if v[i] == nil {
+			out[i] = nil
+			continue
+		}
+		out[i] = *v[i]
+	}
+	return out
+}
+`)
+	if use.listElemPtr {
+		b.WriteString(`
+// fromNullableTimestampListPtr binds a nullable list of nullable
+// TIMESTAMPs: a nil pointer is the Cypher null the schema's nullability
+// declared, not an empty list.
+func fromNullableTimestampListPtr(v *[]*time.Time) any {
+	if v == nil {
+		return nil
+	}
+	return fromNullableTimestampList(*v)
+}
+`)
+	}
+	return []byte(b.String())
 }
 
 // narrowExpr renders the expression that turns a value of the driver

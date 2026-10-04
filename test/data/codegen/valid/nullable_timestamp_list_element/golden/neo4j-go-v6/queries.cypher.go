@@ -23,7 +23,7 @@ type OpenEntryParams struct {
 //
 //	CREATE (l:Entry {id: $id, stamps: $stamps, maybe: $maybe, fixed: $fixed})
 func (q *queries) OpenEntry(ctx context.Context, arg OpenEntryParams) error {
-	_, err := q.db.run(ctx, openEntryQueryText, map[string]any{"id": arg.Id, "stamps": arg.Stamps, "maybe": arg.Maybe, "fixed": arg.Fixed}, neo4j.AccessModeWrite)
+	_, err := q.db.run(ctx, openEntryQueryText, map[string]any{"id": arg.Id, "stamps": fromNullableTimestampList(arg.Stamps), "maybe": fromNullableTimestampListPtr(arg.Maybe), "fixed": arg.Fixed}, neo4j.AccessModeWrite)
 	return err
 }
 
@@ -42,7 +42,7 @@ type EntriesMatchingParams struct {
 //	WHERE l.stamps = $stamps AND l.fixed = $fixed
 //	RETURN l.id AS id
 func (q *queries) EntriesMatching(ctx context.Context, arg EntriesMatchingParams) ([]int64, error) {
-	records, err := q.db.run(ctx, entriesMatchingQueryText, map[string]any{"stamps": arg.Stamps, "fixed": arg.Fixed}, neo4j.AccessModeRead)
+	records, err := q.db.run(ctx, entriesMatchingQueryText, map[string]any{"stamps": fromNullableTimestampList(arg.Stamps), "fixed": arg.Fixed}, neo4j.AccessModeRead)
 	if err != nil {
 		return nil, err
 	}

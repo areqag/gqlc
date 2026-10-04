@@ -818,12 +818,21 @@ func outrangesTheSignedCarrier(goType string) bool {
 // is the sole list shape still owing a conversion — per element, into the
 // driver's own array carrier, mirroring the per-element narrow the decode
 // side has had since walkListElemBody.
+//
+// time.Time IS among them, but only by value. packV's pointer arm hands a
+// pointer-to-struct to packStruct still a pointer, and *time.Time is no
+// case: v5.28.4 raises UnsupportedTypeError and v6.2.0 falls through to
+// mapping.StructAsMap and packs an empty map (bd gqlc-gk6q). A pointer to a
+// scalar takes the other branch and is indirected, so []*int32 and the rest
+// bind bare.
 func sliceParamBindExpr(goType string, width graph.PropertyType, nullable bool, access string) string {
 	leaf, leafWidth := leafType(goType), leafWidth(width)
 	var helper string
 	switch {
 	case isNeutralCarrier(leaf):
 		helper = temporalListHelper(leaf, listElemIsNullable(goType))
+	case leaf == timestampCarrier && listElemIsNullable(goType):
+		helper = nullableTimestampListHelper
 	case codegen.IsDeclaredRecord(leaf, leafWidth):
 		// The second leaf packStruct refuses, and it arrives here for
 		// exactly the reason the paragraph above gives: packV walks the
