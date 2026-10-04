@@ -1,0 +1,7 @@
+CREATE PROPERTY GRAPH TYPE UnionListNullableMember AS {
+    (:Tally {
+        id     :: INT64 NOT NULL,
+        counts :: ANY<LIST<INT32> | STRING>,
+        refs   :: ANY<LIST<UUID> | INT64>
+    })
+}

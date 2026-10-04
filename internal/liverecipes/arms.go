@@ -56,6 +56,10 @@ var LiveArms = map[string]Arm{
 	// Its own neo4j container, both driver majors against it. The AGE
 	// half is TestAGEStoresAndRoundTripsAUUID below.
 	"TestNeo4jStoresAndRoundTripsAUUID": ArmNeo4j,
+	// A union whose member is a temporal list, stored and read back (bd
+	// gqlc-oo5p). Its own neo4j container, both driver majors against it.
+	// No AGE half: union_list_temporal_member is enrolled on neo4j only.
+	"TestNeo4jRoundTripsAUnionOfATemporalList": ArmNeo4j,
 	// The LIST<UNION<…>> storage measurement (bd gqlc-npus), beside the
 	// nested-list and map-valued rows it is modelled on. Its own neo4j
 	// container, no AGE half.
