@@ -28,6 +28,9 @@
 // nil-element arm of the decode is unreachable from a stored property and is
 // held by the emission's unit rows instead.
 //
+// The container is shared with live_neo4j_union_list_expression_test.go's
+// rows (bd gqlc-dkcz), whose header says why they have no test of their own.
+//
 // NOT PARALLEL, for live_neo4j_uuid_test.go's reason: it boots a container of
 // its own, and running beside the parallel set would raise the peak.
 //
@@ -91,6 +94,9 @@ func TestNeo4jRoundTripsAUnionOfATemporalList(t *testing.T) {
 			runUnionListTemporalRows(ctx, t, a.open(ctx, t, boltURI))
 		})
 	}
+	t.Run("a list expression of nullable union elements", func(t *testing.T) {
+		runUnionListExpressionRows(ctx, t, boltURI)
+	})
 }
 
 // The stamps are written at a non-UTC offset so the read-back is known to

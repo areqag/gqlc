@@ -323,3 +323,71 @@ func payloadModels(t *testing.T, pt graph.PropertyType) string {
 	require.FailNow(t, "no models.go in the emission")
 	return ""
 }
+
+// TestUnionListExpressionElementAdmitsNull is the list-EXPRESSION half of
+// the rule for an element that is a DECLARED union (bd gqlc-dkcz):
+// `RETURN [a.either] AS xs` over a nullable `either :: ANY<DATE | INT64>`.
+// The element's carrier text is `any`, which takes no star, and the plan
+// once let that zero the element's nullability too — so the walk handed
+// a NULL element to the union's decode helper, which carries no member
+// for nil and failed the whole column.
+//
+// The nullable row asserts the append as well as the arm. The
+// accumulator is []any, so appending `&v` compiles and stores a *any in
+// the caller's slice; the arm being unreachable is what had hidden that.
+func TestUnionListExpressionElementAdmitsNull(t *testing.T) {
+	t.Parallel()
+
+	either := graph.UnionOf([]graph.UnionMember{{Type: graph.TypeDate}, {Type: graph.TypeInt64}})
+	tests := []struct {
+		name       string
+		nullable   bool
+		wantNilArm bool
+	}{
+		{name: "a nullable union element", nullable: true, wantNilArm: true},
+		{name: "a NOT NULL union element", nullable: false, wantNilArm: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			files, err := neo4j.New().Generate(codegen.Input{
+				Schema: schemaWithPayload(either),
+				Queries: []codegen.NamedQuery{{
+					Name:        "Xs",
+					Cardinality: queryfile.CardinalityMany,
+					SourceFile:  "q.cypher",
+					SourceText:  "MATCH (b:Blob) RETURN [b.payload] AS xs\n",
+					Validated: resolver.ValidatedQuery{Columns: []resolver.Column{{
+						Name: "xs",
+						Type: resolver.ResolvedList{Element: resolver.ResolvedProperty{Type: either, Nullable: tt.nullable}},
+					}}},
+				}},
+			})
+			require.NoError(t, err)
+
+			var queries string
+			for _, f := range files {
+				if f.Path == "q.cypher.go" {
+					queries = string(f.Contents)
+				}
+			}
+			require.Contains(t, queries, "decodeUnion", "the premise: the element walk dispatches through the union helper")
+			require.Contains(t, queries, "acc := make([]any, 0, len(value))",
+				"the union element's carrier gained a star, so the column is no longer the []any every union list is")
+			require.Contains(t, queries, "acc = append(acc, v)\n",
+				"the union element is appended as something other than the bare decoded value")
+			require.NotContains(t, queries, "append(acc, &v)",
+				"the walk appends a *any into the []any accumulator, so the caller reads a pointer where a member belongs")
+
+			if tt.wantNilArm {
+				require.Contains(t, queries, "if elem == nil {\n\t\t\t\tacc = append(acc, nil)",
+					"the walk has no nil arm, so a NULL element reaches the union helper, which carries no member for nil")
+				return
+			}
+			require.NotContains(t, queries, "elem == nil",
+				"this element carries NOT NULL, so admitting null substitutes a nil for a violation")
+		})
+	}
+}

@@ -61,6 +61,10 @@ func (q *queries) AccountEithers(ctx context.Context) ([][]any, error) {
 		}
 		acc := make([]any, 0, len(value))
 		for i, elem := range value {
+			if elem == nil {
+				acc = append(acc, nil)
+				continue
+			}
 			v, err := decodeUnion26f53c9e(elem)
 			if err != nil {
 				return nil, fmt.Errorf("AccountEithers: decode column %q element %d: %w", "eithers", i, err)
