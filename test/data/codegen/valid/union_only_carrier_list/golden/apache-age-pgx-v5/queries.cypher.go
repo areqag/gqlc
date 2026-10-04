@@ -75,7 +75,7 @@ func (q *queries) LedgerEntries(ctx context.Context) ([]*[]any, error) {
 		}
 		var value0 *[]any
 		if raw0 != nil {
-			decoded, err := agtypeListOfAny(raw0)
+			decoded, err := agtypeListOfNullableUnion0aa394d5(raw0)
 			if err != nil {
 				return nil, fmt.Errorf("LedgerEntries: decode column %q: %w", "entries", err)
 			}
@@ -100,7 +100,12 @@ func (q *queries) LedgersByEntries(ctx context.Context, arg *[]any) ([]int64, er
 		return nil, err
 	}
 	param0, err := agtypeEncodedNullable(arg, func(in []any) ([]any, error) {
-		return agtypeEncodedList(in, encodeUnion0aa394d5)
+		return agtypeEncodedList(in, func(v any) (any, error) {
+			if v == nil {
+				return nil, nil
+			}
+			return encodeUnion0aa394d5(v)
+		})
 	})
 	if err != nil {
 		return nil, fmt.Errorf("LedgersByEntries: parameter $entries: %w", err)

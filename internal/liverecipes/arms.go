@@ -69,13 +69,16 @@ var LiveArms = map[string]Arm{
 	// IS the assertion — so it goes in the cheap half beside the uint64
 	// row above rather than paying for an AGE image it never talks to.
 	"TestAGERefusesAUnionParameterOutsideTheDeclaredMemberSet": ArmNeo4j,
-	"TestAGESessionInit":                         ArmAGE,
-	"TestAGERefusesRelationshipTypeAlternation":  ArmAGE,
-	"TestAGERefusesTheFunctionsItDoesNotDefine":  ArmAGE,
-	"TestAGERefusesTheSpatialConstructor":        ArmAGE,
-	"TestAGERefusesTheNamespaceItHasNoSchemaFor": ArmAGE,
-	"TestAGEOffsetSidecar":                       ArmAGE,
-	"TestAGEZonedTime":                           ArmAGE,
+	// The encode half of bd gqlc-3jhv, over a nil DBTX for the same
+	// reason as the row above and in the same cheap half.
+	"TestAGEBindsANullElementInAUnionListParameter": ArmNeo4j,
+	"TestAGESessionInit":                            ArmAGE,
+	"TestAGERefusesRelationshipTypeAlternation":     ArmAGE,
+	"TestAGERefusesTheFunctionsItDoesNotDefine":     ArmAGE,
+	"TestAGERefusesTheSpatialConstructor":           ArmAGE,
+	"TestAGERefusesTheNamespaceItHasNoSchemaFor":    ArmAGE,
+	"TestAGEOffsetSidecar":                          ArmAGE,
+	"TestAGEZonedTime":                              ArmAGE,
 	// The UUID storage and round-trip measurement on this store (bd
 	// gqlc-ytf9, ADR 0047), the twin of TestNeo4jStoresAndRoundTripsAUUID.
 	"TestAGEStoresAndRoundTripsAUUID":                           ArmAGE,
@@ -90,4 +93,5 @@ var LiveArms = map[string]Arm{
 	"TestAGEAgtypeNullReachesPgxAsSQLNULL":                      ArmAGE,
 	"TestNeo4jMinOverAnEmptyGroupIsNull":                        ArmNeo4j,
 	"TestAGEMinOverAnEmptyGroupIsNull":                          ArmAGE,
+	"TestAGERoundTripsANullElementInAUnionList":                 ArmAGE,
 }
