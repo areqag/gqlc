@@ -68,3 +68,27 @@ func (q *queries) AccountUnknownElements(ctx context.Context) ([]AccountUnknownE
 	}
 	return out, nil
 }
+
+const accountBareUnknownQueryText = `MATCH (a:Account) RETURN a.dates[0] AS dated ORDER BY a.id`
+
+// AccountBareUnknown executes the AccountBareUnknown query.
+//
+//	MATCH (a:Account) RETURN a.dates[0] AS dated ORDER BY a.id
+func (q *queries) AccountBareUnknown(ctx context.Context) ([]any, error) {
+	records, err := q.db.run(ctx, accountBareUnknownQueryText, nil, neo4j.AccessModeRead)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]any, 0, len(records))
+	for _, record := range records {
+		value, ok := record.Get("dated")
+		if !ok {
+			return nil, fmt.Errorf("AccountBareUnknown: decode column %q: key not found", "dated")
+		}
+		if value == nil {
+			return nil, fmt.Errorf("AccountBareUnknown: column %q is non-nullable but arrived null", "dated")
+		}
+		out = append(out, value)
+	}
+	return out, nil
+}

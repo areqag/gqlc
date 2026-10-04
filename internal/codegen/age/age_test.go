@@ -1987,10 +1987,11 @@ func (s *EmissionSuite) TestRejectsQueriesItCannotServe() {
 			wantError: true,
 		},
 		{
-			name:      "an unresolved column is dropped",
-			queries:   []codegen.NamedQuery{unknown},
-			wantSub:   `1 query would be dropped: Opaque (column "u" projects unknown)`,
-			wantError: true,
+			// Read through agtypeValue as `any`, as neo4j reads it through
+			// the driver and as this backend already reads an unknown list
+			// element (bd gqlc-2omj).
+			name:    "an unresolved column generates",
+			queries: []codegen.NamedQuery{unknown},
 		},
 		{
 			name:    "a list parameter generates",

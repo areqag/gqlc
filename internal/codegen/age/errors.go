@@ -582,7 +582,8 @@ func unservedScalar(ct resolver.ResolvedScalar) string {
 // the last of these because its label and its properties are together
 // enough to fill the entity struct the schema declares — and a list
 // expression whose every element is served, which unservedListElement
-// decides. What remains is a width no emitted helper can fill, an
+// decides, and a value of unknown type, read through agtype's own value
+// vocabulary as neo4j reads it through the driver's. What remains is a width no emitted helper can fill, an
 // expression the resolver typed as something other than a property, or —
 // for the edge union — a column that could only arrive in answer to a
 // statement this server will not parse.
@@ -613,7 +614,15 @@ func unservedColumn(t resolver.ResolvedType) string {
 		}
 		return ""
 	case resolver.ResolvedUnknown:
-		return "projects " + ct.String()
+		// Served as `any`, decoded through agtypeValue — the arm a property
+		// of no declared shape and an unknown list element already take.
+		// codegen.Prepare plans the row field as ColumnAny with Go type
+		// "any", and decodeFunc answers that text with agtypeValue, so
+		// nothing is missing between the gate and the decode. The refusal
+		// that stood here dated from the scalar-only read path (#657),
+		// whose decoder had no arm for a value of unknown shape; that
+		// helper has existed since (bd gqlc-2omj, GH #2997).
+		return ""
 	}
 	// Reached without a ninth variant. resolver.ResolvedType's unexported
 	// marker stops another package DECLARING an implementation from
@@ -804,10 +813,9 @@ func unservedListElement(t resolver.ResolvedType) string {
 		return ""
 	case resolver.ResolvedUnknown:
 		// Decodes through agtype's own value vocabulary, the same arm a
-		// property of no declared shape takes. Unlike the top-level
-		// unknown column, which has no Go type the table produced to
-		// declare the row field with, an element rides the "any" carrier
-		// the list wrapper is built around.
+		// property of no declared shape and a top-level unknown column
+		// take: the element rides the "any" carrier the list wrapper is
+		// built around.
 		return ""
 	case resolver.ResolvedList:
 		return unservedListElement(et.Element)
