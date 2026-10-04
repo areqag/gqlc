@@ -494,6 +494,7 @@ func (s *ConformanceSuite) TestEmittedDecodersGuardOnlyOnStampableLabels() {
 			in := codegen.Input{Schema: sch, Queries: s.loadNamedQueries(dir, m, sch)}
 			alphabet := schemaLabelAlphabet(sch)
 			decoderShapes := preparedEntityShapes(s.Require(), in)
+			decodedRoll := preparedDecodedEntities(s.Require(), in)
 
 			for _, target := range targets {
 				files, ok := s.emitOrRefuse(target, in)
@@ -505,7 +506,7 @@ func (s *ConformanceSuite) TestEmittedDecodersGuardOnlyOnStampableLabels() {
 					continue
 				}
 				accepted[target]++
-				for _, d := range emittedEntityDecoders(s.Require(), target, files, decoderShapes) {
+				for _, d := range emittedEntityDecoders(s.Require(), target, files, decoderShapes, decodedRoll) {
 					decoders[target][d.shape]++
 					if len(d.guards) > 0 {
 						guarded[target][d.shape]++
@@ -1087,6 +1088,23 @@ func schemaLabelAlphabet(sch schema.Schema) labelAlphabet {
 	return out
 }
 
+// preparedDecodedEntities is the sorted names of the entities some query of
+// in decodes, by the derivation the backends gate their decoders on.
+// Asked of the derivation rather than written down, for the reason
+// preparedEntityShapes is: a roll this sweep kept for itself could drift
+// from the one the emission obeys.
+func preparedDecodedEntities(r *require.Assertions, in codegen.Input) []string {
+	prepared, err := codegen.Prepare(in, probeTypeMap{}, "")
+	r.NoError(err, "the shared derivation refuses a batch the corpus holds valid")
+	// nil when empty, as slices.Sorted answers for the emitted side.
+	var out []string
+	for _, e := range codegen.DecodedEntities(prepared) {
+		out = append(out, e.Name)
+	}
+	slices.Sort(out)
+	return out
+}
+
 // preparedEntityShapes is the axis each entity struct one batch derives
 // sits on, keyed by the struct name a decoder returns.
 //
@@ -1097,10 +1115,10 @@ func schemaLabelAlphabet(sch schema.Schema) labelAlphabet {
 // sweep cannot drift into holding a decoder to an axis the emitter does
 // not put it on.
 //
-// Its key set is also the roll the emission is reconciled against, so a
-// batch it under-names would leave decoders ungraded and one it
-// over-names would demand decoders no backend renders. Both are the same
-// derivation the backends run, which is why neither can drift alone.
+// Its key set is what a decoder is classified against; the roll the
+// emission is reconciled against is preparedDecodedEntities, the subset
+// some query decodes. Both are the same derivation the backends run,
+// which is why neither can drift alone.
 //
 // probeTypeMap admits every property width, so the derivation runs for
 // every fixture any backend serves. A narrower table would refuse widths
@@ -1427,11 +1445,16 @@ func TestUnstampableReasonNamesTheRightObstacle(t *testing.T) {
 // limits are stated under "What it does not decide" above.
 //
 // Then both directions are reconciled. The entities decoded must be
-// exactly the entities the shared derivation names, one decoder each:
-// every backend renders one decoder per entity, so an entity left
-// undecoded is either an emission that stopped filling that struct or a
-// decoder written in a shape this sweep cannot read — and the second is
-// precisely the ungraded site the classification exists to refuse.
+// exactly roll, one decoder each, where the sweep passes the entities the
+// shared derivation says some query decodes (codegen.DecodedEntities):
+// every backend renders one decoder per such entity and none for the rest
+// (bd gqlc-m1dk), so an entity of the roll left undecoded is either an
+// emission that stopped filling that struct or a decoder written in a
+// shape this sweep cannot read — and the second is precisely the ungraded
+// site the classification exists to refuse. shapes stays the whole
+// entity table, so a function returning an entity outside the roll is
+// still classified as its decoder, and is then the extra name the
+// reconciliation reports.
 //
 // Naming the wire's scalar helpers is what this replaces. Keying on
 // decode<T> separated a decoder from agtypeInt64 and agtypeString by their
@@ -1440,7 +1463,7 @@ func TestUnstampableReasonNamesTheRightObstacle(t *testing.T) {
 // agtype's fixed spellings of true, false and null are held by
 // wireScalarSpellings instead.
 func emittedEntityDecoders(
-	r *require.Assertions, target string, files []codegen.File, shapes map[string]codegen.EntityKind,
+	r *require.Assertions, target string, files []codegen.File, shapes map[string]codegen.EntityKind, roll []string,
 ) []entityDecoder {
 	fset := token.NewFileSet()
 	var out []entityDecoder
@@ -1495,12 +1518,13 @@ func emittedEntityDecoders(
 		}
 	}
 
-	r.Equal(slices.Sorted(maps.Keys(shapes)), slices.Sorted(maps.Keys(decoded)),
-		"%s decodes a different set of entities than codegen.Prepare names for this fixture. Every backend "+
-			"renders one decoder per entity, and this sweep recognises one by the entity type it returns, so an "+
-			"entity the derivation names and the emission does not decode is either a struct nothing fills or a "+
-			"decoder written in a shape this sweep cannot read — and the guards of a decoder it cannot read are "+
-			"graded by nothing at all", target)
+	r.Equal(roll, slices.Sorted(maps.Keys(decoded)),
+		"%s decodes a different set of entities than the ones codegen.DecodedEntities says this fixture's "+
+			"queries decode. Every backend renders one decoder per such entity and none for the rest, and this "+
+			"sweep recognises one by the entity type it returns, so an entity the derivation names and the "+
+			"emission does not decode is either a struct nothing fills or a decoder written in a shape this "+
+			"sweep cannot read — and the guards of a decoder it cannot read are graded by nothing at all; an "+
+			"entity decoded outside it is a decoder nothing calls (bd gqlc-m1dk)", target)
 	return out
 }
 
@@ -2295,7 +2319,7 @@ func recordedGrading(
 				}
 			}
 		}()
-		for _, d := range emittedEntityDecoders(r, "probe-backend", files, shapes) {
+		for _, d := range emittedEntityDecoders(r, "probe-backend", files, shapes, slices.Sorted(maps.Keys(shapes))) {
 			gradeDecoderGuards(r, "probe-backend", "probe-fixture", d, alphabet)
 		}
 		for _, d := range emittedMethodDecoders(r, files, shapes) {
@@ -2358,7 +2382,7 @@ func recordedSweep(files []codegen.File, shapes map[string]codegen.EntityKind) (
 				}
 			}
 		}()
-		out = emittedEntityDecoders(require.New(rec), "probe-backend", files, shapes)
+		out = emittedEntityDecoders(require.New(rec), "probe-backend", files, shapes, slices.Sorted(maps.Keys(shapes)))
 	}()
 	return rec.msgs, out
 }
@@ -2423,7 +2447,7 @@ func decodeKnows(raw []byte) (Knows, error) { return Knows{}, nil }
 		{
 			name:     "an entity the emission never decodes",
 			emission: "package emitted\n\nfunc decodePerson(raw []byte) (Person, error) { return Person{}, nil }\n",
-			want:     "decodes a different set of entities than codegen.Prepare names for this fixture",
+			want:     "decodes a different set of entities than the ones codegen.DecodedEntities says",
 		},
 		{
 			name: "a second decoder for one entity, spelled as a value in a dispatch table",
@@ -4251,7 +4275,7 @@ func decodePerson(raw []byte) (Person, error) {
 		t.Run(tc.name, func(t *testing.T) {
 			files := []codegen.File{{Path: "models.go", Contents: []byte(fmt.Sprintf(emission, tc.guard))}}
 
-			decoders := emittedEntityDecoders(require.New(t), "probe-backend", files, shapes)
+			decoders := emittedEntityDecoders(require.New(t), "probe-backend", files, shapes, slices.Sorted(maps.Keys(shapes)))
 
 			requireSwept(t, len(decoders), "the sweep of this emission", whyDecoderListEmpties)
 			require.Equal(t, []entityDecoder{{

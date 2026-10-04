@@ -266,6 +266,7 @@ var corpusTables = map[string]corpusrun.Table{
 func (s *EmissionSuite) TestEmittedHelpersDecodeTheAgtypeCorpus() {
 	in := s.inputFrom(filepath.Join("testdata", corpusSchema))
 	in.Queries = []codegen.NamedQuery{servedQuery, instantParamQuery, carrierParamQuery, zonedParamQuery, listCarrierParamQuery, nestedListCarrierParamQuery}
+	in = decodingEveryEntity(in)
 	emitted, err := age.New(age.WithPackageName(corpusPackage)).Generate(in)
 	s.Require().NoError(err)
 	files := make(map[string]string, len(emitted))

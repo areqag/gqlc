@@ -1,7 +1,12 @@
+// Package goldensunused_test holds the edges between a PR and `unused` over
+// the goldens (`just check-goldens-unused`). It is test-only: the gate roots
+// nothing since bd gqlc-m1dk, so the tool that wrote its roots, and the
+// package these tests lived in beside it, went with the rooting.
+//
 // An external test package: it reads ci.yml through a third-party YAML
 // package, and govulncheck discards an in-package test variant together with
 // what only it imports (`just vuln-root-residual`, bd gqlc-m5rc).
-package main_test
+package goldensunused_test
 
 import (
 	"bytes"

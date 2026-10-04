@@ -234,7 +234,7 @@ func TestEmittedDecodersRunOnDriverValues(t *testing.T) {
 	require.NoError(t, err)
 	sch, err := gql.New().Parse(bytes.NewReader(src))
 	require.NoError(t, err)
-	in := codegen.Input{Schema: sch, Queries: corpusNamedQueries(t, sch)}
+	in := decodingEveryEntity(codegen.Input{Schema: sch, Queries: corpusNamedQueries(t, sch)})
 
 	emit := func(v neo4j.DriverVersion) map[string]string {
 		files, err := neo4j.New(neo4j.WithPackageName(corpusPackage), neo4j.WithDriverVersion(v)).Generate(in)

@@ -34,7 +34,11 @@ func generate(in codegen.Input, target driverTarget, packageName string) ([]code
 	// the batch reaches a record, and a batch can reach one through a
 	// query parameter alone — which models.go, whose whole body is gated
 	// on the schema declaring an entity, would emit nothing for.
-	if encodings := codegen.RecordEncodings(prepared.Entities, prepared.Queries); len(encodings) > 0 {
+	// Both encoding sets read the decoded entities alone: an entity's
+	// record or union property is converted only inside its decode
+	// helper, which is emitted for those alone (bd gqlc-m1dk).
+	decoded := codegen.DecodedEntities(prepared)
+	if encodings := codegen.RecordEncodings(decoded, prepared.Queries); len(encodings) > 0 {
 		files = append(files, codegen.File{
 			Path:     "record_neo4j.go",
 			Contents: renderRecordHelpers(pkg, encodings, recordUse, target),
@@ -46,7 +50,7 @@ func generate(in codegen.Input, target driverTarget, packageName string) ([]code
 	// when the batch reaches a union, and a batch can reach one through a
 	// query parameter alone — which models.go, whose whole body is gated
 	// on the schema declaring an entity, would emit nothing for.
-	if encodings := codegen.UnionEncodings(prepared.Entities, prepared.Queries); len(encodings) > 0 {
+	if encodings := codegen.UnionEncodings(decoded, prepared.Queries); len(encodings) > 0 {
 		files = append(files, codegen.File{
 			Path:     "union_neo4j.go",
 			Contents: renderUnionHelpers(pkg, encodings, unionUse, target),

@@ -4,9 +4,6 @@ package nestedlistelementprojection
 
 import (
 	"fmt"
-
-	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
-	"github.com/neo4j/neo4j-go-driver/v5/neo4j/dbtype"
 )
 
 // Grid corresponds to the Grid node type.
@@ -15,84 +12,6 @@ type Grid struct {
 	Labels []*string
 	Ranks  *[]int16
 	Tags   *[]*string
-}
-
-// decodeGrid decodes a driver dbtype.Node into a Grid struct,
-// enforcing the wire label and the per-property nullability the
-// schema declares.
-func decodeGrid(node dbtype.Node) (Grid, error) {
-	has0 := false
-	for _, label := range node.Labels {
-		if label == "Grid" {
-			has0 = true
-			break
-		}
-	}
-	if !has0 {
-		return Grid{}, fmt.Errorf("decode Grid: expected a node labelled %q, got labels %q", "Grid", node.Labels)
-	}
-	var out Grid
-	value0, err := neo4j.GetProperty[int64](node, "id")
-	if err != nil {
-		return Grid{}, fmt.Errorf("decode Grid.Id: %w", err)
-	}
-	out.Id = value0
-	value1, err := neo4j.GetProperty[[]any](node, "labels")
-	if err != nil {
-		return Grid{}, fmt.Errorf("decode Grid.Labels: %w", err)
-	}
-	value1s := make([]*string, 0, len(value1))
-	for i0, elem0 := range value1 {
-		if elem0 == nil {
-			value1s = append(value1s, nil)
-			continue
-		}
-		v0, ok := elem0.(string)
-		if !ok {
-			return Grid{}, fmt.Errorf("decode Grid.Labels: property %q element %d: expected string, got %T", "labels", i0, elem0)
-		}
-		value1s = append(value1s, &v0)
-	}
-	out.Labels = value1s
-	if v, ok := node.Props["ranks"]; ok {
-		s, ok := v.([]any)
-		if !ok {
-			return Grid{}, fmt.Errorf("decode Grid.Ranks: property %q: expected []any, got %T", "ranks", v)
-		}
-		narrowed := make([]int16, 0, len(s))
-		for i0, elem0 := range s {
-			v0, ok := elem0.(int64)
-			if !ok {
-				return Grid{}, fmt.Errorf("decode Grid.Ranks: property %q element %d: expected int64, got %T", "ranks", i0, elem0)
-			}
-			v0n, err := narrowInt[int16](v0)
-			if err != nil {
-				return Grid{}, fmt.Errorf("decode Grid.Ranks: property %q element %d: %w", "ranks", i0, err)
-			}
-			narrowed = append(narrowed, v0n)
-		}
-		out.Ranks = &narrowed
-	}
-	if v, ok := node.Props["tags"]; ok {
-		s, ok := v.([]any)
-		if !ok {
-			return Grid{}, fmt.Errorf("decode Grid.Tags: property %q: expected []any, got %T", "tags", v)
-		}
-		narrowed := make([]*string, 0, len(s))
-		for i0, elem0 := range s {
-			if elem0 == nil {
-				narrowed = append(narrowed, nil)
-				continue
-			}
-			v0, ok := elem0.(string)
-			if !ok {
-				return Grid{}, fmt.Errorf("decode Grid.Tags: property %q element %d: expected string, got %T", "tags", i0, elem0)
-			}
-			narrowed = append(narrowed, &v0)
-		}
-		out.Tags = &narrowed
-	}
-	return out, nil
 }
 
 // narrowInt converts a driver's int64 down to the integer width the

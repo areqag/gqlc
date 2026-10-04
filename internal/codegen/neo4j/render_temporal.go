@@ -2,6 +2,7 @@ package neo4j
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/areqag/gqlc/internal/codegen"
@@ -82,7 +83,9 @@ func conversionUses(prepared codegen.Prepared, tm typeMap) (map[string]carrierUs
 		records: make(map[graph.PropertyType]carrierUse),
 		unions:  make(map[graph.PropertyType]carrierUse),
 	}
-	for _, e := range prepared.Entities {
+	// An entity's properties are decoded only inside its decode<Name>
+	// helper, which is emitted only for an entity some query decodes.
+	for _, e := range codegen.DecodedEntities(prepared) {
 		for _, f := range e.Fields {
 			w.markDecode(f.GoType, f.Width)
 		}
@@ -445,12 +448,14 @@ func narrowCall(goType string, width graph.PropertyType, src string) string {
 // reports it is `unused` over the goldens with generated files visible
 // (`just check-goldens-unused`, part of the required fence, bd
 // gqlc-ukzq): a narrowInt or narrowFloat32 emitted into a golden package
-// that never calls it reds that check by name. Two limits. It reads the
+// that never calls it reds that check by name. One limit: it reads the
 // shapes the fixtures have, and none declaring a record targets this
 // driver, so the record arm is held by
-// TestNarrowsANumericWidthIgnoresRecords alone. And entity decoders are
-// rooted there (bd gqlc-m1dk), so a helper only a dead decoder calls
-// counts as called.
+// TestNarrowsANumericWidthIgnoresRecords alone.
+//
+// entities is the DECODED entities (codegen.DecodedEntities): a property
+// is narrowed only inside its entity's decode helper, which is emitted
+// for those alone (bd gqlc-m1dk).
 func narrowsANumericWidth(entities []codegen.Entity, prepared []codegen.Query, tm typeMap) (ints, floats bool) {
 	var n numericNarrowing
 	for _, e := range entities {
@@ -602,6 +607,16 @@ func renderTemporalConversions(pkg string, uses map[string]carrierUse, target dr
 	b.WriteString("package ")
 	b.WriteString(pkg)
 	b.WriteString("\n\n")
+
+	// The carriers can be named by an entity struct no query decodes,
+	// which converts nothing (bd gqlc-m1dk); an import nothing names
+	// does not compile.
+	if !slices.ContainsFunc(codegen.TemporalCarriers, func(name string) bool {
+		_, used := uses[name]
+		return used
+	}) {
+		return []byte(b.String())
+	}
 
 	b.WriteString("import (\n")
 	if needsTimePackage(uses) {

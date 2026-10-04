@@ -4,9 +4,6 @@ package certifiedlistelement
 
 import (
 	"fmt"
-
-	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
-	"github.com/neo4j/neo4j-go-driver/v5/neo4j/dbtype"
 )
 
 // Person corresponds to the Person node type.
@@ -15,50 +12,6 @@ type Person struct {
 	Id    int64
 	Rank  int32
 	Score *int64
-}
-
-// decodePerson decodes a driver dbtype.Node into a Person struct,
-// enforcing the wire label and the per-property nullability the
-// schema declares.
-func decodePerson(node dbtype.Node) (Person, error) {
-	has0 := false
-	for _, label := range node.Labels {
-		if label == "Person" {
-			has0 = true
-			break
-		}
-	}
-	if !has0 {
-		return Person{}, fmt.Errorf("decode Person: expected a node labelled %q, got labels %q", "Person", node.Labels)
-	}
-	var out Person
-	value0, err := neo4j.GetProperty[int64](node, "age")
-	if err != nil {
-		return Person{}, fmt.Errorf("decode Person.Age: %w", err)
-	}
-	out.Age = value0
-	value1, err := neo4j.GetProperty[int64](node, "id")
-	if err != nil {
-		return Person{}, fmt.Errorf("decode Person.Id: %w", err)
-	}
-	out.Id = value1
-	value2, err := neo4j.GetProperty[int64](node, "rank")
-	if err != nil {
-		return Person{}, fmt.Errorf("decode Person.Rank: %w", err)
-	}
-	value2n, err := narrowInt[int32](value2)
-	if err != nil {
-		return Person{}, fmt.Errorf("decode Person.Rank: %w", err)
-	}
-	out.Rank = value2n
-	if v, ok := node.Props["score"]; ok {
-		s, ok := v.(int64)
-		if !ok {
-			return Person{}, fmt.Errorf("decode Person.Score: property %q: expected int64, got %T", "score", v)
-		}
-		out.Score = &s
-	}
-	return out, nil
 }
 
 // narrowInt converts a driver's int64 down to the integer width the

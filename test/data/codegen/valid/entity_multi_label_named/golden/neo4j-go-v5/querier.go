@@ -2,7 +2,10 @@
 
 package entitymultilabelnamed
 
+import "context"
+
 type ReadQuerier interface {
+	PersonEmployees(ctx context.Context) ([]PersonEmployee, error)
 }
 
 type WriteQuerier interface {

@@ -1210,7 +1210,7 @@ a `golden/` subdirectory with the complete generated package:
 | `temporal_column_localdatetime` | `RETURN localdatetime() AS ldt :one` — `ResolvedTemporal{LocalDateTime}` column. |
 | `temporal_column_duration` | `RETURN duration({days: 7}) AS d :one` — `ResolvedTemporal{Duration}` column. Guards against `time.Duration` regression. |
 | `temporal_column_time` | `RETURN time() AS t :one` — `ResolvedTemporal{Time}` column. |
-| `property_date` | `Person.dob :: DATE NOT NULL` schema property with no query — models-only adoption. `Person.Dob Date` — the neutral carrier, decoded from `dbtype.Date` through the emitted `toDate` (ADR 0033). Emits `temporal.go` + `temporal_neo4j.go`. |
+| `property_date` | `Person.dob :: DATE NOT NULL` schema property with no query — models-only adoption. `Person.Dob Date` — the neutral carrier, decoded from `dbtype.Date` through the emitted `toDate` (ADR 0033). Emits `temporal.go` + `temporal_neo4j.go`. *Note (2026-10-04, bd gqlc-m1dk):* the fixture now carries a `RETURN p` query, because a decoder is emitted only for an entity some query decodes; without it there is no `decodePerson` and so no `toDate`. |
 | `property_timestamp` | `Person.updatedAt :: TIMESTAMP` (nullable) schema property. `Person.UpdatedAt *time.Time`. Exercises the `time` import in `models.go`. |
 | `float32_column` | `Person.height :: FLOAT32 NOT NULL` + `RETURN p.height AS h :one`. Exercises the encode-widen / decode-narrow contract on both entity property and column. |
 | `float32_parameter` | `MATCH (p:Person {height: $h}) RETURN p :one` with `$h :: FLOAT32`. Exercises the parameter-binding `float64(x)` widen. |

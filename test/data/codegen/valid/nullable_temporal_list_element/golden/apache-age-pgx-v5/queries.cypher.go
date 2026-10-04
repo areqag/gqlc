@@ -74,3 +74,39 @@ func (q *queries) SlotsMatching(ctx context.Context, arg SlotsMatchingParams) ([
 	}
 	return out, nil
 }
+
+const allSlotsQueryText = `MATCH (s:Slot) RETURN s`
+
+// AllSlots executes the AllSlots query.
+//
+//	MATCH (s:Slot) RETURN s
+func (q *queries) AllSlots(ctx context.Context) ([]Slot, error) {
+	stmt, err := q.cypherStmt("$gqlc$", allSlotsQueryText, "v0 ag_catalog.agtype")
+	if err != nil {
+		return nil, err
+	}
+	rows, err := q.db.Query(ctx, stmt, "{}")
+	if err != nil {
+		return nil, fmt.Errorf("AllSlots: %w", err)
+	}
+	defer rows.Close()
+	out := make([]Slot, 0)
+	for rows.Next() {
+		var raw0 []byte
+		if err := rows.Scan(&raw0); err != nil {
+			return nil, fmt.Errorf("AllSlots: scan row: %w", err)
+		}
+		if raw0 == nil {
+			return nil, fmt.Errorf("AllSlots: column %q is non-nullable but arrived null", "s")
+		}
+		value0, err := decodeSlot(raw0)
+		if err != nil {
+			return nil, fmt.Errorf("AllSlots: decode column %q: %w", "s", err)
+		}
+		out = append(out, value0)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("AllSlots: %w", err)
+	}
+	return out, nil
+}

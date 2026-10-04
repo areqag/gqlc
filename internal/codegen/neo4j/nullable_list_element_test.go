@@ -312,7 +312,7 @@ func listColumnInput(list graph.PropertyType) codegen.Input {
 func payloadModels(t *testing.T, pt graph.PropertyType) string {
 	t.Helper()
 
-	files, err := neo4j.New().Generate(codegen.Input{Schema: schemaWithPayload(pt)})
+	files, err := neo4j.New().Generate(decodingEveryEntity(codegen.Input{Schema: schemaWithPayload(pt)}))
 	require.NoError(t, err)
 
 	for _, f := range files {

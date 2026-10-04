@@ -79,6 +79,10 @@ func richPrepared(t *testing.T) (codegen.Prepared, []graph.PropertyType) {
 				{RawName: "p", Field: "P", GoType: recordText(t, paramRec), Width: paramRec},
 			},
 			RowFields: []codegen.Row{
+				// The entity field's record is reached only through the
+				// entity's decoder, which only a whole-node column calls
+				// (bd gqlc-m1dk).
+				{ColumnName: "person", Field: "Person", GoType: "Person", Kind: codegen.ColumnNode},
 				{ColumnName: "r", Field: "R", GoType: recordText(t, rowRec), Width: rowRec},
 				{
 					ColumnName: "notes", Field: "Notes",
@@ -124,7 +128,9 @@ func richPrepared(t *testing.T) (codegen.Prepared, []graph.PropertyType) {
 func TestRecordUseAnswersForExactlyTheSharedEncodingSet(t *testing.T) {
 	prepared, want := richPrepared(t)
 
-	shared := codegen.RecordEncodings(prepared.Entities, prepared.Queries)
+	// The decoded entities, as generate passes them: an entity's record
+	// is converted only inside its decode helper.
+	shared := codegen.RecordEncodings(codegen.DecodedEntities(prepared), prepared.Queries)
 	require.ElementsMatch(t, want, shared,
 		"the premise: the fixture really does reach all five records, so neither walk can be right by reaching none")
 

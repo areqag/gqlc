@@ -18,3 +18,6 @@ MATCH (e:Event) RETURN e.badge AS badge
 
 // name: EventTag :one
 MATCH (e:Event) RETURN e.tag AS tag
+
+// name: AllEvents :many
+MATCH (e:Event) RETURN e

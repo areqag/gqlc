@@ -2,59 +2,10 @@
 
 package nullablecolumns
 
-import (
-	"fmt"
-
-	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
-	"github.com/neo4j/neo4j-go-driver/v5/neo4j/dbtype"
-)
-
 // Person corresponds to the Person node type.
 type Person struct {
 	Age      *int64
 	Id       int64
 	Name     string
 	Nickname *string
-}
-
-// decodePerson decodes a driver dbtype.Node into a Person struct,
-// enforcing the wire label and the per-property nullability the
-// schema declares.
-func decodePerson(node dbtype.Node) (Person, error) {
-	has0 := false
-	for _, label := range node.Labels {
-		if label == "Person" {
-			has0 = true
-			break
-		}
-	}
-	if !has0 {
-		return Person{}, fmt.Errorf("decode Person: expected a node labelled %q, got labels %q", "Person", node.Labels)
-	}
-	var out Person
-	if v, ok := node.Props["age"]; ok {
-		s, ok := v.(int64)
-		if !ok {
-			return Person{}, fmt.Errorf("decode Person.Age: property %q: expected int64, got %T", "age", v)
-		}
-		out.Age = &s
-	}
-	value0, err := neo4j.GetProperty[int64](node, "id")
-	if err != nil {
-		return Person{}, fmt.Errorf("decode Person.Id: %w", err)
-	}
-	out.Id = value0
-	value1, err := neo4j.GetProperty[string](node, "name")
-	if err != nil {
-		return Person{}, fmt.Errorf("decode Person.Name: %w", err)
-	}
-	out.Name = value1
-	if v, ok := node.Props["nickname"]; ok {
-		s, ok := v.(string)
-		if !ok {
-			return Person{}, fmt.Errorf("decode Person.Nickname: property %q: expected string, got %T", "nickname", v)
-		}
-		out.Nickname = &s
-	}
-	return out, nil
 }

@@ -1,5 +1,5 @@
 {
   "package": "propertybytes",
-  "queryFiles": [],
+  "queryFiles": ["queries.cypher"],
   "targets": ["neo4j-go-v5"]
 }

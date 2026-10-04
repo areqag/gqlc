@@ -1,6 +1,6 @@
 {
   "package": "propertyduration",
-  "queryFiles": [],
+  "queryFiles": ["queries.cypher"],
   "targets": [
     "neo4j-go-v5",
     "apache-age-pgx-v5"

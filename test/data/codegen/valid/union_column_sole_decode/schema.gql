@@ -1,0 +1,3 @@
+CREATE PROPERTY GRAPH TYPE UnionColumnSoleDecode AS {
+    (:Thing { id :: INT64 NOT NULL, either :: ANY<DATE | INT64> })
+}

@@ -14,55 +14,9 @@ type Person struct {
 	Id int64
 }
 
-// decodePerson decodes a driver dbtype.Node into a Person struct,
-// enforcing the wire label and the per-property nullability the
-// schema declares.
-func decodePerson(node dbtype.Node) (Person, error) {
-	has0 := false
-	for _, label := range node.Labels {
-		if label == "Person" {
-			has0 = true
-			break
-		}
-	}
-	if !has0 {
-		return Person{}, fmt.Errorf("decode Person: expected a node labelled %q, got labels %q", "Person", node.Labels)
-	}
-	var out Person
-	value0, err := neo4j.GetProperty[int64](node, "id")
-	if err != nil {
-		return Person{}, fmt.Errorf("decode Person.Id: %w", err)
-	}
-	out.Id = value0
-	return out, nil
-}
-
 // Post corresponds to the Post node type.
 type Post struct {
 	Id int64
-}
-
-// decodePost decodes a driver dbtype.Node into a Post struct,
-// enforcing the wire label and the per-property nullability the
-// schema declares.
-func decodePost(node dbtype.Node) (Post, error) {
-	has0 := false
-	for _, label := range node.Labels {
-		if label == "Post" {
-			has0 = true
-			break
-		}
-	}
-	if !has0 {
-		return Post{}, fmt.Errorf("decode Post: expected a node labelled %q, got labels %q", "Post", node.Labels)
-	}
-	var out Post
-	value0, err := neo4j.GetProperty[int64](node, "id")
-	if err != nil {
-		return Post{}, fmt.Errorf("decode Post.Id: %w", err)
-	}
-	out.Id = value0
-	return out, nil
 }
 
 // Authored corresponds to the AUTHORED edge type (Person -> Post).

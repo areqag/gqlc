@@ -2,7 +2,10 @@
 
 package propertybytes
 
+import "context"
+
 type ReadQuerier interface {
+	Blobs(ctx context.Context) ([]Blob, error)
 }
 
 type WriteQuerier interface {

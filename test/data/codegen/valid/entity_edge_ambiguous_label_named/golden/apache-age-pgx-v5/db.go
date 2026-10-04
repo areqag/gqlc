@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -68,6 +69,27 @@ func (q *queries) boundGraph() (string, error) {
 			q.graph, len(q.graph), maxGraphNameBytes)
 	}
 	return q.graph, nil
+}
+
+// cypherStmt composes the statement one query method runs: the bound
+// graph name, the query text between the delimiters tag opens and
+// closes, and the record shape a set-returning cypher() call declares.
+//
+// The name travels inside the statement text because AGE resolves
+// cypher()'s graph argument during parse analysis and accepts a constant
+// there and nothing else. An E-string is the literal form whose escapes
+// mean the same thing whatever standard_conforming_strings is set to,
+// and escaping the backslash and the quote holds an arbitrary name to
+// one literal at the SQL layer; AGE refuses both characters in a graph
+// name at create_graph, so the two barriers stand independently. Query
+// arguments never travel this way: they bind to $1.
+func (q *queries) cypherStmt(tag, text, record string) (string, error) {
+	graph, err := q.boundGraph()
+	if err != nil {
+		return "", err
+	}
+	escaped := strings.ReplaceAll(strings.ReplaceAll(graph, `\`, `\\`), `'`, `\'`)
+	return "SELECT * FROM ag_catalog.cypher(E'" + escaped + "', " + tag + text + tag + ", $1) AS (" + record + ")", nil
 }
 
 // ErrTxDone is returned by Commit when the transaction has already

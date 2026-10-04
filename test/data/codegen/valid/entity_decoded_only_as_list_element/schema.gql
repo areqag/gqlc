@@ -1,0 +1,4 @@
+CREATE PROPERTY GRAPH TYPE EntityDecodedOnlyAsListElement AS {
+    (:Tag { name :: STRING NOT NULL }),
+    (:Tag) -[:NEAR { weight :: INT32 NOT NULL }]-> (:Tag)
+}

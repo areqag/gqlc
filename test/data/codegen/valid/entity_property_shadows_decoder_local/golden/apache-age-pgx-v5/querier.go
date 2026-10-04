@@ -6,6 +6,7 @@ import "context"
 
 type ReadQuerier interface {
 	OneMarker(ctx context.Context) (Marker, error)
+	OneLink(ctx context.Context) (Links, error)
 }
 
 type WriteQuerier interface {

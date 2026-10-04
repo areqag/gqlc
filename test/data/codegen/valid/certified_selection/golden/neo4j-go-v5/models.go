@@ -4,47 +4,12 @@ package certifiedselection
 
 import (
 	"fmt"
-
-	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
-	"github.com/neo4j/neo4j-go-driver/v5/neo4j/dbtype"
 )
 
 // Person corresponds to the Person node type.
 type Person struct {
 	Name string
 	Rank int32
-}
-
-// decodePerson decodes a driver dbtype.Node into a Person struct,
-// enforcing the wire label and the per-property nullability the
-// schema declares.
-func decodePerson(node dbtype.Node) (Person, error) {
-	has0 := false
-	for _, label := range node.Labels {
-		if label == "Person" {
-			has0 = true
-			break
-		}
-	}
-	if !has0 {
-		return Person{}, fmt.Errorf("decode Person: expected a node labelled %q, got labels %q", "Person", node.Labels)
-	}
-	var out Person
-	value0, err := neo4j.GetProperty[string](node, "name")
-	if err != nil {
-		return Person{}, fmt.Errorf("decode Person.Name: %w", err)
-	}
-	out.Name = value0
-	value1, err := neo4j.GetProperty[int64](node, "rank")
-	if err != nil {
-		return Person{}, fmt.Errorf("decode Person.Rank: %w", err)
-	}
-	value1n, err := narrowInt[int32](value1)
-	if err != nil {
-		return Person{}, fmt.Errorf("decode Person.Rank: %w", err)
-	}
-	out.Rank = value1n
-	return out, nil
 }
 
 // narrowInt converts a driver's int64 down to the integer width the

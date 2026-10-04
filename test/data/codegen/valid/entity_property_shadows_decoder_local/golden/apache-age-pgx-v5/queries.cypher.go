@@ -47,3 +47,44 @@ func (q *queries) OneMarker(ctx context.Context) (Marker, error) {
 	}
 	return value0, nil
 }
+
+const oneLinkQueryText = `MATCH (:Marker)-[l:LINKS]->(:Marker) RETURN l`
+
+// OneLink executes the OneLink query.
+//
+//	MATCH (:Marker)-[l:LINKS]->(:Marker) RETURN l
+func (q *queries) OneLink(ctx context.Context) (Links, error) {
+	stmt, err := q.cypherStmt("$gqlc$", oneLinkQueryText, "v0 ag_catalog.agtype")
+	if err != nil {
+		return Links{}, err
+	}
+	rows, err := q.db.Query(ctx, stmt, "{}")
+	if err != nil {
+		return Links{}, fmt.Errorf("OneLink: %w", err)
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		if err := rows.Err(); err != nil {
+			return Links{}, fmt.Errorf("OneLink: %w", err)
+		}
+		return Links{}, ErrNoRows
+	}
+	var raw0 []byte
+	if err := rows.Scan(&raw0); err != nil {
+		return Links{}, fmt.Errorf("OneLink: scan row: %w", err)
+	}
+	if rows.Next() {
+		return Links{}, ErrMultipleResults
+	}
+	if err := rows.Err(); err != nil {
+		return Links{}, fmt.Errorf("OneLink: %w", err)
+	}
+	if raw0 == nil {
+		return Links{}, fmt.Errorf("OneLink: column %q is non-nullable but arrived null", "l")
+	}
+	value0, err := decodeLinks(raw0)
+	if err != nil {
+		return Links{}, fmt.Errorf("OneLink: decode column %q: %w", "l", err)
+	}
+	return value0, nil
+}

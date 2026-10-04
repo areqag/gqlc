@@ -2,57 +2,8 @@
 
 package schemalistpropertyunprojected
 
-import (
-	"fmt"
-
-	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
-	"github.com/neo4j/neo4j-go-driver/v5/neo4j/dbtype"
-)
-
 // Event corresponds to the Event node type.
 type Event struct {
 	Id   int64
 	Tags *[]*string
-}
-
-// decodeEvent decodes a driver dbtype.Node into a Event struct,
-// enforcing the wire label and the per-property nullability the
-// schema declares.
-func decodeEvent(node dbtype.Node) (Event, error) {
-	has0 := false
-	for _, label := range node.Labels {
-		if label == "Event" {
-			has0 = true
-			break
-		}
-	}
-	if !has0 {
-		return Event{}, fmt.Errorf("decode Event: expected a node labelled %q, got labels %q", "Event", node.Labels)
-	}
-	var out Event
-	value0, err := neo4j.GetProperty[int64](node, "id")
-	if err != nil {
-		return Event{}, fmt.Errorf("decode Event.Id: %w", err)
-	}
-	out.Id = value0
-	if v, ok := node.Props["tags"]; ok {
-		s, ok := v.([]any)
-		if !ok {
-			return Event{}, fmt.Errorf("decode Event.Tags: property %q: expected []any, got %T", "tags", v)
-		}
-		narrowed := make([]*string, 0, len(s))
-		for i0, elem0 := range s {
-			if elem0 == nil {
-				narrowed = append(narrowed, nil)
-				continue
-			}
-			v0, ok := elem0.(string)
-			if !ok {
-				return Event{}, fmt.Errorf("decode Event.Tags: property %q element %d: expected string, got %T", "tags", i0, elem0)
-			}
-			narrowed = append(narrowed, &v0)
-		}
-		out.Tags = &narrowed
-	}
-	return out, nil
 }

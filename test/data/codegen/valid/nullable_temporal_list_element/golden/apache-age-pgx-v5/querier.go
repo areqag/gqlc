@@ -6,6 +6,7 @@ import "context"
 
 type ReadQuerier interface {
 	SlotsMatching(ctx context.Context, arg SlotsMatchingParams) ([]int64, error)
+	AllSlots(ctx context.Context) ([]Slot, error)
 }
 
 type WriteQuerier interface {

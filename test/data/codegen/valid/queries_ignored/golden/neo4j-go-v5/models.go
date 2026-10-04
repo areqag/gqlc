@@ -2,77 +2,9 @@
 
 package queriesignored
 
-import (
-	"fmt"
-
-	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
-	"github.com/neo4j/neo4j-go-driver/v5/neo4j/dbtype"
-)
-
 // Person corresponds to the Person node type.
 type Person struct {
 	Age  *int
 	Id   int
 	Name string
-}
-
-// decodePerson decodes a driver dbtype.Node into a Person struct,
-// enforcing the wire label and the per-property nullability the
-// schema declares.
-func decodePerson(node dbtype.Node) (Person, error) {
-	has0 := false
-	for _, label := range node.Labels {
-		if label == "Person" {
-			has0 = true
-			break
-		}
-	}
-	if !has0 {
-		return Person{}, fmt.Errorf("decode Person: expected a node labelled %q, got labels %q", "Person", node.Labels)
-	}
-	var out Person
-	if v, ok := node.Props["age"]; ok {
-		s, ok := v.(int64)
-		if !ok {
-			return Person{}, fmt.Errorf("decode Person.Age: property %q: expected int64, got %T", "age", v)
-		}
-		narrowed, err := narrowInt[int](s)
-		if err != nil {
-			return Person{}, fmt.Errorf("decode Person.Age: %w", err)
-		}
-		out.Age = &narrowed
-	}
-	value0, err := neo4j.GetProperty[int64](node, "id")
-	if err != nil {
-		return Person{}, fmt.Errorf("decode Person.Id: %w", err)
-	}
-	value0n, err := narrowInt[int](value0)
-	if err != nil {
-		return Person{}, fmt.Errorf("decode Person.Id: %w", err)
-	}
-	out.Id = value0n
-	value1, err := neo4j.GetProperty[string](node, "name")
-	if err != nil {
-		return Person{}, fmt.Errorf("decode Person.Name: %w", err)
-	}
-	out.Name = value1
-	return out, nil
-}
-
-// narrowInt converts a driver's int64 down to the integer width the
-// schema declared, refusing a value that width cannot represent.
-//
-// The round-trip catches every width whose range is a strict subset of
-// int64's. uint64 is the one where it does not: the conversion is a
-// bijection there, so uint64(-1) round-trips back to -1 unchanged and
-// only the sign disagreement gives it away. A uint64 property's readable
-// range is [0, MaxInt64] — the wire integer is signed 64-bit — so a
-// negative carrier is always a violation rather than a large value.
-func narrowInt[T ~int | ~int8 | ~int16 | ~int32 | ~int64 |
-	~uint | ~uint8 | ~uint16 | ~uint32 | ~uint64](v int64) (T, error) {
-	out := T(v)
-	if int64(out) != v || (out < T(0)) != (v < 0) {
-		return 0, fmt.Errorf("value %d does not fit the declared %T width", v, out)
-	}
-	return out, nil
 }

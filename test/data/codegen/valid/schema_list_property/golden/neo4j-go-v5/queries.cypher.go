@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
+	"github.com/neo4j/neo4j-go-driver/v5/neo4j/dbtype"
 )
 
 const getEventTagsQueryText = `MATCH (e:Event) RETURN e.tags AS tags`
@@ -46,4 +47,32 @@ func (q *queries) GetEventTags(ctx context.Context) (*[]*string, error) {
 		valuePtr = &acc
 	}
 	return valuePtr, nil
+}
+
+const allEventsQueryText = `MATCH (e:Event) RETURN e`
+
+// AllEvents executes the AllEvents query.
+//
+//	MATCH (e:Event) RETURN e
+func (q *queries) AllEvents(ctx context.Context) ([]Event, error) {
+	records, err := q.db.run(ctx, allEventsQueryText, nil, neo4j.AccessModeRead)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Event, 0, len(records))
+	for _, record := range records {
+		node, isNil, err := neo4j.GetRecordValue[dbtype.Node](record, "e")
+		if err != nil {
+			return nil, fmt.Errorf("AllEvents: decode column %q: %w", "e", err)
+		}
+		if isNil {
+			return nil, fmt.Errorf("AllEvents: column %q is non-nullable but arrived null", "e")
+		}
+		value, err := decodeEvent(node)
+		if err != nil {
+			return nil, fmt.Errorf("AllEvents: decode column %q: %w", "e", err)
+		}
+		out = append(out, value)
+	}
+	return out, nil
 }

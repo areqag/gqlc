@@ -116,6 +116,53 @@ type Prepared struct {
 	Queries  []Query
 }
 
+// DecodedEntities is the subset of p.Entities, in Phase Z order, that some
+// query hands to a decode<Name> helper: a whole-node or whole-edge column,
+// an edge-union candidate, or either of those as a list element at any
+// depth. A backend emits a decoder for these alone (bd gqlc-m1dk): a
+// decoder for an entity no query returns whole is an unexported function
+// nothing calls, and every helper only it calls is dead with it. The
+// entity's struct is emitted either way, being exported.
+//
+// The positions are the ones the render layers name decode<Name> at. One
+// added there and not here is a call to a helper nothing declared, which
+// fails at go build of the emitted package.
+func DecodedEntities(p Prepared) []Entity {
+	decoded := make(map[string]bool)
+	for _, q := range p.Queries {
+		markDecodedEntities(decoded, q)
+	}
+	var out []Entity
+	for _, e := range p.Entities {
+		if decoded[e.Name] {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// markDecodedEntities is DecodedEntities' reading of one query.
+func markDecodedEntities(decoded map[string]bool, q Query) {
+	wholeEntity := func(k ColumnKind) bool { return k == ColumnNode || k == ColumnEdge }
+	for _, f := range q.RowFields {
+		if wholeEntity(f.Kind) {
+			decoded[f.GoType] = true
+		}
+		for elem := f.ListElem; elem != nil; elem = elem.Nested {
+			if wholeEntity(elem.Kind) {
+				decoded[elem.EntityName] = true
+			}
+		}
+	}
+	// Every edge union, whether a column's or a list element's: both
+	// dispatch onto each candidate's decoder.
+	for _, u := range q.EdgeUnions {
+		for _, c := range u.Candidates {
+			decoded[c] = true
+		}
+	}
+}
+
 // Query bundles the per-query derivations produced by Phase B — the
 // derived method surface, the Params/Row shapes, and the resolved axes
 // Phase A already gate-checked. Kept together so the per-source emission
