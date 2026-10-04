@@ -3759,3 +3759,41 @@ func assertPathMemberKindAgrees(rt *rapid.T, part query.Part, pb query.PathBindi
 		return
 	}
 }
+
+// TestComprehensionPaths pins Query.ComprehensionPaths on the shapes the
+// Pattern2 goldens do not hold (bd gqlc-btge). The EXISTS row is the one that
+// holds recordComprehensionPath's suppression guard: a MATCH p = ... inside
+// EXISTS is not collected either, so the two spellings stay in step.
+func TestComprehensionPaths(t *testing.T) {
+	cases := []struct {
+		name string
+		src  string
+		want []string
+	}{
+		{
+			"an anonymous comprehension records nothing",
+			"MATCH (a) RETURN [(a)-->(b) | b] AS bs", nil,
+		},
+		{
+			"source order, not sorted, with duplicates kept",
+			"MATCH (a) RETURN [q = (a)-->() | q] AS x, [p = (a)<--() | p] AS y, [q = (a)--() | q] AS z",
+			[]string{"q", "p", "q"},
+		},
+		{
+			"nested in another comprehension's body",
+			"MATCH (a) RETURN [(a)-->(b) | [q = (b)-->() | q]] AS x",
+			[]string{"q"},
+		},
+		{
+			"inside EXISTS it is suppressed",
+			"MATCH (a) WHERE EXISTS { MATCH (a)-->(b) WHERE size([p = (b)-->() | p]) > 0 RETURN b } RETURN a", nil,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			q, err := cypher.New().Parse(strings.NewReader(tc.src))
+			require.NoError(t, err)
+			require.Equal(t, tc.want, q.ComprehensionPaths)
+		})
+	}
+}

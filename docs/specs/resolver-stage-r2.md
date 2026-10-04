@@ -564,6 +564,17 @@ The switch table:
 | `TypeEdge{}` | panic (resolver bug — RefProjection path in §4.5 bypasses resolveType) | 4.10 edge (R1) |
 | `TypePath{}` | panic (not reached — R5) | 4.10 path (R5) |
 
+*Amendment 2026-10-04 (bead gqlc-btge).* The `TypeNode{}` / `TypeEdge{}`
+rows above, and the "unreachable, panic" bullet below, no longer describe
+the code. Both were reachable — through `CASE`, parentheses, list indexing
+and a `WITH` carry of those — and PR #2987 (merged 6f6acdf2, bead
+gqlc-ruql) made them return `fmt.Errorf("%w: node-valued expression",
+ErrOutOfR0Scope)` / `"%w: edge-valued expression"` instead of panicking.
+The `TypePath{}` row still panics, and is still not reached from a query:
+`shortestPath(...)` and a pattern-comprehension path are not typed
+`TypePath` by the parser, and the latter is refused before `resolveType`
+runs (ADR 0008 amendment 2026-10-04).
+
 **Reachability posture — panic vs. error, per arm.**
 
 - `TypeList{TypeNode|TypeEdge}` (**reachable**, error): a list literal

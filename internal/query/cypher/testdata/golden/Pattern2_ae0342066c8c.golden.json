@@ -30,5 +30,8 @@
   ],
   "combinators": null,
   "parameters": null,
-  "statementKind": "read"
+  "statementKind": "read",
+  "comprehensionPaths": [
+    "p"
+  ]
 }

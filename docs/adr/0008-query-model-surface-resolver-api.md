@@ -1,5 +1,23 @@
 # The `query.Query` surface + resolver API
 
+> _Amendment (2026-10-04, gqlc-btge): the **`ComprehensionPaths` axis** on
+> `Query` — `[]string`, `json:"comprehensionPaths,omitempty"`. A pattern
+> comprehension is opaque to the model (typed `TypeUnknown`, no ref inside
+> it mined), so a path it binds (`[p = (a)-->(b) | p]`) reached the resolver
+> as nothing at all and resolved as an untyped column, while the same
+> binding at `MATCH p = ...` is refused as `ErrOutOfR0Scope: path binding`.
+> The parser now records each such variable, in source order with duplicates
+> kept, via `EnterOC_PatternComprehension`; the resolver refuses a query
+> carrying any with `ErrOutOfR0Scope: path binding "p" in a pattern
+> comprehension`, before any branch resolves. It is recorded at outer scope
+> only: inside `EXISTS { ... }` it is suppressed, as a `MATCH p = ...` there
+> is. Query-level rather than per-Part because nothing reads which Part it
+> sits in, and the Enter-time order of `EnterOC_With` (projection collected,
+> part swapped, then children walked) would attribute a WITH item's
+> comprehension to the part after it. 8 of 3199 parser goldens rebaseline
+> (the Pattern2 scenarios that name a path); every other golden is
+> byte-identical by omitempty._
+
 > _Amendment (2026-07-11, gqlc-33k.3): **Use-precision refinement**, not a
 > model surface change. A `$param` inside an `EXISTS { RegularQuery }`
 > subquery's `LIMIT` or `SKIP` slot previously recorded the blanket
@@ -472,6 +490,11 @@ on each additive cycle.
 
 **Later additions** — inventory:
 
+- **`ComprehensionPaths` axis on `Query`** — adopted 2026-10-04 (gqlc-btge,
+  see the amendment note above). Populated parser-side by
+  `EnterOC_PatternComprehension`; consumed by `resolve`
+  (`internal/resolver/resolve.go`) as an `ErrOutOfR0Scope` refusal. Carries
+  names only; whoever admits paths later widens it.
 - **shortestPath selector axis** on `PathBinding` (see posture below).
 - **`EXISTS { … }` Use precision** (gqlc-33k.3): parameters inside an
   existential subquery previously recorded coarse `ExprUse`s. **Closed

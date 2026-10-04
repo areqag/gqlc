@@ -223,15 +223,24 @@ var invalidFixtures = map[string]error{
 	"ambiguous_edge_orientation.cypher":                 ErrAmbiguousEdgeOrientation,
 	"ambiguous_edge_orientation_after_inference.cypher": ErrAmbiguousEdgeOrientation,
 	"path_binding.cypher":                               ErrOutOfR0Scope,
-	"unwind_binding.cypher":                             ErrOutOfR0Scope,
-	"unknown_edge_undirected.cypher":                    ErrUnknownEdge,
-	"unknown_edge_multi_type_all_miss.cypher":           ErrUnknownEdge,
-	"unknown_property_union_missing.cypher":             ErrUnknownProperty,
-	"unknown_property_union_type_differs.cypher":        ErrUnknownProperty,
-	"unknown_property_union_nullability_differs.cypher": ErrUnknownProperty,
-	"unknown_property_union_sibling_branch.cypher":      ErrUnknownProperty,
-	"untyped_edge.cypher":                               ErrOutOfR0Scope,
-	"var_length_edge_property_projection.cypher":        ErrOutOfR0Scope,
+	// A path bound inside a pattern comprehension (bd gqlc-btge): refused
+	// wherever the comprehension sits and whatever its body does with p.
+	"path_in_pattern_comprehension.cypher":                      ErrOutOfR0Scope,
+	"path_in_pattern_comprehension_filter.cypher":               ErrOutOfR0Scope,
+	"path_in_pattern_comprehension_nodes.cypher":                ErrOutOfR0Scope,
+	"path_in_pattern_comprehension_length.cypher":               ErrOutOfR0Scope,
+	"path_in_pattern_comprehension_in_where.cypher":             ErrOutOfR0Scope,
+	"path_in_pattern_comprehension_carried_through_with.cypher": ErrOutOfR0Scope,
+	"path_in_pattern_comprehension_order_by.cypher":             ErrOutOfR0Scope,
+	"unwind_binding.cypher":                                     ErrOutOfR0Scope,
+	"unknown_edge_undirected.cypher":                            ErrUnknownEdge,
+	"unknown_edge_multi_type_all_miss.cypher":                   ErrUnknownEdge,
+	"unknown_property_union_missing.cypher":                     ErrUnknownProperty,
+	"unknown_property_union_type_differs.cypher":                ErrUnknownProperty,
+	"unknown_property_union_nullability_differs.cypher":         ErrUnknownProperty,
+	"unknown_property_union_sibling_branch.cypher":              ErrUnknownProperty,
+	"untyped_edge.cypher":                                       ErrOutOfR0Scope,
+	"var_length_edge_property_projection.cypher":                ErrOutOfR0Scope,
 	// R5 additions:
 	"union_column_count_mismatch.cypher":       ErrUnionColumnMismatch,
 	"union_column_name_mismatch.cypher":        ErrUnionColumnMismatch,
@@ -797,6 +806,17 @@ var invalidFixtureContains = map[string]string{
 	// variable name. Distinguished by the "binding" suffix.
 	"path_binding.cypher":   "path binding",
 	"unwind_binding.cypher": "unwind binding",
+	// The comprehension arm says where the path was bound and names it, so it
+	// cannot be mistaken for the top-level arm above, whose message it
+	// contains. The order-by fixture binds `path`, not `p`: the name is read off
+	// the query.
+	"path_in_pattern_comprehension.cypher":                      `path binding "p" in a pattern comprehension`,
+	"path_in_pattern_comprehension_filter.cypher":               `path binding "p" in a pattern comprehension`,
+	"path_in_pattern_comprehension_nodes.cypher":                `path binding "p" in a pattern comprehension`,
+	"path_in_pattern_comprehension_length.cypher":               `path binding "p" in a pattern comprehension`,
+	"path_in_pattern_comprehension_in_where.cypher":             `path binding "p" in a pattern comprehension`,
+	"path_in_pattern_comprehension_carried_through_with.cypher": `path binding "p" in a pattern comprehension`,
+	"path_in_pattern_comprehension_order_by.cypher":             `path binding "path" in a pattern comprehension`,
 	// The three ways the refusal can name the edge it refuses. A named binding
 	// is quoted; an anonymous one has no name, so it is placed by the label it
 	// carries and the two ends it runs between — which are themselves either a
