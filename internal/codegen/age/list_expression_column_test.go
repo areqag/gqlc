@@ -293,3 +293,112 @@ func TestListExpressionColumnDecodesThroughTheSliceWrapper(t *testing.T) {
 	require.Contains(t, queries, "agtypeListOfString(", "the column does not decode through the wrapper")
 	require.Contains(t, queries, "[]string", "the row field does not carry the slice type")
 }
+
+// TestListExpressionColumnDecodesItsElementByWidth pins the element
+// decoder a list EXPRESSION column binds when its element is a property
+// whose Go text does not name a decoder (bd gqlc-k1dg). A closed union
+// carries as `any`, as ANY VALUE does, and a record as an anonymous
+// struct; only the width tells which decoder the element needs, and a
+// list expression column carries none of its own — codegen.Row.Width is
+// set for a schema property, and the element's width is on the ListElem
+// plan. The union rows decoded through agtypeListOfAny / agtypeValue
+// before, handing back a DATE member as its ISO string and an INT32
+// member as int64; the record rows failed generation naming the struct
+// text as a codegen bug.
+//
+// The INT32 row is the control: a narrow scalar's text names its decoder,
+// so it was narrowed before and must read the same now.
+func TestListExpressionColumnDecodesItsElementByWidth(t *testing.T) {
+	t.Parallel()
+
+	dateOrInt := graph.UnionOf([]graph.UnionMember{{Type: graph.TypeDate}, {Type: graph.TypeInt64}})
+	int32OrString := graph.UnionOf([]graph.UnionMember{{Type: graph.TypeInt32}, {Type: graph.TypeString}})
+	rec := graph.RecordOf([]graph.RecordField{{Name: "zip", Type: graph.TypeInt32, NotNull: true}})
+
+	cases := []struct {
+		name string
+		elem resolver.ResolvedType
+		// column is the wrapper the column decodes through; binds is the
+		// element decoder that wrapper must hand agtypeList.
+		column, binds string
+	}{
+		{
+			name:   "a union with a DATE member",
+			elem:   resolver.ResolvedProperty{Type: dateOrInt, Nullable: true},
+			column: "agtypeListOfNullable" + codegen.UnionHelperSuffix(dateOrInt),
+			binds:  "return decode" + codegen.UnionHelperSuffix(dateOrInt) + "(elem)",
+		},
+		{
+			name:   "a union with an INT32 member",
+			elem:   resolver.ResolvedProperty{Type: int32OrString, Nullable: true},
+			column: "agtypeListOfNullable" + codegen.UnionHelperSuffix(int32OrString),
+			binds:  "return decode" + codegen.UnionHelperSuffix(int32OrString) + "(elem)",
+		},
+		{
+			name:   "a nested list of a union",
+			elem:   resolver.ResolvedProperty{Type: graph.ListOf(dateOrInt, false), Nullable: true},
+			column: "agtypeListOfNullableListOfNullable" + codegen.UnionHelperSuffix(dateOrInt),
+			binds:  "agtypeNullableElem(agtypeListOfNullable" + codegen.UnionHelperSuffix(dateOrInt) + ")",
+		},
+		{
+			name:   "a union under a list expression of lists",
+			elem:   resolver.ResolvedList{Element: resolver.ResolvedProperty{Type: dateOrInt, Nullable: true}},
+			column: "agtypeListOfListOfNullable" + codegen.UnionHelperSuffix(dateOrInt),
+			binds:  "return agtypeList(raw, agtypeListOfNullable" + codegen.UnionHelperSuffix(dateOrInt) + ")",
+		},
+		{
+			name:   "a nullable record",
+			elem:   resolver.ResolvedProperty{Type: rec, Nullable: true},
+			column: "agtypeListOfNullable" + codegen.RecordHelperSuffix(rec),
+			binds:  "agtypeNullableElem(decode" + codegen.RecordHelperSuffix(rec) + ")",
+		},
+		{
+			name:   "a NOT NULL record",
+			elem:   resolver.ResolvedProperty{Type: rec},
+			column: "agtypeListOf" + codegen.RecordHelperSuffix(rec),
+			binds:  "return agtypeList(raw, decode" + codegen.RecordHelperSuffix(rec) + ")",
+		},
+		{
+			// The wrapper's doc line named the inner list's record by its
+			// raw struct text, which split the comment across lines that
+			// are not comments, and the file failed to format.
+			name:   "a nested list of a record",
+			elem:   resolver.ResolvedProperty{Type: graph.ListOf(rec, false), Nullable: true},
+			column: "agtypeListOfNullableListOfNullable" + codegen.RecordHelperSuffix(rec),
+			binds:  "agtypeNullableElem(agtypeListOfNullable" + codegen.RecordHelperSuffix(rec) + ")",
+		},
+		{
+			name:   "an INT32, the control",
+			elem:   resolver.ResolvedProperty{Type: graph.TypeInt32, Nullable: true},
+			column: "agtypeListOfNullableInt32",
+			binds:  "agtypeNullableElem(agtypeIntAs[int32])",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			in := listColumnInput(t, resolver.Column{Name: "xs", Type: resolver.ResolvedList{Element: tc.elem}})
+			files, err := age.New(age.WithPackageName("listexpr")).Generate(in)
+			require.NoError(t, err)
+
+			var models, queries string
+			for _, f := range files {
+				switch {
+				case f.Path == "models.go":
+					models = string(f.Contents)
+				case strings.HasSuffix(f.Path, ".cypher.go"):
+					queries = string(f.Contents)
+				}
+			}
+			require.Contains(t, queries, tc.column+"(raw0)", "the column does not decode through the wrapper its element width names")
+			require.NotContains(t, queries, "agtypeListOfAny(", "the column decodes through the undispatched wrapper")
+
+			_, wrapper, ok := strings.Cut(models, "\nfunc "+tc.column+"(raw []byte)")
+			require.True(t, ok, "models.go declares no %s", tc.column)
+			wrapper, _, _ = strings.Cut(wrapper, "\n}\n")
+			require.Contains(t, wrapper, tc.binds, "the wrapper does not bind the element's own decoder")
+		})
+	}
+}
