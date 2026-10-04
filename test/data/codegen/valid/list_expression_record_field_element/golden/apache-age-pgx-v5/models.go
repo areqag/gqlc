@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
-	"time"
 )
 
 // Account corresponds to the Account node type.
@@ -18,36 +17,6 @@ type Account struct {
 		N *int32
 		U *any
 	}
-}
-
-// decodeAccount decodes an agtype vertex into a Account struct, enforcing
-// the label and the per-property nullability the schema declares.
-func decodeAccount(raw []byte) (Account, error) {
-	label, props, err := agtypeEntity(raw, "::vertex")
-	if err != nil {
-		return Account{}, fmt.Errorf("decode Account: %w", err)
-	}
-	if label != "Account" {
-		return Account{}, fmt.Errorf("decode Account: expected label %q, got %q", "Account", label)
-	}
-	var out Account
-	value0, err := agtypeProperty(props, "id", agtypeInt64)
-	if err != nil {
-		return Account{}, fmt.Errorf("decode Account.Id: %w", err)
-	}
-	out.Id = value0
-	value1, err := agtypeNullableProperty(props, "ul", decodeRecorda0e7fbf1)
-	if err != nil {
-		return Account{}, fmt.Errorf("decode Account.Ul: %w", err)
-	}
-	out.Ul = value1
-	return out, nil
-}
-
-// recorda0e7fbf1 is the carrier for RECORD<n INT32,u UNION<DATE|INT64>>.
-type recorda0e7fbf1 = struct {
-	N *int32
-	U *any
 }
 
 // AccountUl is the record type of Account property ul.
@@ -89,30 +58,6 @@ func agtypeInt64(raw []byte) (int64, error) {
 	return out, nil
 }
 
-// agtypeIntAs decodes an agtype integer into a width narrower than the
-// int64 scalar it rides in, refusing a stored value that width cannot
-// hold rather than wrapping it.
-//
-// Two clauses, and both are load-bearing. The round-trip catches every
-// width whose range is a strict subset of int64's. It cannot catch
-// uint64, where the conversion is a bijection and int64(uint64(-1)) is
-// -1 again; there the sign comparison is the whole of the check. A
-// UINT64 property's readable set is therefore [0, MaxInt64], since
-// agtype's integer scalar is signed 64-bit and a larger value is
-// unstorable rather than unreadable.
-func agtypeIntAs[T ~int | ~int8 | ~int16 | ~int32 | ~int64 |
-	~uint | ~uint8 | ~uint16 | ~uint32 | ~uint64](raw []byte) (T, error) {
-	v, err := agtypeInt64(raw)
-	if err != nil {
-		return 0, err
-	}
-	out := T(v)
-	if int64(out) != v || (out < T(0)) != (v < 0) {
-		return 0, fmt.Errorf("gqlc: value %d does not fit the declared %T width", v, out)
-	}
-	return out, nil
-}
-
 // agtypeFloat64 decodes an agtype float scalar. The float parser reads
 // it rather than the JSON decoder because agtype's float vocabulary is
 // IEEE 754's: NaN, Infinity and -Infinity are values AGE emits and JSON
@@ -125,53 +70,6 @@ func agtypeFloat64(raw []byte) (float64, error) {
 		return 0, fmt.Errorf("gqlc: %q is not an agtype float: %w", raw, err)
 	}
 	return out, nil
-}
-
-// agtypeDateLayout is the stored form of a DATE, in the reference time
-// every Go layout is written in. Zero-padded and four-digit: both halves
-// are load-bearing, because they are the whole of why the stored strings
-// sort chronologically.
-const agtypeDateLayout = "2006-01-02"
-
-// agtypeDate decodes a stored DATE. agtype has no temporal value, so
-// gqlc stores one as the string scalar in zero-padded ISO YYYY-MM-DD:
-// the one temporal spelling whose lexical order is its chronological
-// order, so an author's ORDER BY n.dob is answered by the database's own
-// string comparison with nothing for gqlc to rewrite.
-//
-// That ordering holds across [0001-01-01, 9999-12-31] and nowhere else,
-// which is why the padding and the bound are read back here rather than
-// assumed. A year needing a fifth digit sorts under every four-digit year
-// because '1' < '2', and a proleptic year before 1 CE needs a sign, which
-// sorts under every digit and files the whole era at the front,
-// ascending. gqlc's own encode produces neither — it refuses them — but
-// it writes to an ordinary agtype string property on a vertex any writer
-// can touch, so what is read back is whatever the graph holds.
-//
-// The padding is enforced by the layout and not by a check beside it.
-// time.Parse reads each field at a fixed width, so '2024-1-2' fails at
-// the month, '24-01-02' at the year, and a signed or five-digit year at
-// the first byte that is not a digit where one belongs — every spelling
-// that would sort in the wrong place is refused before a Date is built.
-//
-// That leaves the range bounded at one end only, which is measured
-// rather than an oversight. A year over 9999 needs a fifth digit and a
-// year before 1 CE needs a sign, and the layout refuses both; year 0 is
-// the one out-of-range year spelled with four unsigned digits, so it is
-// the only one that reaches here, and it is what this bound is for.
-func agtypeDate(raw []byte) (Date, error) {
-	text, err := agtypeString(raw)
-	if err != nil {
-		return Date{}, err
-	}
-	at, err := time.Parse(agtypeDateLayout, text)
-	if err != nil {
-		return Date{}, fmt.Errorf("gqlc: %q is not a date in zero-padded ISO YYYY-MM-DD form: %w", text, err)
-	}
-	if at.Year() < 1 {
-		return Date{}, fmt.Errorf("gqlc: %q is outside the year 1 to year 9999 range this encoding admits", text)
-	}
-	return Date{Year: at.Year(), Month: int(at.Month()), Day: at.Day()}, nil
 }
 
 // agtypeSpan reports where the value at the front of b ends: the offset
@@ -247,39 +145,6 @@ func agtypeObject(raw []byte) (map[string][]byte, error) {
 	return out, nil
 }
 
-// agtypeEntity splits an agtype vertex or edge into the label it carries
-// and the undecoded text of each of its properties. A vertex and an edge
-// are the same object but for the annotation, so requiring the one the
-// caller named is what stands between an edge's decoder and a vertex
-// whose label happens to match it.
-func agtypeEntity(raw []byte, annotation string) (string, map[string][]byte, error) {
-	body, ok := bytes.CutSuffix(bytes.TrimSpace(raw), []byte(annotation))
-	if !ok {
-		return "", nil, fmt.Errorf("gqlc: %q does not carry the %s annotation", raw, annotation)
-	}
-	fields, err := agtypeObject(body)
-	if err != nil {
-		return "", nil, err
-	}
-	rawLabel, ok := fields["label"]
-	if !ok {
-		return "", nil, fmt.Errorf("gqlc: %q carries no label", raw)
-	}
-	label, err := agtypeString(rawLabel)
-	if err != nil {
-		return "", nil, err
-	}
-	rawProps, ok := fields["properties"]
-	if !ok {
-		return "", nil, fmt.Errorf("gqlc: %q carries no properties", raw)
-	}
-	props, err := agtypeObject(rawProps)
-	if err != nil {
-		return "", nil, err
-	}
-	return label, props, nil
-}
-
 // agtypeList decodes an agtype list, reading each element through the
 // decoder the caller supplies. The split steps over a nested string, map
 // or list whole, so a comma inside one separates nothing; an element the
@@ -316,65 +181,6 @@ func agtypeList[T any](raw []byte, decode func([]byte) (T, error)) ([]T, error) 
 // agtypeListOfAny decodes an agtype list of any elements.
 func agtypeListOfAny(raw []byte) ([]any, error) {
 	return agtypeList(raw, agtypeValue)
-}
-
-// agtypeRecordField reads one member of a record's map. An absent key and
-// an explicit null are the same thing — no value here — and both answer
-// nil, because a record spells "this field has no value" both ways and a
-// reader that told them apart would report a difference the schema does
-// not declare.
-func agtypeRecordField[T any](fields map[string][]byte, key string, decode func([]byte) (T, error)) (*T, error) {
-	raw, ok := fields[key]
-	if !ok || string(bytes.TrimSpace(raw)) == "null" {
-		return nil, nil
-	}
-	out, err := decode(raw)
-	if err != nil {
-		return nil, fmt.Errorf("gqlc: field %q: %w", key, err)
-	}
-	return &out, nil
-}
-
-// decodeRecorda0e7fbf1 checks an agtype map into a recorda0e7fbf1.
-func decodeRecorda0e7fbf1(raw []byte) (recorda0e7fbf1, error) {
-	var out recorda0e7fbf1
-	fields, err := agtypeObject(raw)
-	if err != nil {
-		return out, fmt.Errorf("decode RECORD<n INT32,u UNION<DATE|INT64>>: %w", err)
-	}
-	value0, err := agtypeRecordField(fields, "n", agtypeIntAs[int32])
-	if err != nil {
-		return out, fmt.Errorf("decode RECORD<n INT32,u UNION<DATE|INT64>>: field %q: %w", "n", err)
-	}
-	out.N = value0
-	value1, err := agtypeRecordField(fields, "u", decodeUnion0aa394d5)
-	if err != nil {
-		return out, fmt.Errorf("decode RECORD<n INT32,u UNION<DATE|INT64>>: field %q: %w", "u", err)
-	}
-	out.U = value1
-	return out, nil
-}
-
-// decodeUnion0aa394d5 dispatches an agtype value onto the member of
-// UNION<DATE|INT64> whose wire family it arrived as, and narrows it
-// to that member's declared width.
-func decodeUnion0aa394d5(raw []byte) (any, error) {
-	body := bytes.TrimSpace(raw)
-	if len(body) == 0 {
-		return nil, fmt.Errorf("decode UNION<DATE|INT64>: %q is not an agtype value", raw)
-	}
-	switch body[0] {
-	case '"':
-		out, err := agtypeDate(body)
-		if err != nil {
-			return nil, fmt.Errorf("decode UNION<DATE|INT64>: %w", err)
-		}
-		return out, nil
-	}
-	if out, err := agtypeInt64(body); err == nil {
-		return out, nil
-	}
-	return nil, fmt.Errorf("decode UNION<DATE|INT64>: %q is no member's wire shape", raw)
 }
 
 // agtypeValue decodes a value of no declared shape through agtype's own
@@ -451,32 +257,4 @@ func agtypeMap(raw []byte) (map[string]any, error) {
 		out[key] = value
 	}
 	return out, nil
-}
-
-// agtypeProperty reads one property the schema declares NOT NULL out of a
-// split entity. AGE drops a property whose value is null, so an absent
-// key is how a null arrives, and taking the Go zero for one would report
-// absence as a value the graph holds.
-func agtypeProperty[T any](props map[string][]byte, key string, decode func([]byte) (T, error)) (T, error) {
-	raw, ok := props[key]
-	if !ok {
-		var zero T
-		return zero, fmt.Errorf("gqlc: property %q is absent", key)
-	}
-	return decode(raw)
-}
-
-// agtypeNullableProperty reads one nullable property out of a split
-// entity, where the absence agtypeProperty refuses is the schema's null
-// and reaches the caller as the nil pointer.
-func agtypeNullableProperty[T any](props map[string][]byte, key string, decode func([]byte) (T, error)) (*T, error) {
-	raw, ok := props[key]
-	if !ok {
-		return nil, nil
-	}
-	out, err := decode(raw)
-	if err != nil {
-		return nil, err
-	}
-	return &out, nil
 }
