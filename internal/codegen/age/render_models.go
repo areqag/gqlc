@@ -292,10 +292,13 @@ type listPlan struct {
 }
 
 // importsBytes reports whether models.go names the bytes package: the
-// wire splitters, the list walk with agtypeIsNull beside it, the value
-// vocabulary, the record field read and the union dispatch.
+// wire splitters, the list walk with agtypeIsNull beside it, and the union
+// dispatch. The value vocabulary and the record field read name it too,
+// and need no disjunct of their own: both mark object (needValue,
+// needRecord). union_column_sole_decode is the fixture whose only bytes
+// caller is a union decoder.
 func (h helpers) importsBytes() bool {
-	return h.object || h.list || h.value || h.recordField || len(h.unionDecoders) > 0
+	return h.object || h.list || len(h.unionDecoders) > 0
 }
 
 // importsTime reports whether models.go names the time package, which

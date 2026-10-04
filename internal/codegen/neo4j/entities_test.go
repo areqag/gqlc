@@ -47,19 +47,22 @@ func decodingEveryEntity(in codegen.Input) codegen.Input {
 
 // TestEntityDecoderIsEmittedOnlyWhereAQueryDecodesIt pins the gate bd
 // gqlc-m1dk put on decode<Name>: the struct is the schema's, the decoder
-// the batch's. Event declares a DATE and a union, so its decoder would
-// call toDate and decodeUnion<…> and import neo4j and dbtype; with no
-// query decoding it, models.go names neither package, temporal_neo4j.go
-// converts nothing and so imports nothing — while temporal.go stays, since
-// the struct names Date — and no union helper file is emitted at all. (A
-// record property is refused by this backend, so no entity reaches a
-// record helper here.)
+// the batch's. Event declares a DATE, a UUID and a union, so its decoder
+// would call toDate, toUUID and decodeUnion<…> and import neo4j and
+// dbtype; with no query decoding it, models.go names neither package,
+// temporal_neo4j.go and uuid_neo4j.go convert nothing and so import
+// nothing, and no union_neo4j.go is emitted. temporal.go and uuid.go stay,
+// since the struct names Date and UUID, and each keeps its (empty) bridge
+// beside it: TestTemporalCarriersAreEmittedExactlyWhenReferenced holds the
+// pair. (A record property is refused by this backend, so no entity
+// reaches a record helper here.)
 func TestEntityDecoderIsEmittedOnlyWhereAQueryDecodesIt(t *testing.T) {
 	sch, err := gql.New().Parse(strings.NewReader(`CREATE PROPERTY GRAPH TYPE Gate AS {
     (:Person { id :: INT64 NOT NULL }),
     (:Event {
         id   :: INT64 NOT NULL,
         born :: DATE NOT NULL,
+        ref  :: UUID NOT NULL,
         pick :: ANY<INT32 | STRING>
     })
 }`))
@@ -82,14 +85,19 @@ func TestEntityDecoderIsEmittedOnlyWhereAQueryDecodesIt(t *testing.T) {
 	require.NotContains(t, none["models.go"], "import (",
 		"no decoder is emitted, so nothing in models.go names fmt, neo4j or dbtype")
 	require.Contains(t, none, "temporal.go", "Event's struct names Date whether or not anything decodes it")
+	require.Contains(t, none, "uuid.go", "Event's struct names UUID whether or not anything decodes it")
 	require.NotContains(t, none["temporal_neo4j.go"], "import (",
 		"nothing converts a Date, so the bridge file declares nothing that names dbtype")
 	require.NotContains(t, none["temporal_neo4j.go"], "func toDate(")
+	require.NotContains(t, none["uuid_neo4j.go"], "import (",
+		"nothing converts a UUID, so the bridge file declares nothing that names fmt or uuid")
+	require.NotContains(t, none["uuid_neo4j.go"], "func toUUID(")
 	require.NotContains(t, none, "union_neo4j.go", "nothing decodes or binds Event's union")
 
 	all := emit(decodingEveryEntity(codegen.Input{Schema: sch}))
 	require.Contains(t, all["models.go"], "func decodeEvent(node dbtype.Node) (Event, error) {")
 	require.Contains(t, all["models.go"], "func decodePerson(node dbtype.Node) (Person, error) {")
 	require.Contains(t, all["temporal_neo4j.go"], "func toDate(")
+	require.Contains(t, all["uuid_neo4j.go"], "func toUUID(")
 	require.Contains(t, all["union_neo4j.go"], "func decodeUnion")
 }

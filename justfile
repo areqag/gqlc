@@ -3274,8 +3274,9 @@ check-goldens-unused: sweep-discovery-probes ensure-golangci
         echo "unused over goldens: ${m}, ${generated} of ${total} Go files carry the generated header"
 
         # WITNESS: two unexported funcs nothing calls, which this run has to
-        # name. They are shaped as the two per-use decoder families — a record
-        # decoder answering an unexported alias, a union decoder answering any.
+        # name, one per driver family's golden package. Any unexported func
+        # would do; the shapes are a record decoder's and a union decoder's
+        # only because those are what the emitter writes.
         neo4j_pkg="$(first_golden "${m}" 'neo4j-go-v*')"
         age_pkg="$(first_golden "${m}" 'apache-age-pgx-v*')"
         if [ -z "${neo4j_pkg}" ] || [ -z "${age_pkg}" ]; then

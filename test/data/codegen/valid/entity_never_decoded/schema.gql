@@ -4,6 +4,7 @@ CREATE PROPERTY GRAPH TYPE EntityNeverDecoded AS {
         id   :: INT64     NOT NULL,
         seen :: TIMESTAMP NOT NULL,
         born :: DATE      NOT NULL,
+        ref  :: UUID      NOT NULL,
         pick :: ANY<INT32 | STRING>
     })
 }

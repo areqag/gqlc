@@ -16,6 +16,7 @@ type Event struct {
 	Born Date
 	Id   int64
 	Pick *any
+	Ref  UUID
 	Seen time.Time
 }
 

@@ -145,7 +145,7 @@ func modelImportNeeds(entities, decoded []codegen.Entity) (anyNonNull, anyTime b
 			// an unimported package. goTypeNeedsImports strips the
 			// "[]" prefixes to the leaf; the dbtype half of its
 			// answer is discarded because this file's dbtype import
-			// is unconditional.
+			// follows a decode helper, not a struct field.
 			if _, needTime := goTypeNeedsImports(f.GoType); needTime {
 				anyTime = true
 			}
