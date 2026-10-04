@@ -68,13 +68,26 @@ merged #2844 and #2592, one each, where `filename` was git's new path. That is
 eleven PRs and three renames, a floor and not a census; a PR whose two
 endpoints disagree on the claiming set falsifies it.
 
-Two known differences, neither a lost collision. (1) The endpoint diffs
-against the PR's own BASE branch, where the compare named master: a PR stacked
-on another PR lists only its own changes, and the parent's additions are
-checked on the parent. Every PR measured above targets master. (2) Its merge
-base is GitHub's, not the just-pushed GITHUB_SHA's, so for a head that has
-merged in master it can list master's own documents as additions; those
-dedupe by name against master's listing and claim nothing new.
+Two known differences, neither able to turn a collision green. (1) The
+endpoint diffs against the PR's own BASE branch, where the compare named
+master: a PR stacked on another PR lists only its own changes, and the
+parent's additions are checked on the parent. Every PR measured above targets
+master. (2) Its merge base is computed against GitHub's `base.sha`, which it
+refreshes lazily, not against the just-pushed GITHUB_SHA. For a head that has
+merged or rebased onto master past a stale `base.sha`, it can list master's
+own documents as additions. Those dedupe by name against master's listing,
+unless master has since renumbered one and reused its ordinal: then the stale
+extra collides, which is a FALSE FAILURE, never a lost one. Unwitnessed here:
+on 2026-10-04 a review re-measured five open PRs (#2999 #2998 #2996 #2994
+#2990), and merge-base(H, base.sha) equalled merge-base(H, origin/master) on
+all five, with pulls/files again equal to git's set. With the eleven above,
+that is sixteen PRs, a floor. None of the latest 400 PR heads held a merge
+commit.
+
+A third difference is closed in code. The compare named both SHAs, but
+pulls/files names neither and answers for whatever head the PR has when it
+is read. So after reading the files, the head is read again
+(current_head()); if it moved since the list, no status is posted.
 
 THE pulls/files CAP. GitHub's REST documentation gives that endpoint a
 3000-file maximum. That is documented, not measured -- no PR here has come
@@ -237,6 +250,11 @@ def added_under(repo, number, directories):
     return claimed_by([entry for page in pages for entry in page], directories)
 
 
+def current_head(repo, number):
+    """PR `number`'s head SHA as GitHub reports it now."""
+    return json.loads(run(["gh", "api", f"repos/{repo}/pulls/{number}"]).stdout)["head"]["sha"]
+
+
 def post_status(repo, head_sha, state, description, target_url):
     run(
         [
@@ -298,6 +316,17 @@ def check_open_prs(directories):
             post_status(repo, head, "error", description, target_url)
             print(f"error: PR #{pr['number']}: {refusal}", file=sys.stderr)
             refused.append(pr["number"])
+            continue
+        # pulls/files names no SHA, so the files are pinned to the listed head
+        # by asking again AFTER reading them. On a mismatch nothing is posted:
+        # the push that moved the head rebuilt its merge ref, which ci.yml's
+        # tree check reads, and the next master push asks this again.
+        now = current_head(repo, pr["number"])
+        if now != head:
+            print(
+                f"PR #{pr['number']}: head moved from {head} to {now} during the "
+                "read, no status posted"
+            )
             continue
         if not any(added.values()):
             # Silent by design. Most PRs touch no enrolled series, and a
@@ -452,7 +481,7 @@ def self_test_gh_failure():
 # POSTED as one JSON line. Anything it does not model exits 99, so a call the
 # script newly makes is a loud row failure rather than an answer invented here.
 FAKE_GH = r'''
-import json, sys, urllib.parse
+import json, os, sys, urllib.parse
 WORLD, POSTED = {world!r}, {posted!r}
 args = sys.argv[1:]
 world = json.load(open(WORLD))
@@ -469,8 +498,17 @@ if args[:1] == ["api"] and "-X" in args:
 endpoint = next((a for a in args if a.startswith("repos/")), "")
 path, _, query = endpoint.partition("?")
 parts = path.split("/")
+if args[:1] == ["api"] and len(parts) == 5 and parts[3] == "pulls" and not query:
+    # A head in "heads" moves only once its files have been read, so a check
+    # made before the read sees the listed head and cannot pass the row.
+    listed = next(pr["headRefOid"] for pr in world["prs"] if str(pr["number"]) == parts[4])
+    moved = os.path.exists(WORLD + ".read." + parts[4])
+    sha = world.get("heads", {{}}).get(parts[4], listed) if moved else listed
+    print(json.dumps({{"head": {{"sha": sha}}}}))
+    sys.exit(0)
 if args[:1] == ["api"] and len(parts) == 6 and parts[3] == "pulls" and parts[5] == "files":
     files = world["files"][parts[4]]
+    open(WORLD + ".read." + parts[4], "w").close()
     per_page = int(urllib.parse.parse_qs(query).get("per_page", ["30"])[0])
     pages = [files[i:i + per_page] for i in range(0, len(files), per_page)] or [[]]
     # Measured against gh 2.102.0, 2026-10-04: --slurp alone is refused;
@@ -559,21 +597,26 @@ def self_test_refusal_does_not_silence_later_prs():
     Observed 2026-10-04 (bd gqlc-rs3j): PR #2978 legitimately changed 303
     files, its read was refused at the cap, and the refusal exited the loop,
     so every open PR listed after it got no verdict on three master pushes.
-    The world here is that order: a quiet PR, the unreadable one, then a PR
-    whose ordinal master has taken -- the one whose RED the abort used to eat.
+    The world here is that order: a quiet PR, a colliding PR, the unreadable
+    one, then a PR whose ordinal master has taken -- the one whose RED the
+    abort used to eat. The colliding PR BEFORE the refused one is what pins
+    the refusal's `continue`: without it the refused PR falls through holding
+    the previous PR's additions, and a quiet predecessor hides that.
     """
     name = "a refused PR in the middle does not silence the PRs after it"
     adr = "docs/adr"
     taken = "0012-an-ordinal-master-already-holds.md"
-    quiet, capped, colliding = "1" * 40, "2" * 40, "3" * 40
+    quiet, capped, colliding, earlier = "1" * 40, "2" * 40, "3" * 40, "5" * 40
     world = {
         "prs": [
             {"number": 1, "headRefOid": quiet},
+            {"number": 5, "headRefOid": earlier},
             {"number": 2, "headRefOid": capped},
             {"number": 3, "headRefOid": colliding},
         ],
         "files": {
             "1": [{"status": "modified", "filename": "README.md"}],
+            "5": [{"status": "added", "filename": f"{adr}/0012-an-earlier-claim.md"}],
             "2": [
                 {"status": "added", "filename": f"test/data/g{i:04d}.golden"}
                 for i in range(PULL_FILES_CAP)
@@ -594,6 +637,8 @@ def self_test_refusal_does_not_silence_later_prs():
         problems.append(f"the error does not name the cap: {posts[capped]!r}")
     elif len(posts[capped]["description"]) > DESCRIPTION_LIMIT:
         problems.append(f"the error is past {DESCRIPTION_LIMIT} chars: {posts[capped]!r}")
+    if posts.get(earlier, {}).get("state") != "failure":
+        problems.append(f"the PR before it got no failure: {posts.get(earlier)!r}")
     if posts.get(colliding, {}).get("state") != "failure":
         problems.append(f"the PR after it got no failure: {posts.get(colliding)!r}")
     elif "0012" not in posts[colliding]["description"]:
@@ -609,27 +654,66 @@ def self_test_refusal_does_not_silence_later_prs():
 
 
 def self_test_read_past_one_page():
-    """A PR wider than one page is read to its last page (bd gqlc-rs3j).
+    """A PR wider than one page is read on every page (bd gqlc-rs3j).
 
     PR #2978 changed 303 files; the compare it was read through returns 300
-    and no way to ask for the rest. Here the only enrolled addition is the
-    303rd entry, past both the compare's cap and the first three 100-entry
-    pages, so a read that stops early reports "adds no enrolled document".
+    and no way to ask for the rest. Two 303-file PRs here, each with its one
+    enrolled addition at an opposite end: the last entry (past the compare's
+    cap and three 100-entry pages) and the first. A read that keeps only the
+    first page loses the one, a read that keeps only the last loses the
+    other, and either reports "adds no enrolled document" for it.
     """
-    name = "a PR wider than one page is read to its last page"
+    name = "a PR wider than one page is read on every page"
     adr = "docs/adr"
-    head = "4" * 40
-    files = [{"status": "modified", "filename": f"test/data/g{i:04d}.golden"} for i in range(302)]
-    files.append({"status": "added", "filename": f"{adr}/0012-past-the-first-pages.md"})
-    world = {"prs": [{"number": 4, "headRefOid": head}], "files": {"4": files}}
+    last, first = "4" * 40, "8" * 40
+    padding = [{"status": "modified", "filename": f"test/data/g{i:04d}.golden"} for i in range(302)]
+    claim = {"status": "added", "filename": f"{adr}/0012-a-claim-on-one-page.md"}
+    world = {
+        "prs": [{"number": 4, "headRefOid": last}, {"number": 8, "headRefOid": first}],
+        "files": {"4": padding + [claim], "8": [claim] + padding},
+    }
     rc, posts, out = run_against_fake_gh(
         world, [adr], {adr: ["0012-an-ordinal-master-already-holds.md"]}
     )
-    if rc != 0 or posts.get(head, {}).get("state") != "failure":
+    states = {head: posts.get(head, {}).get("state") for head in (last, first)}
+    if rc != 0 or set(states.values()) != {"failure"}:
         print(
             f"self-test FAILED: {name}\n"
-            f"  wanted rc=0 and a failure on the head, got rc={rc!r}, "
-            f"posted {posts.get(head)!r}\n"
+            f"  wanted rc=0 and a failure on both heads, got rc={rc!r}, "
+            f"states {states!r}\n"
+            "  output was:\n    " + out.replace("\n", "\n    "),
+            file=sys.stderr,
+        )
+        return True
+    print(f"self-test ok: {name}")
+    return False
+
+
+def self_test_head_moved_during_read():
+    """Files read from one head are not posted onto another (bd gqlc-rs3j).
+
+    The PR list names each head SHA, but pulls/{n}/files names none: it
+    answers for whatever the head is when it is read. A push between the two
+    reads, or GitHub's own diff recompute after one, would attach a verdict
+    from one head's files to the other head. Here the head moves from 6... to
+    7... while the files are read, and the files collide; nothing may be
+    posted on either SHA.
+    """
+    name = "a head that moved between the list and the read gets no verdict"
+    adr = "docs/adr"
+    listed, moved = "6" * 40, "7" * 40
+    world = {
+        "prs": [{"number": 6, "headRefOid": listed}],
+        "heads": {"6": moved},
+        "files": {"6": [{"status": "added", "filename": f"{adr}/0012-a-claim.md"}]},
+    }
+    rc, posts, out = run_against_fake_gh(
+        world, [adr], {adr: ["0012-an-ordinal-master-already-holds.md"]}
+    )
+    if rc != 0 or posts:
+        print(
+            f"self-test FAILED: {name}\n"
+            f"  wanted rc=0 and no status, got rc={rc!r}, posted {posts!r}\n"
             "  output was:\n    " + out.replace("\n", "\n    "),
             file=sys.stderr,
         )
@@ -683,6 +767,8 @@ def self_test():
     if self_test_refusal_does_not_silence_later_prs():
         failed = True
     if self_test_read_past_one_page():
+        failed = True
+    if self_test_head_moved_during_read():
         failed = True
     for name, master_names, added_names, want_ok in rows:
         got_ok, description = verdict("docs/adr", master_names, added_names)
