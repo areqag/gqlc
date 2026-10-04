@@ -156,5 +156,12 @@
     "case_over_mixed_label_nodes_projection.cypher": "social_r7.gql",
     "parenthesized_node_projection.cypher": "social_r7.gql",
     "list_index_node_projection.cypher": "social_r7.gql",
-    "case_over_nodes_carried_through_with.cypher": "social_r7.gql"
+    "case_over_nodes_carried_through_with.cypher": "social_r7.gql",
+    "path_in_pattern_comprehension.cypher": "social_r3.gql",
+    "path_in_pattern_comprehension_filter.cypher": "social_r3.gql",
+    "path_in_pattern_comprehension_nodes.cypher": "social_r3.gql",
+    "path_in_pattern_comprehension_length.cypher": "social_r3.gql",
+    "path_in_pattern_comprehension_in_where.cypher": "social_r3.gql",
+    "path_in_pattern_comprehension_carried_through_with.cypher": "social_r3.gql",
+    "path_in_pattern_comprehension_order_by.cypher": "social_r3.gql"
 }
