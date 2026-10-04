@@ -14,6 +14,7 @@ import (
 type Event struct {
 	Born Date
 	Id   int64
+	Pick *any
 	Seen time.Time
 }
 

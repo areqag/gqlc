@@ -47,14 +47,21 @@ func decodingEveryEntity(in codegen.Input) codegen.Input {
 
 // TestEntityDecoderIsEmittedOnlyWhereAQueryDecodesIt pins the gate bd
 // gqlc-m1dk put on decode<Name>: the struct is the schema's, the decoder
-// the batch's. Event declares a DATE, so its decoder would call toDate
-// and import neo4j and dbtype; with no query decoding it, models.go names
-// neither package and temporal_neo4j.go converts nothing and so imports
-// nothing — while temporal.go stays, since the struct names Date.
+// the batch's. Event declares a DATE and a union, so its decoder would
+// call toDate and decodeUnion<…> and import neo4j and dbtype; with no
+// query decoding it, models.go names neither package, temporal_neo4j.go
+// converts nothing and so imports nothing — while temporal.go stays, since
+// the struct names Date — and no union helper file is emitted at all. (A
+// record property is refused by this backend, so no entity reaches a
+// record helper here.)
 func TestEntityDecoderIsEmittedOnlyWhereAQueryDecodesIt(t *testing.T) {
 	sch, err := gql.New().Parse(strings.NewReader(`CREATE PROPERTY GRAPH TYPE Gate AS {
     (:Person { id :: INT64 NOT NULL }),
-    (:Event { id :: INT64 NOT NULL, born :: DATE NOT NULL })
+    (:Event {
+        id   :: INT64 NOT NULL,
+        born :: DATE NOT NULL,
+        pick :: ANY<INT32 | STRING>
+    })
 }`))
 	require.NoError(t, err)
 
@@ -78,9 +85,11 @@ func TestEntityDecoderIsEmittedOnlyWhereAQueryDecodesIt(t *testing.T) {
 	require.NotContains(t, none["temporal_neo4j.go"], "import (",
 		"nothing converts a Date, so the bridge file declares nothing that names dbtype")
 	require.NotContains(t, none["temporal_neo4j.go"], "func toDate(")
+	require.NotContains(t, none, "union_neo4j.go", "nothing decodes or binds Event's union")
 
 	all := emit(decodingEveryEntity(codegen.Input{Schema: sch}))
 	require.Contains(t, all["models.go"], "func decodeEvent(node dbtype.Node) (Event, error) {")
 	require.Contains(t, all["models.go"], "func decodePerson(node dbtype.Node) (Person, error) {")
 	require.Contains(t, all["temporal_neo4j.go"], "func toDate(")
+	require.Contains(t, all["union_neo4j.go"], "func decodeUnion")
 }

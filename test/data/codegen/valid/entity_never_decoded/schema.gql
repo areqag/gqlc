@@ -3,6 +3,7 @@ CREATE PROPERTY GRAPH TYPE EntityNeverDecoded AS {
     (:Event {
         id   :: INT64     NOT NULL,
         seen :: TIMESTAMP NOT NULL,
-        born :: DATE      NOT NULL
+        born :: DATE      NOT NULL,
+        pick :: ANY<INT32 | STRING>
     })
 }
