@@ -169,6 +169,8 @@ func runNullableTimestampListRows(ctx context.Context, t *testing.T, arm nullabl
 			at.In(time.Local),
 			at.In(time.FixedZone("", 2*3600)),
 			at.In(time.FixedZone("CEST", -3*3600-1800)),
+			// The server takes "CET" and would store it at CET's +01:00.
+			at.In(time.FixedZone("CET", 5*3600)),
 		}
 		stamps := make([]*time.Time, len(zoned))
 		for i := range zoned {
@@ -194,6 +196,35 @@ func runNullableTimestampListRows(ctx context.Context, t *testing.T, arm nullabl
 		matched, err := arm.matching(ctx, stamps, zoned)
 		require.NoError(t, err, "a list parameter of stamps outside UTC was refused")
 		require.Equal(t, []int64{1}, matched)
+	})
+
+	// The premise of the next row, measured: = on a ZONED DATETIME compares
+	// the zone's form as well as the instant, so an offset and a named zone
+	// at the same instant and offset are not equal.
+	t.Run("premise: = tells a named zone from the same offset", func(t *testing.T) {
+		rows := arm.raw(ctx, t, "RETURN datetime('2024-02-29T21:30Z') = datetime('2024-02-29T21:30Z[UTC]') AS utc, "+
+			"datetime('2024-02-29T16:30-05:00') = datetime('2024-02-29T16:30[America/New_York]') AS region")
+		require.Equal(t, []map[string]any{{"utc": false, "region": false}}, rows)
+	})
+
+	// Values stored in a named zone — by gqlc before bd gqlc-m3ax, which
+	// sent every location bare, or by any other writer — must still match
+	// their own read-back with =. A bind that rewrote UTC or an IANA region
+	// into an offset would miss them, with nothing reporting it.
+	t.Run("a list stored in named zones matches its own read-back with =", func(t *testing.T) {
+		wipe(t)
+		named := "[datetime('2024-02-29T21:30Z[UTC]'), datetime('2024-02-29T16:30[America/New_York]'), " +
+			"datetime('2024-02-29T21:30Z[GMT]')]"
+		arm.raw(ctx, t, "CREATE (:Entry {id: 1, stamps: "+named+", fixed: "+named+"})")
+
+		got, err := arm.read(ctx, 1)
+		require.NoError(t, err)
+		require.Len(t, got.fixed, 3)
+		require.Equal(t, time.UTC, got.fixed[0].Location(), "the premise: the driver decodes Z[UTC] to time.UTC")
+
+		matched, err := arm.matching(ctx, got.stamps, got.fixed)
+		require.NoError(t, err)
+		require.Equal(t, []int64{1}, matched, "a read-back value, bound again, must match the node it was read from")
 	})
 
 	t.Run("a nil element reaches the server as null", func(t *testing.T) {

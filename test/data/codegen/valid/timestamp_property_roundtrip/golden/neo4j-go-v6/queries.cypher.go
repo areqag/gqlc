@@ -74,6 +74,30 @@ func (q *queries) EventsSeenAfter(ctx context.Context, arg *time.Time) ([]int64,
 	return out, nil
 }
 
+const eventsAtQueryText = `MATCH (e:Event) WHERE e.occurredAt = $at RETURN e.id AS id ORDER BY e.id`
+
+// EventsAt executes the EventsAt query.
+//
+//	MATCH (e:Event) WHERE e.occurredAt = $at RETURN e.id AS id ORDER BY e.id
+func (q *queries) EventsAt(ctx context.Context, arg time.Time) ([]int64, error) {
+	records, err := q.db.run(ctx, eventsAtQueryText, map[string]any{"at": fromTimestamp(arg)}, neo4j.AccessModeRead)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]int64, 0, len(records))
+	for _, record := range records {
+		value, isNil, err := neo4j.GetRecordValue[int64](record, "id")
+		if err != nil {
+			return nil, fmt.Errorf("EventsAt: decode column %q: %w", "id", err)
+		}
+		if isNil {
+			return nil, fmt.Errorf("EventsAt: column %q is non-nullable but arrived null", "id")
+		}
+		out = append(out, value)
+	}
+	return out, nil
+}
+
 const eventAtQueryText = `MATCH (e:Event) WHERE e.id = $id RETURN e.occurredAt AS occurredAt`
 
 // EventAt executes the EventAt query.

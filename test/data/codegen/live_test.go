@@ -289,6 +289,7 @@ type timestampRoundtripQuerier interface {
 	addEvent(ctx context.Context, id int64, occurredAt time.Time) error
 	eventsAfter(ctx context.Context, since time.Time) ([]int64, error)
 	eventsSeenAfter(ctx context.Context, seenAfter *time.Time) ([]int64, error)
+	eventsAt(ctx context.Context, at time.Time) ([]int64, error)
 	eventAt(ctx context.Context, id int64) (time.Time, error)
 	oneEvent(ctx context.Context, id int64) (eventEntity, error)
 }
@@ -2166,7 +2167,7 @@ func timestampRoundTrip(ctx context.Context, t *testing.T, b writeBackend) { //n
 // one: time.Now()'s "Local" and an unnamed or abbreviated time.FixedZone were
 // refused on both majors (bd gqlc-m3ax). A neo4j server stores the zone it was
 // sent, and AGE stores the instant alone, so the read-back is compared as an
-// instant.
+// instant, and matched with = both as written and as read back.
 //
 // time.Now() is truncated to the microsecond because that is AGE's resolution;
 // Truncate keeps the location, which is what the row is about.
@@ -2182,17 +2183,33 @@ func timestampAnyZoneBinds(ctx context.Context, t *testing.T, b writeBackend) { 
 		{"time.Now()", time.Now().Truncate(time.Microsecond)},
 		{"time.Local", at.In(time.Local)},
 		{"an unnamed time.FixedZone", at.In(time.FixedZone("", 2*3600))},
+		// LoadLocation("") is UTC, so at offset 0 only the name tells it apart.
+		{"an unnamed time.FixedZone at offset 0", at.In(time.FixedZone("", 0))},
 		{"an abbreviated time.FixedZone", at.In(time.FixedZone("CEST", 2*3600))},
+		{"a time.FixedZone named for an id Go loads and the server refuses", at.In(time.FixedZone("EST", -5*3600))},
+		{"a time.FixedZone mislabelled with an id the server takes", at.In(time.FixedZone("CET", 5*3600))},
 		{"a time.FixedZone named UTC", at.In(time.FixedZone("UTC", 0))},
 		{"an IANA location", at.In(newYork)},
 		{"time.UTC", at},
 	}
 	for i, z := range zones {
 		id := int64(100 + i)
+		// A distinct instant per row, so = can only find the row's own event.
+		z.at = z.at.Add(time.Duration(i) * time.Minute)
 		require.NoError(t, q.addEvent(ctx, id, z.at), "write an instant in %s", z.name)
 		got, err := q.eventAt(ctx, id)
 		require.NoError(t, err, "read the instant written in %s", z.name)
 		require.True(t, z.at.Equal(got), "%s: wrote %s, read %s", z.name, z.at, got)
+
+		// Equality, both as written and as read back: on neo4j = compares
+		// the zone's form, so a bind that rewrote a zone the server stores
+		// by name would miss here while every range predicate still passed.
+		hit, err := q.eventsAt(ctx, z.at)
+		require.NoError(t, err)
+		require.Equal(t, []int64{id}, hit, "%s: = on the value as written", z.name)
+		hit, err = q.eventsAt(ctx, got)
+		require.NoError(t, err)
+		require.Equal(t, []int64{id}, hit, "%s: = on the value as read back (%s)", z.name, got)
 
 		// A nullable parameter takes the same location through its own
 		// helper. No event was written with a seenAt, so the answer is

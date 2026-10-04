@@ -20,6 +20,13 @@ MATCH (e:Event) WHERE e.occurredAt > $since RETURN e.id AS id ORDER BY e.occurre
 // name: EventsSeenAfter :many
 MATCH (e:Event) WHERE e.seenAt > $seenAfter RETURN e.id AS id ORDER BY e.seenAt
 
+// EventsAt is the equality half (bd gqlc-m3ax). On neo4j = compares the
+// zone's form as well as the instant, so a value bound in a different form
+// from the one stored misses where a range predicate would not.
+
+// name: EventsAt :many
+MATCH (e:Event) WHERE e.occurredAt = $at RETURN e.id AS id ORDER BY e.id
+
 // name: EventAt :one
 MATCH (e:Event) WHERE e.id = $id RETURN e.occurredAt AS occurredAt
 

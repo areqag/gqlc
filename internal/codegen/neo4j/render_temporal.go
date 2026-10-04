@@ -403,13 +403,24 @@ const timestampHelper = "Timestamp"
 // Every bind goes through fromTimestamp because of the drivers' packStruct
 // (v5.28.4 and v6.2.0, neo4j/internal/bolt/outgoing.go): a time.Time whose
 // zone is not named "Offset" is sent as the location's name, which the
-// server takes as a zone id and refuses unless it is an IANA one. Measured
-// against the pinned image on both majors: time.Local ("Local", whenever
-// TZ is unset), an unnamed time.FixedZone and an abbreviated one ("CEST")
-// are refused, so time.Now() is (bd gqlc-m3ax). A list element owes the
-// same conversion, and so does a *time.Time inside a list for its own
-// reason: packV hands a pointer-to-struct to packStruct still a pointer,
-// and *time.Time is no case there (bd gqlc-gk6q).
+// server takes as a zone id. Measured against the pinned image on both
+// majors (bd gqlc-m3ax): time.Local ("Local", whenever TZ is unset), an
+// unnamed time.FixedZone and an abbreviated one ("CEST") are refused, so
+// time.Now() is. A list element owes the same conversion, and so does a
+// *time.Time inside a list for its own reason: packV hands a
+// pointer-to-struct to packStruct still a pointer, and *time.Time is no
+// case there (bd gqlc-gk6q).
+//
+// fromTimestamp converts only what the server would refuse or misread, and
+// sends every other value as it was. Cypher's = compares the zone FORM as
+// well as the instant — datetime('…Z') = datetime('…Z[UTC]') is false,
+// and MERGE and DISTINCT follow it — so rewriting a zone the server
+// accepts would stop a bound value matching one stored in its named form,
+// including a value this package just decoded (ADR 0033, note of
+// 2026-10-04). The five names it refuses although Go's tzdata loads them
+// were measured by sending every name under /usr/share/zoneinfo (598) to
+// the pinned image on 2026-10-04; a server refusing another fails loudly
+// at the send, it does not store a wrong value.
 //
 // Its own file for the reason uuid_neo4j.go has one: the trigger is
 // independent of the temporal pair, since TIMESTAMP is no neutral carrier
@@ -419,15 +430,51 @@ func renderTimestampConversions(pkg string, use carrierUse) []byte {
 	b.WriteString(codegen.Header())
 	b.WriteString("package ")
 	b.WriteString(pkg)
-	b.WriteString("\n\nimport \"time\"\n")
+	b.WriteString("\n\nimport (\n\t\"sync\"\n\t\"time\"\n)\n")
 	b.WriteString(`
-// fromTimestamp binds a TIMESTAMP as its instant in a fixed zone named
-// "Offset" at the offset it reads in its own location, which is the one
-// name the driver sends as an offset rather than as a zone id. The
-// instant and the offset are kept; an IANA location's region is not.
+// fromTimestamp binds a TIMESTAMP in a form the server accepts. A value
+// whose zone the driver sends as an id the server takes is sent as it is
+// (time.UTC among them: LoadLocation("UTC") is time.UTC); any other is
+// moved, same instant and same offset, into a fixed zone named "Offset",
+// which the driver sends as an offset instead.
 func fromTimestamp(v time.Time) time.Time {
 	_, offset := v.Zone()
+	if timestampZoneIsSendable(v, offset) {
+		return v
+	}
 	return v.In(time.FixedZone("Offset", offset))
+}
+
+// timestampZones caches time.LoadLocation by name, guarded by
+// timestampZonesMu; a nil entry is a name not to send as a zone id. It is
+// seeded with the names the server refuses that LoadLocation would not
+// reject: "" and "Local", which it resolves to UTC and to time.Local, and
+// the five ids Go's tzdata loads and the server does not.
+var (
+	timestampZonesMu sync.Mutex
+	timestampZones   = map[string]*time.Location{
+		"": nil, "Local": nil, "EST": nil, "HST": nil, "MST": nil, "ROC": nil, "Factory": nil,
+	}
+)
+
+// timestampZoneIsSendable reports whether v's location name is a zone id
+// the server accepts and resolves to the offset v reads. A name that loads
+// at a different offset is a FixedZone mislabelled with a real id, which
+// the server would store at the id's offset rather than v's.
+func timestampZoneIsSendable(v time.Time, offset int) bool {
+	name := v.Location().String()
+	timestampZonesMu.Lock()
+	loc, ok := timestampZones[name]
+	if !ok {
+		loc, _ = time.LoadLocation(name)
+		timestampZones[name] = loc
+	}
+	timestampZonesMu.Unlock()
+	if loc == nil {
+		return false
+	}
+	_, want := v.In(loc).Zone()
+	return want == offset
 }
 `)
 	if use.encodePtr {
