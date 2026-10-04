@@ -11,6 +11,10 @@
 // backend decoded through agtypeListOfAny even when its width was known
 // (43422c03; bd gqlc-k1dg narrows that).
 //
+// The union has no temporal member on purpose. With ANY<DATE | INT64> this
+// package emits temporal.go with nothing naming a carrier (bd gqlc-r2dp,
+// 47b60c09), which is a defect of its own and not the one this pins.
+//
 // AGE-only because neo4j does not store a RECORD property (StorableProperty).
 
 // name: AccountRecordFieldElements :many
