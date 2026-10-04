@@ -28,12 +28,13 @@ type foreignEffect struct{ query.Effect }
 // The panic is kept rather than turned into an error, and the reason is not
 // that the arm is unreachable. Only parser-constructed Types reach resolveType
 // today, so reaching it takes a change inside this module rather than a query —
-// but the arm is reachable in the language sense, and the three arms just above
-// it (TypeNode, TypeEdge, TypePath) already panic for exactly that reading of
-// "resolver bug". Returning an ErrOutOfR0Scope here instead would put an
-// in-module programming mistake into the same channel as a user writing an
-// unsupported query, and the resolver's callers surface that channel to the
-// user as a diagnostic about their Cypher.
+// but the arm is reachable in the language sense, and the TypePath arm just
+// above it already panics for exactly that reading of "resolver bug". (TypeNode
+// and TypeEdge used to as well, until a CASE over two nodes showed a query does
+// reach them; they refuse now, bd gqlc-ruql.) Returning an ErrOutOfR0Scope here
+// instead would put an in-module programming mistake into the same channel as
+// a user writing an unsupported query, and the resolver's callers surface that
+// channel to the user as a diagnostic about their Cypher.
 func TestResolveTypeDefaultPanicsOnAForeignType(t *testing.T) {
 	var got ResolvedType
 	var err error

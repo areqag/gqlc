@@ -150,5 +150,11 @@
     "carried_alias_redeclared_as_node.cypher": "social_r5.gql",
     "carried_alias_redeclared_as_labelled_node.cypher": "social_r5.gql",
     "carried_alias_redeclared_as_edge.cypher": "social_r5.gql",
-    "carried_edge_redeclared_as_node.cypher": "social_r5.gql"
+    "carried_edge_redeclared_as_node.cypher": "social_r5.gql",
+    "case_over_nodes_projection.cypher": "social_r7.gql",
+    "case_over_edges_projection.cypher": "social_r7.gql",
+    "case_over_mixed_label_nodes_projection.cypher": "social_r7.gql",
+    "parenthesized_node_projection.cypher": "social_r7.gql",
+    "list_index_node_projection.cypher": "social_r7.gql",
+    "case_over_nodes_carried_through_with.cypher": "social_r7.gql"
 }
