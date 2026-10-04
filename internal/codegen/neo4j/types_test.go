@@ -438,6 +438,85 @@ func TestStorablePropertyRefusesAUnionValuedList(t *testing.T) {
 	}
 }
 
+// TestStorablePropertyRefusesAUnionWithAnUnstorableMember is the bare-union
+// arm (bd gqlc-jt5u). A bare union is stored — the server keeps whichever
+// member value is written — so the question is per MEMBER: a union is
+// storable only if every member is. TestNeo4jRefusesAMapValuedStoredProperty
+// measured it on the pinned image, Neo4j Kernel 5.26.28 community: a key
+// holding an INT64 on one node and a BOOL on another refused a map SET onto
+// the INT64 node with "Property values can only be of primitive types or
+// arrays thereof", and a nested list with "Collections containing
+// collections can not be stored in properties". A neo4j property key has
+// no declared type, so the other members' values do not make the slot hold
+// a record.
+//
+// EVERY REFUSED ROW ASSERTS BOTH AXES, for the reason the record test
+// states: a union with a record member arriving as a query VALUE decodes.
+//
+// The member rows are one per arm the bare widths already take, because
+// the arm recurses rather than re-listing them: a RECORD member, the
+// braceless RECORD, a nested list, a list of records and a union-valued
+// list. The admitted rows stop the arm refusing a union for merely HAVING a
+// parameterised member — a flat list member is stored as an array.
+func TestStorablePropertyRefusesAUnionWithAnUnstorableMember(t *testing.T) {
+	record := graph.RecordOf([]graph.RecordField{{Name: "opened_on", Type: graph.TypeDate, NotNull: true}})
+	refused := []graph.PropertyType{
+		// The bead's own width: ANY<RECORD { opened_on :: DATE NOT NULL } | INT64>.
+		graph.UnionOf([]graph.UnionMember{{Type: record}, {Type: graph.TypeInt64}}),
+		graph.UnionOf([]graph.UnionMember{{Type: graph.TypeAnyRecord}, {Type: graph.TypeBool}}),
+		graph.UnionOf([]graph.UnionMember{{Type: graph.ListOf(graph.ListOf(graph.TypeInt32, false), false)}, {Type: graph.TypeString}}),
+		graph.UnionOf([]graph.UnionMember{{Type: graph.ListOf(record, true)}, {Type: graph.TypeInt64}}),
+		graph.UnionOf([]graph.UnionMember{
+			{Type: graph.ListOf(graph.UnionOf([]graph.UnionMember{{Type: graph.TypeBool}, {Type: graph.TypeInt64}}), false)},
+			{Type: graph.TypeString},
+		}),
+		// NOT NULL on the offending member must not hide it.
+		graph.UnionOf([]graph.UnionMember{{Type: record, NotNull: true}, {Type: graph.TypeInt64}}),
+	}
+	for _, pt := range refused {
+		t.Run("refused/"+string(pt), func(t *testing.T) {
+			require.Falsef(t, neo4j.TypeMap{}.StorableProperty(pt),
+				"the neo4j server refuses a map or a nested collection written into a property key "+
+					"whatever that key holds on other nodes, so %s has a member no write could store", pt)
+
+			got, ok := neo4j.TypeMap{}.Property(pt)
+			require.Truef(t, ok,
+				"%s must stay CARRIED: a union arriving as a query VALUE decodes on this backend, and "+
+					"putting the refusal on the carrier axis would take that decode with it", pt)
+			require.NotEmpty(t, got)
+		})
+	}
+
+	admitted := []graph.PropertyType{
+		graph.UnionOf([]graph.UnionMember{{Type: graph.TypeBool}, {Type: graph.TypeInt64}}),
+		graph.UnionOf([]graph.UnionMember{{Type: graph.ListOf(graph.TypeInt32, false)}, {Type: graph.TypeString}}),
+	}
+	for _, pt := range admitted {
+		t.Run("admitted/"+string(pt), func(t *testing.T) {
+			require.Truef(t, neo4j.TypeMap{}.StorableProperty(pt),
+				"every member of %s is a width the server stores, so the union must stay storable", pt)
+		})
+	}
+}
+
+// TestUnionMemberPropertyRejectionReachesTheCaller is the caller half of the
+// arm above: the refusal leaves generation on the storage sentinel, naming
+// the property and the declared union, and not on the carrier channel.
+func TestUnionMemberPropertyRejectionReachesTheCaller(t *testing.T) {
+	record := graph.RecordOf([]graph.RecordField{{Name: "opened_on", Type: graph.TypeDate, NotNull: true}})
+	union := graph.UnionOf([]graph.UnionMember{{Type: record}, {Type: graph.TypeInt64}})
+	files, err := neo4j.New().Generate(codegen.Input{Schema: schemaWithPayload(union)})
+
+	require.ErrorIs(t, err, codegen.ErrUnstorableProperty,
+		"a union whose RECORD member the server will not store is a STORAGE refusal")
+	require.NotErrorIs(t, err, codegen.ErrUnrepresentableWidth,
+		"RECORD and INT64 are distinct wire families and both carry, so the carrier channel would be false")
+	require.ErrorContains(t, err,
+		`entity "Blob" property "payload" has `+string(union)+
+			`, which the neo4j backend cannot store as a property`)
+	require.Nil(t, files)
+}
+
 // TestUnionListPropertyRejectionReachesTheCaller is the record and
 // nested-list obligation for this width: a table returning false is only
 // useful if the failure travels out of generation naming the entity, the

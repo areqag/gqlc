@@ -426,9 +426,21 @@ recorded here because neither was predictable from the rule's wording:
   arm refuses the whole width for that reason, and is over-broad by
   exactly one member pairing on purpose.
 
-The arm is the **list branch only**: a bare `UNION<…>` property is a
-single primitive value and is stored, so `KindUnion` is not refused at
-the top of `StorableProperty` the way `KindRecord` is.
+That arm is the **list branch**: a bare `UNION<…>` property is a
+single primitive value and is stored, so `KindUnion` is not refused
+outright at the top of `StorableProperty` the way `KindRecord` is.
+
+**A bare union is instead asked per member** (`gqlc-jt5u`), which is
+§5's *"any union with a map-family or record member"* ruling, stated
+here since stage 2 had left it unwritten: `StorableProperty` admitted
+`ANY<RECORD {…} | INT64>` by silence. Measured 2026-10-04 against Neo4j
+Kernel 5.26.28 community, in `TestNeo4jRefusesAMapValuedStoredProperty`:
+one key holding an `INT64` on one node and a `BOOL` on another, both
+stored, refused a map `SET` onto the `INT64` node with the map-valued
+wording and a nested list with ADR 0035's. A neo4j property key has no
+declared type, so the union is storable exactly when every member is,
+and the arm recurses over `Members()` rather than re-listing the
+refused widths.
 
 **Stage 1 — records** (`gqlc-jffyz`, retitled to records only):
 `KindRecord` + `TypeAnyRecord` + `RECORD<>` carriers on both

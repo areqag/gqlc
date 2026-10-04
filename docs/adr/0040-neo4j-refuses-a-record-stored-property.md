@@ -162,6 +162,14 @@ map-family or record member"*, and that is stage 2's to write when the union
 work lands. This ADR records the record half only, which is what has been
 measured.
 
+*Addendum, 2026-10-04 (`gqlc-jt5u`).* The union half has since been measured
+and written. In `TestNeo4jRefusesAMapValuedStoredProperty`, against Neo4j Kernel
+5.26.28 community, a key holding an `INT64` and a `BOOL` on two nodes refused a
+map `SET` onto the `INT64` node with this ADR's wording, so the other members'
+values do not make a map storable. neo4j's `StorableProperty` now refuses a
+union any member of which it refuses; `invalid/unstorable_property_union_record_member`
+is the fixture. The spec's §7 carries the detail.
+
 Field access *into* a record inside query text (`RETURN p.addr.city`) is out of
 scope for both stages; a record value moves whole. That limit is the spec's
 (§6) and is repeated here only so a reader of this ADR does not infer it was
