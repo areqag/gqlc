@@ -1682,6 +1682,10 @@ var fixedDeclarationFiles = map[string]bool{
 	// holds it anyway is the backwards half: UUID is a reserved row, and a
 	// reserved row no swept file declares fails there.
 	"uuid.go": true, "uuid_neo4j.go": true,
+	// The nullable-element TIMESTAMP list helpers (bd gqlc-gk6q), on the
+	// bridges' terms: the batch decides whether the file is emitted, never
+	// a name in it. It exports nothing today.
+	"timestamp_neo4j.go": true,
 }
 
 // inputDerivedFiles names the emitted files whose exported declarations
