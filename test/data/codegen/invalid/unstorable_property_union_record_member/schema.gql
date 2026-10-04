@@ -1,0 +1,13 @@
+// neo4j targets only, for the reason unstorable_property_record gives: the
+// refusal is the SERVER's storage rule. A bare union is stored, but only one
+// member's value at a time, and this union's RECORD member is a map the
+// pinned image refuses in any property slot — measured by
+// TestNeo4jRefusesAMapValuedStoredProperty against a key that already held
+// an INT64 and a BOOL on other nodes (bd gqlc-jt5u). So the union is refused
+// per MEMBER, as the bare record next door is refused whole.
+CREATE PROPERTY GRAPH TYPE UnstorablePropertyUnionRecordMember AS {
+    (:Ledger {
+        id    :: INT64 NOT NULL,
+        entry :: ANY<RECORD { opened_on :: DATE NOT NULL } | INT64>
+    })
+}

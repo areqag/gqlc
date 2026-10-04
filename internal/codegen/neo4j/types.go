@@ -206,8 +206,9 @@ func wireFamily(goType string) string {
 	return driverCarrier(goType)
 }
 
-// StorableProperty refuses a record, a list of records, and a list whose
-// element is itself a list, and admits everything else.
+// StorableProperty refuses a record, a list of records, a list whose
+// element is itself a list or a union, and a union any member of which it
+// refuses, and admits everything else.
 //
 // This is the storage axis, not the carrier axis: Property answers
 // "[][]int16" for LIST<LIST<INT16>> and is right to, and this backend
@@ -253,11 +254,20 @@ func wireFamily(goType string) string {
 // tests the "RECORD<" prefix, which all three spellings share. A depth-3
 // list of records is already refused one level out by the nested-list arm.
 //
-// THE UNION ARM IS THE LIST ARM ONLY, and it rests on its own measurement
-// rather than on the record one next door. A BARE union property is a
-// single primitive value and is STORED — the pinned image kept
-// `{u: true}` — so the refusal cannot be hung on KindUnion at the top.
-// What the server refuses is the ARRAY: a stored property array must be
+// A BARE UNION IS ASKED PER MEMBER. A bare union property holds one
+// member's value at a time and is STORED when that member is — the pinned
+// image kept `{u: true}` — so the union is storable exactly when every
+// member is, and the recursion refuses one whose member is a record, a
+// nested list or any other width refused here. A neo4j property key has
+// no declared type, so the other members' values do not make a map
+// storable: TestNeo4jRefusesAMapValuedStoredProperty wrote an INT64 and a
+// BOOL under one key, then SET a map and a nested list onto the INT64 node,
+// and both were refused with the bare widths' own wording (bd gqlc-jt5u).
+// Without this arm ANY<RECORD {…} | INT64> generated a struct field whose
+// RECORD arm no write could fill.
+//
+// THE UNION-VALUED LIST rests on its own measurement rather than on the
+// record one next door. What the server refuses is the ARRAY: a stored property array must be
 // homogeneous in its storage type, and every union gqlc admits is
 // heterogeneous by construction, because codegen.UnionMemberCollision
 // already refuses at declaration any union whose members share a wire
@@ -288,15 +298,23 @@ func wireFamily(goType string) string {
 // LIST<ANY VALUE> stays admitted for the reason it is admitted above: it
 // can carry a heterogeneous list at runtime, which no static check can
 // see, and that write fails at the server as it does today.
-func (typeMap) StorableProperty(pt graph.PropertyType) bool {
-	if pt.Kind() == graph.KindRecord {
+func (t typeMap) StorableProperty(pt graph.PropertyType) bool {
+	switch pt.Kind() {
+	case graph.KindRecord:
 		return false
-	}
-	if pt.Kind() != graph.KindList {
+	case graph.KindUnion:
+		for _, m := range pt.Members() {
+			if !t.StorableProperty(m.Type) {
+				return false
+			}
+		}
 		return true
+	case graph.KindList:
+		elem := pt.Elem().Kind()
+		return elem != graph.KindList && elem != graph.KindRecord && elem != graph.KindUnion
+	case graph.KindScalar:
 	}
-	elem := pt.Elem().Kind()
-	return elem != graph.KindList && elem != graph.KindRecord && elem != graph.KindUnion
+	return true
 }
 
 // Temporal maps a resolver Temporal kind to the Go type text C3 emits
