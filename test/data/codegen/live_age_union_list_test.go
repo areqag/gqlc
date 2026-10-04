@@ -19,10 +19,9 @@
 // encoder could not pass.
 //
 // One row reads its null through union_only_carrier_list's package instead.
-// That package
-// has ONE union list, so its wrapper was bound to the right decoder even
-// before the gqlc-3s7q fix, and the row isolates the null: in the
-// two-widths package before the fix, the lists that reached agtypeValue
+// That package has ONE union list, so its wrapper was bound to the right
+// decoder even before the gqlc-3s7q fix, and the row isolates the null: in
+// the two-widths package before the fix, the lists that reached agtypeValue
 // passed a null for the wrong reason.
 //
 // The bare nullable union PROPERTY is the third question gqlc-3jhv asked: a
