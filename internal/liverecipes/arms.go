@@ -98,4 +98,6 @@ var LiveArms = map[string]Arm{
 	"TestAGERoundTripsANullElementInAUnionList":                 ArmAGE,
 	// A list expression column of union and record elements (bd gqlc-k1dg).
 	"TestAGEDecodesAListExpressionElementByItsWidth": ArmAGE,
+	// A bare column the resolver types as unknown (bd gqlc-2omj).
+	"TestAGEServesAnUnknownColumnAsAny": ArmAGE,
 }
