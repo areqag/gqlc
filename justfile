@@ -3021,8 +3021,7 @@ gh-orphans-close *args:
 #
 #   - ENFORCED on generated code: `unused`, by check-goldens-unused, which runs
 #     after this body. An unexported symbol the emitter emits with no caller
-#     reds this required check — except an entity decoder, which that recipe
-#     roots, counts and prints, pending bd gqlc-m1dk.
+#     reds this required check.
 #   - NOT ENFORCED on generated code: every other linter in .golangci.yml, by
 #     decision. Measured 2026-09-20 at e2f02f06 and golangci-lint v2.13.1, with
 #     both of that recipe's locks lifted in a copy of the root config: the other
@@ -3178,25 +3177,17 @@ test-codegen-fence: sweep-discovery-probes ensure-golangci check-codegen-externa
 # at v2.13.1; each lock is restored on its own, on every run, in the witness
 # below.
 #
-# ENTITY DECODERS ARE ROOTED, and that is an exemption, not a finding fixed.
-# Both backends emit decode<Entity> for every entity the schema declares whether
-# or not the batch reads it, which is an open design question (bd gqlc-m1dk) and
-# not this recipe's to settle. Unrooted, `unused` reported 513 over these goldens
-# (at e2f02f06, in the one run test-codegen-fence's comment cites): the decoders
-# nothing calls, and — the larger part — the helpers only those decoders call.
-# That second part is why this is a ROOT and not an exclusion rule: a transitive
-# finding carries an ordinary helper name, toDate or agtypeInt64, which is
-# exactly the name this gate has to keep reporting elsewhere.
-# internal/tools/goldenroots picks the decoders out by SHAPE — func
-# decode<T>(x) (<T>, error) where <T> is an exported struct the package defines
-# — so decodeRecord<digest> and decodeUnion<digest>, which are emitted per use,
-# stay held; it prints what it rooted and how many of those nothing else names,
-# and refuses a run that rooted none.
+# NOTHING IS ROOTED. Until bd gqlc-m1dk both backends emitted decode<Entity>
+# for every entity the schema declared, read or not, and this recipe rooted
+# those decoders through a tool written for the purpose, pending that bead's
+# ruling. The ruling was to gate them on use, as the helpers above are, and the
+# rooting went with it: every unexported symbol in a golden is held here on the
+# same terms.
 #
 # The tree is not edited. The module is copied outside it (~1600 files, ~30 ms
-# measured), the roots are written into the copy, and the trap removes it. The
-# cache sits under the copy too: every run's paths are new, so entries written
-# to this checkout's cache would never be read again.
+# measured), the witness below is written into the copy, and the trap removes
+# it. The cache sits under the copy too: every run's paths are new, so entries
+# written to this checkout's cache would never be read again.
 #
 # A TRAP DOES NOT RUN UNDER SIGKILL, which is how a session on the dev host ends
 # at a quota wall (bd gqlc-7hyt). Measured 2026-09-20: killed mid-lint, by its
@@ -3282,9 +3273,8 @@ check-goldens-unused: sweep-discovery-probes ensure-golangci
         generated="$(find "${scratch}/${m}" -name '*.go' -exec grep -lE '^// Code generated .* DO NOT EDIT\.$' {} + | wc -l)"
         echo "unused over goldens: ${m}, ${generated} of ${total} Go files carry the generated header"
 
-        # WITNESS, ahead of the rooting so that a sink rooting too much roots
-        # these as well and is caught by their silence. They are shaped as the
-        # two per-use decoder families a `^decode` rule would swallow: a record
+        # WITNESS: two unexported funcs nothing calls, which this run has to
+        # name. They are shaped as the two per-use decoder families — a record
         # decoder answering an unexported alias, a union decoder answering any.
         neo4j_pkg="$(first_golden "${m}" 'neo4j-go-v*')"
         age_pkg="$(first_golden "${m}" 'apache-age-pgx-v*')"
@@ -3300,20 +3290,15 @@ check-goldens-unused: sweep-discovery-probes ensure-golangci
         printf '\ntype recordfencewitness = struct{}\n\nfunc decodeRecordfencewitness(v map[string]any) (recordfencewitness, error) {\n\t_ = v\n\treturn recordfencewitness{}, nil\n}\n' >>"${neo4j_pkg}"
         printf '\nfunc decodeUnionfencewitness(raw []byte) (any, error) {\n\treturn raw, nil\n}\n' >>"${age_pkg}"
 
-        go run ./internal/tools/goldenroots "${scratch}/${m}"
-
         witness_pkgs=("$(dirname "${neo4j_pkg}")" "$(dirname "${age_pkg}")")
         run_unused "${m}" unused.yml "${witness_pkgs[@]}"
         for name in decodeRecordfencewitness decodeUnionfencewitness; do
             case "${lint_out}" in
                 *"func ${name} is unused"*) ;;
                 *)  echo "error: an unexported func nothing calls, ${name}, was appended to a golden in" >&2
-                    echo "       a scratch copy and \`unused\` did not name it (exit ${lint_rc}). Either" >&2
-                    echo "       generated files are no longer visible to this run, or the rooting in" >&2
-                    echo "       internal/tools/goldenroots has widened past entity decoders — this" >&2
-                    echo "       func is shaped like a per-use record/union decoder, which a rule" >&2
-                    echo "       keyed on the \`decode\` prefix roots. The gate below is blind to an" >&2
-                    echo "       over-emitted helper (bd gqlc-ukzq). What the linter said:" >&2
+                    echo "       a scratch copy and \`unused\` did not name it (exit ${lint_rc}), so" >&2
+                    echo "       generated files are no longer visible to this run and the gate below" >&2
+                    echo "       is blind to an over-emitted helper (bd gqlc-ukzq). What the linter said:" >&2
                     printf '%s\n' "${lint_out}" | sed 's/^/         /' >&2
                     exit 1
                     ;;
@@ -3345,8 +3330,7 @@ check-goldens-unused: sweep-discovery-probes ensure-golangci
             echo "error: \`unused\` over ${m} with generated files visible (bd gqlc-ukzq). Each" >&2
             echo "       symbol below is emitted into a package that never names it; the paths are" >&2
             echo "       the goldens', read from a scratch copy. The fix is in the emitter — gate" >&2
-            echo "       the helper on the use that calls it — and then a regenerate. Entity" >&2
-            echo "       decoders are not reported: they are rooted above, pending bd gqlc-m1dk." >&2
+            echo "       the helper on the use that calls it — and then a regenerate." >&2
             printf '%s\n' "${lint_out}" | sed 's/^/         /' >&2
             exit 1
         fi

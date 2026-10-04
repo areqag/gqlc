@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"github.com/neo4j/neo4j-go-driver/v6/neo4j"
+	"github.com/neo4j/neo4j-go-driver/v6/neo4j/dbtype"
 )
 
 const slotsMatchingQueryText = `MATCH (s:Slot)
@@ -37,6 +38,34 @@ func (q *queries) SlotsMatching(ctx context.Context, arg SlotsMatchingParams) ([
 		}
 		if isNil {
 			return nil, fmt.Errorf("SlotsMatching: column %q is non-nullable but arrived null", "id")
+		}
+		out = append(out, value)
+	}
+	return out, nil
+}
+
+const allSlotsQueryText = `MATCH (s:Slot) RETURN s`
+
+// AllSlots executes the AllSlots query.
+//
+//	MATCH (s:Slot) RETURN s
+func (q *queries) AllSlots(ctx context.Context) ([]Slot, error) {
+	records, err := q.db.run(ctx, allSlotsQueryText, nil, neo4j.AccessModeRead)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Slot, 0, len(records))
+	for _, record := range records {
+		node, isNil, err := neo4j.GetRecordValue[dbtype.Node](record, "s")
+		if err != nil {
+			return nil, fmt.Errorf("AllSlots: decode column %q: %w", "s", err)
+		}
+		if isNil {
+			return nil, fmt.Errorf("AllSlots: column %q is non-nullable but arrived null", "s")
+		}
+		value, err := decodeSlot(node)
+		if err != nil {
+			return nil, fmt.Errorf("AllSlots: decode column %q: %w", "s", err)
 		}
 		out = append(out, value)
 	}

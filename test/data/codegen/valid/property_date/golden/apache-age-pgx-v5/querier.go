@@ -2,7 +2,10 @@
 
 package propertydate
 
+import "context"
+
 type ReadQuerier interface {
+	People(ctx context.Context) ([]Person, error)
 }
 
 type WriteQuerier interface {

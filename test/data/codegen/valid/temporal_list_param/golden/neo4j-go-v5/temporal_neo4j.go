@@ -8,14 +8,6 @@ import (
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j/dbtype"
 )
 
-// toDate reads the calendar components off a driver date. The
-// hydrator builds it as UTC midnight of the packed epoch-day, so the
-// clock the newtype also carries holds nothing to lose.
-func toDate(v dbtype.Date) Date {
-	year, month, day := time.Time(v).Date()
-	return Date{Year: year, Month: int(month), Day: day}
-}
-
 // fromDate builds the driver date the packer turns into epoch-days.
 // UTC midnight, so the packer's day division is exact for every date,
 // including those before the epoch.
@@ -32,12 +24,6 @@ func fromDateList(v []Date) []any {
 		out[i] = fromDate(v[i])
 	}
 	return out
-}
-
-// toDuration copies a driver duration field for field: dbtype.Duration
-// already holds the four components apart.
-func toDuration(v dbtype.Duration) Duration {
-	return Duration{Months: v.Months, Days: v.Days, Seconds: v.Seconds, Nanos: v.Nanos}
 }
 
 // fromDuration copies a duration field for field.

@@ -6,6 +6,7 @@ import "context"
 
 type ReadQuerier interface {
 	GetEventTags(ctx context.Context) (*[]*string, error)
+	AllEvents(ctx context.Context) ([]Event, error)
 }
 
 type WriteQuerier interface {

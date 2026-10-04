@@ -2,13 +2,6 @@
 
 package temporallistparam
 
-import (
-	"fmt"
-
-	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
-	"github.com/neo4j/neo4j-go-driver/v5/neo4j/dbtype"
-)
-
 // Slot corresponds to the Slot node type.
 type Slot struct {
 	Days  []Date
@@ -16,103 +9,4 @@ type Slot struct {
 	Ranks []int32
 	Spans *[]Duration
 	Tags  []string
-}
-
-// decodeSlot decodes a driver dbtype.Node into a Slot struct,
-// enforcing the wire label and the per-property nullability the
-// schema declares.
-func decodeSlot(node dbtype.Node) (Slot, error) {
-	has0 := false
-	for _, label := range node.Labels {
-		if label == "Slot" {
-			has0 = true
-			break
-		}
-	}
-	if !has0 {
-		return Slot{}, fmt.Errorf("decode Slot: expected a node labelled %q, got labels %q", "Slot", node.Labels)
-	}
-	var out Slot
-	value0, err := neo4j.GetProperty[[]any](node, "days")
-	if err != nil {
-		return Slot{}, fmt.Errorf("decode Slot.Days: %w", err)
-	}
-	value0s := make([]Date, 0, len(value0))
-	for i0, elem0 := range value0 {
-		v0, ok := elem0.(dbtype.Date)
-		if !ok {
-			return Slot{}, fmt.Errorf("decode Slot.Days: property %q element %d: expected dbtype.Date, got %T", "days", i0, elem0)
-		}
-		value0s = append(value0s, toDate(v0))
-	}
-	out.Days = value0s
-	value1, err := neo4j.GetProperty[int64](node, "id")
-	if err != nil {
-		return Slot{}, fmt.Errorf("decode Slot.Id: %w", err)
-	}
-	out.Id = value1
-	value2, err := neo4j.GetProperty[[]any](node, "ranks")
-	if err != nil {
-		return Slot{}, fmt.Errorf("decode Slot.Ranks: %w", err)
-	}
-	value2s := make([]int32, 0, len(value2))
-	for i0, elem0 := range value2 {
-		v0, ok := elem0.(int64)
-		if !ok {
-			return Slot{}, fmt.Errorf("decode Slot.Ranks: property %q element %d: expected int64, got %T", "ranks", i0, elem0)
-		}
-		v0n, err := narrowInt[int32](v0)
-		if err != nil {
-			return Slot{}, fmt.Errorf("decode Slot.Ranks: property %q element %d: %w", "ranks", i0, err)
-		}
-		value2s = append(value2s, v0n)
-	}
-	out.Ranks = value2s
-	if v, ok := node.Props["spans"]; ok {
-		s, ok := v.([]any)
-		if !ok {
-			return Slot{}, fmt.Errorf("decode Slot.Spans: property %q: expected []any, got %T", "spans", v)
-		}
-		narrowed := make([]Duration, 0, len(s))
-		for i0, elem0 := range s {
-			v0, ok := elem0.(dbtype.Duration)
-			if !ok {
-				return Slot{}, fmt.Errorf("decode Slot.Spans: property %q element %d: expected dbtype.Duration, got %T", "spans", i0, elem0)
-			}
-			narrowed = append(narrowed, toDuration(v0))
-		}
-		out.Spans = &narrowed
-	}
-	value3, err := neo4j.GetProperty[[]any](node, "tags")
-	if err != nil {
-		return Slot{}, fmt.Errorf("decode Slot.Tags: %w", err)
-	}
-	value3s := make([]string, 0, len(value3))
-	for i0, elem0 := range value3 {
-		v0, ok := elem0.(string)
-		if !ok {
-			return Slot{}, fmt.Errorf("decode Slot.Tags: property %q element %d: expected string, got %T", "tags", i0, elem0)
-		}
-		value3s = append(value3s, v0)
-	}
-	out.Tags = value3s
-	return out, nil
-}
-
-// narrowInt converts a driver's int64 down to the integer width the
-// schema declared, refusing a value that width cannot represent.
-//
-// The round-trip catches every width whose range is a strict subset of
-// int64's. uint64 is the one where it does not: the conversion is a
-// bijection there, so uint64(-1) round-trips back to -1 unchanged and
-// only the sign disagreement gives it away. A uint64 property's readable
-// range is [0, MaxInt64] — the wire integer is signed 64-bit — so a
-// negative carrier is always a violation rather than a large value.
-func narrowInt[T ~int | ~int8 | ~int16 | ~int32 | ~int64 |
-	~uint | ~uint8 | ~uint16 | ~uint32 | ~uint64](v int64) (T, error) {
-	out := T(v)
-	if int64(out) != v || (out < T(0)) != (v < 0) {
-		return 0, fmt.Errorf("value %d does not fit the declared %T width", v, out)
-	}
-	return out, nil
 }

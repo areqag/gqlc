@@ -2,7 +2,10 @@
 
 package entityzeropropertynode
 
+import "context"
+
 type ReadQuerier interface {
+	Markers(ctx context.Context) ([]Marker, error)
 }
 
 type WriteQuerier interface {

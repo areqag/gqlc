@@ -2,49 +2,9 @@
 
 package twodateparams
 
-import (
-	"fmt"
-
-	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
-	"github.com/neo4j/neo4j-go-driver/v5/neo4j/dbtype"
-)
-
 // Event corresponds to the Event node type.
 type Event struct {
 	Created Date
 	Id      int64
 	Name    string
-}
-
-// decodeEvent decodes a driver dbtype.Node into a Event struct,
-// enforcing the wire label and the per-property nullability the
-// schema declares.
-func decodeEvent(node dbtype.Node) (Event, error) {
-	has0 := false
-	for _, label := range node.Labels {
-		if label == "Event" {
-			has0 = true
-			break
-		}
-	}
-	if !has0 {
-		return Event{}, fmt.Errorf("decode Event: expected a node labelled %q, got labels %q", "Event", node.Labels)
-	}
-	var out Event
-	value0, err := neo4j.GetProperty[dbtype.Date](node, "created")
-	if err != nil {
-		return Event{}, fmt.Errorf("decode Event.Created: %w", err)
-	}
-	out.Created = toDate(value0)
-	value1, err := neo4j.GetProperty[int64](node, "id")
-	if err != nil {
-		return Event{}, fmt.Errorf("decode Event.Id: %w", err)
-	}
-	out.Id = value1
-	value2, err := neo4j.GetProperty[string](node, "name")
-	if err != nil {
-		return Event{}, fmt.Errorf("decode Event.Name: %w", err)
-	}
-	out.Name = value2
-	return out, nil
 }

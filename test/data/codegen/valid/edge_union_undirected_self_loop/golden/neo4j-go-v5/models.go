@@ -14,29 +14,6 @@ type Person struct {
 	Id int64
 }
 
-// decodePerson decodes a driver dbtype.Node into a Person struct,
-// enforcing the wire label and the per-property nullability the
-// schema declares.
-func decodePerson(node dbtype.Node) (Person, error) {
-	has0 := false
-	for _, label := range node.Labels {
-		if label == "Person" {
-			has0 = true
-			break
-		}
-	}
-	if !has0 {
-		return Person{}, fmt.Errorf("decode Person: expected a node labelled %q, got labels %q", "Person", node.Labels)
-	}
-	var out Person
-	value0, err := neo4j.GetProperty[int64](node, "id")
-	if err != nil {
-		return Person{}, fmt.Errorf("decode Person.Id: %w", err)
-	}
-	out.Id = value0
-	return out, nil
-}
-
 // Likes corresponds to the LIKES edge type (Person -> Person).
 type Likes struct {
 	Since int64

@@ -4,9 +4,6 @@ package twononnulllistcolumns
 
 import (
 	"fmt"
-
-	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
-	"github.com/neo4j/neo4j-go-driver/v5/neo4j/dbtype"
 )
 
 // Listy corresponds to the Listy node type.
@@ -14,81 +11,6 @@ type Listy struct {
 	Ranks []*int32
 	Spare *[]*string
 	Tags  []*string
-}
-
-// decodeListy decodes a driver dbtype.Node into a Listy struct,
-// enforcing the wire label and the per-property nullability the
-// schema declares.
-func decodeListy(node dbtype.Node) (Listy, error) {
-	has0 := false
-	for _, label := range node.Labels {
-		if label == "Listy" {
-			has0 = true
-			break
-		}
-	}
-	if !has0 {
-		return Listy{}, fmt.Errorf("decode Listy: expected a node labelled %q, got labels %q", "Listy", node.Labels)
-	}
-	var out Listy
-	value0, err := neo4j.GetProperty[[]any](node, "ranks")
-	if err != nil {
-		return Listy{}, fmt.Errorf("decode Listy.Ranks: %w", err)
-	}
-	value0s := make([]*int32, 0, len(value0))
-	for i0, elem0 := range value0 {
-		if elem0 == nil {
-			value0s = append(value0s, nil)
-			continue
-		}
-		v0, ok := elem0.(int64)
-		if !ok {
-			return Listy{}, fmt.Errorf("decode Listy.Ranks: property %q element %d: expected int64, got %T", "ranks", i0, elem0)
-		}
-		v0n, err := narrowInt[int32](v0)
-		if err != nil {
-			return Listy{}, fmt.Errorf("decode Listy.Ranks: property %q element %d: %w", "ranks", i0, err)
-		}
-		value0s = append(value0s, &v0n)
-	}
-	out.Ranks = value0s
-	if v, ok := node.Props["spare"]; ok {
-		s, ok := v.([]any)
-		if !ok {
-			return Listy{}, fmt.Errorf("decode Listy.Spare: property %q: expected []any, got %T", "spare", v)
-		}
-		narrowed := make([]*string, 0, len(s))
-		for i0, elem0 := range s {
-			if elem0 == nil {
-				narrowed = append(narrowed, nil)
-				continue
-			}
-			v0, ok := elem0.(string)
-			if !ok {
-				return Listy{}, fmt.Errorf("decode Listy.Spare: property %q element %d: expected string, got %T", "spare", i0, elem0)
-			}
-			narrowed = append(narrowed, &v0)
-		}
-		out.Spare = &narrowed
-	}
-	value1, err := neo4j.GetProperty[[]any](node, "tags")
-	if err != nil {
-		return Listy{}, fmt.Errorf("decode Listy.Tags: %w", err)
-	}
-	value1s := make([]*string, 0, len(value1))
-	for i0, elem0 := range value1 {
-		if elem0 == nil {
-			value1s = append(value1s, nil)
-			continue
-		}
-		v0, ok := elem0.(string)
-		if !ok {
-			return Listy{}, fmt.Errorf("decode Listy.Tags: property %q element %d: expected string, got %T", "tags", i0, elem0)
-		}
-		value1s = append(value1s, &v0)
-	}
-	out.Tags = value1s
-	return out, nil
 }
 
 // narrowInt converts a driver's int64 down to the integer width the

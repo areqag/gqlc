@@ -159,14 +159,24 @@ func TestTemporalUsesSeesACarrierHidingInsideARecord(t *testing.T) {
 	require.True(t, ok)
 	require.Contains(t, structText, "Date", "the premise: the carrier really is inside the emitted text")
 
+	place := []codegen.Entity{{Name: "Place", Fields: []codegen.EntityField{
+		{PropName: "addr", Field: "Addr", GoType: structText, Width: width},
+	}}}
+	decodingPlace := []codegen.Query{{RowFields: []codegen.Row{
+		{ColumnName: "p", Field: "P", GoType: "Place", Kind: codegen.ColumnNode},
+	}}}
+
 	t.Run("a record property owes the decode direction", func(t *testing.T) {
-		use := neo4j.TemporalUseOf(codegen.Prepared{
-			Entities: []codegen.Entity{{Name: "Place", Fields: []codegen.EntityField{
-				{PropName: "addr", Field: "Addr", GoType: structText, Width: width},
-			}}},
-		}, "Date", neo4j.TypeMap{})
+		use := neo4j.TemporalUseOf(codegen.Prepared{Entities: place, Queries: decodingPlace}, "Date", neo4j.TypeMap{})
 		require.True(t, use.Decode,
 			"the record's decode helper calls toDate, so the bridge file owes it")
+	})
+
+	t.Run("a record property of an entity no query decodes owes nothing", func(t *testing.T) {
+		// decodePlace is not emitted (bd gqlc-m1dk), so neither is
+		// anything only it calls.
+		require.Empty(t, neo4j.TemporalUseNames(codegen.Prepared{Entities: place}, neo4j.TypeMap{}),
+			"no query decodes Place, so nothing calls the record's decode helper or the toDate inside it")
 	})
 
 	t.Run("a record parameter owes the encode direction", func(t *testing.T) {
@@ -204,6 +214,7 @@ func TestTemporalUsesSeesACarrierHidingInsideARecord(t *testing.T) {
 			Entities: []codegen.Entity{{Name: "Place", Fields: []codegen.EntityField{
 				{PropName: "addr", Field: "Addr", GoType: "map[string]any", Width: graph.TypeAnyRecord},
 			}}},
+			Queries: decodingPlace,
 		}, neo4j.TypeMap{}), "RECORD<ANY> declares no fields, so no carrier can be hiding in one")
 	})
 }

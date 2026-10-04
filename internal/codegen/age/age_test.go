@@ -7,9 +7,11 @@ import (
 	"go/parser"
 	"go/token"
 	"go/types"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
@@ -131,9 +133,12 @@ func (s *EmissionSuite) inputFromText(src string) codegen.Input {
 
 // TestFileSet pins the C0 file set: the pgx handle, the graph lifecycle,
 // the Querier interfaces, and the models file. The models file carries
-// the schema's entity surface whether or not a query in the batch
+// the schema's entity structs whether or not a query in the batch
 // projects one — the entity table is the schema's, not the batch's, so
-// the same schema emits the same structs for every backend.
+// the same schema emits the same structs for every backend. Their
+// decoders are the batch's: this batch has no query, so it decodes no
+// entity and carries no decoder, nor any helper only a decoder calls
+// (bd gqlc-m1dk).
 func (s *EmissionSuite) TestFileSet() {
 	paths := make([]string, 0, len(s.files))
 	for p := range s.files {
@@ -141,7 +146,38 @@ func (s *EmissionSuite) TestFileSet() {
 	}
 	s.Require().ElementsMatch([]string{"db.go", "graph.go", "models.go", "querier.go"}, paths)
 	s.Require().Contains(s.files["models.go"], "type "+personLabel+" struct {")
-	s.Require().Contains(s.files["models.go"], "func decode"+personLabel+"(raw []byte) ("+personLabel+", error) {")
+	s.Require().NotContains(s.files["models.go"], "func decode"+personLabel+"(")
+	s.Require().NotContains(s.files["models.go"], "func agtypeEntity(")
+
+	files, err := age.New().Generate(decodingEveryEntity(s.in))
+	s.Require().NoError(err)
+	for _, f := range files {
+		if f.Path == "models.go" {
+			s.Require().Contains(string(f.Contents), "func decode"+personLabel+"(raw []byte) ("+personLabel+", error) {")
+			s.Require().Contains(string(f.Contents), "func agtypeEntity(")
+		}
+	}
+}
+
+// TestUndecodedEntityStructImportsOnlyWhatItNames pins models.go's import
+// block for a batch decoding no entity (bd gqlc-m1dk). Event's struct names
+// time.Time for its TIMESTAMP whether or not anything decodes it, and no
+// helper is emitted at all, so time is the one import: the bytes,
+// encoding/json and fmt every decoder used to bring are gone with them.
+func (s *EmissionSuite) TestUndecodedEntityStructImportsOnlyWhatItNames() {
+	files, err := age.New().Generate(s.inputFromText(`CREATE PROPERTY GRAPH TYPE Gate AS {
+    (:Event { id :: INT64 NOT NULL, seen :: TIMESTAMP NOT NULL })
+}`))
+	s.Require().NoError(err)
+	for _, f := range files {
+		if f.Path != "models.go" {
+			continue
+		}
+		s.Require().Contains(string(f.Contents), "\nimport (\n\t\"time\"\n)\n")
+		s.Require().NotContains(string(f.Contents), "func agtype")
+		return
+	}
+	s.Require().Fail("no models.go in the emission")
 }
 
 // TestWithPackageName pins the CLI-1 §3.4 widening: a configured name
@@ -185,6 +221,34 @@ func readQuery(name string, cols ...resolver.Column) codegen.NamedQuery {
 		SourceText:  "MATCH (p:Person) RETURN p.name\n",
 		Validated:   resolver.ValidatedQuery{Columns: cols},
 	}
+}
+
+// decodingEveryEntity is in with one query appended per node and edge type
+// its schema declares, each returning that entity whole. A backend emits
+// decode<Name> only for an entity some query decodes (bd gqlc-m1dk), so a
+// test reading an entity decoder off a query-free batch would read none.
+func decodingEveryEntity(in codegen.Input) codegen.Input {
+	var cols []resolver.ResolvedType
+	for _, k := range slices.Sorted(maps.Keys(in.Schema.Nodes)) {
+		cols = append(cols, resolver.ResolvedNode{Labels: k})
+	}
+	edges := slices.SortedFunc(maps.Keys(in.Schema.Edges), func(a, b schema.EdgeKey) int {
+		return strings.Compare(fmt.Sprint(a), fmt.Sprint(b))
+	})
+	for _, k := range edges {
+		cols = append(cols, resolver.ResolvedEdge{EdgeKey: k})
+	}
+	in.Queries = slices.Clone(in.Queries)
+	for i, ty := range cols {
+		in.Queries = append(in.Queries, codegen.NamedQuery{
+			Name:        fmt.Sprintf("DecodeEntity%d", i),
+			Cardinality: queryfile.CardinalityMany,
+			SourceFile:  "entities.cypher",
+			SourceText:  "MATCH (n) RETURN n\n",
+			Validated:   resolver.ValidatedQuery{Columns: []resolver.Column{{Name: "n", Type: ty}}},
+		})
+	}
+	return in
 }
 
 // execQuery is the other batch entry this backend serves — a write that

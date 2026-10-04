@@ -3,11 +3,7 @@
 package writeexectemporalparam
 
 import (
-	"fmt"
 	"time"
-
-	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
-	"github.com/neo4j/neo4j-go-driver/v5/neo4j/dbtype"
 )
 
 // Person corresponds to the Person node type.
@@ -15,37 +11,4 @@ type Person struct {
 	Id        int64
 	Stale     bool
 	UpdatedAt time.Time
-}
-
-// decodePerson decodes a driver dbtype.Node into a Person struct,
-// enforcing the wire label and the per-property nullability the
-// schema declares.
-func decodePerson(node dbtype.Node) (Person, error) {
-	has0 := false
-	for _, label := range node.Labels {
-		if label == "Person" {
-			has0 = true
-			break
-		}
-	}
-	if !has0 {
-		return Person{}, fmt.Errorf("decode Person: expected a node labelled %q, got labels %q", "Person", node.Labels)
-	}
-	var out Person
-	value0, err := neo4j.GetProperty[int64](node, "id")
-	if err != nil {
-		return Person{}, fmt.Errorf("decode Person.Id: %w", err)
-	}
-	out.Id = value0
-	value1, err := neo4j.GetProperty[bool](node, "stale")
-	if err != nil {
-		return Person{}, fmt.Errorf("decode Person.Stale: %w", err)
-	}
-	out.Stale = value1
-	value2, err := neo4j.GetProperty[time.Time](node, "updatedAt")
-	if err != nil {
-		return Person{}, fmt.Errorf("decode Person.UpdatedAt: %w", err)
-	}
-	out.UpdatedAt = value2
-	return out, nil
 }

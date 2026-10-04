@@ -9,8 +9,9 @@ import (
 )
 
 // renderModels emits models.go (spec §5.2). C2 emits one exported
-// struct per schema NodeType and EdgeType (Phase Z order) plus an
-// unexported decode<Name> helper. C5 adds two blocks:
+// struct per schema NodeType and EdgeType (Phase Z order), each followed
+// by an unexported decode<Name> helper where some query decodes that
+// entity (codegen.DecodedEntities, bd gqlc-m1dk). C5 adds two blocks:
 //
 //   - Marker methods on each candidate entity struct, one per edgeUnion
 //     interface it participates in. Emitted between the struct
@@ -20,15 +21,15 @@ import (
 //     Input.Queries slice order sub-ordered by column position, with a
 //     `//sumtype:decl` comment line above each.
 //
-// The import set is a template invariant on schema shape:
+// The import set:
 //
-//   - dbtype: unconditional (decode helpers take dbtype.Node /
+//   - dbtype iff any decode helper is emitted (they take dbtype.Node /
 //     dbtype.Relationship)
-//   - fmt iff any decode can fail, which every property can except a
-//     nullable one of no declared shape: that arm is a Props lookup
-//     whose miss is the schema's null, not an error to report
-//   - neo4j iff any non-nullable property of a declared shape is decoded
-//     (neo4j.GetProperty[T]); a property typed `any` never reaches it
+//   - fmt iff any decode helper or narrowing helper is emitted: each
+//     opens with a wire-label guard or a range check that can fail
+//   - neo4j iff any decoded non-nullable property of a declared shape is
+//     read (neo4j.GetProperty[T]); a property typed `any` never reaches it
+//   - time iff any entity struct names it, decoded or not
 //
 // EdgeUnion emission adds no new import (the interface + marker methods
 // live in this package; no cross-package reference emerges). A schema
@@ -41,7 +42,12 @@ func renderModels(pkg string, entities []codegen.Entity, prepared []codegen.Quer
 	}
 
 	unions, markersByEntity := collectEdgeUnions(prepared)
-	anyNonNull, anyTime := modelImportNeeds(entities)
+	decoded := codegen.DecodedEntities(codegen.Prepared{Entities: entities, Queries: prepared})
+	isDecoded := make(map[string]bool, len(decoded))
+	for _, e := range decoded {
+		isDecoded[e.Name] = true
+	}
+	anyNonNull, anyTime := modelImportNeeds(entities, decoded)
 
 	var b strings.Builder
 	b.WriteString(codegen.Header())
@@ -52,15 +58,15 @@ func renderModels(pkg string, entities []codegen.Entity, prepared []codegen.Quer
 	// Each checked-narrowing helper is emitted only where something calls
 	// it, so narrowFloat32 — the only thing in this file that names math —
 	// gates the math import with it.
-	narrowsInts, narrowsFloats := narrowsANumericWidth(entities, prepared, target.types())
+	narrowsInts, narrowsFloats := narrowsANumericWidth(decoded, prepared, target.types())
 
-	writeModelImports(&b, target, narrowsFloats, anyTime, anyNonNull)
+	writeModelImports(&b, target, len(decoded) > 0, narrowsInts || narrowsFloats, narrowsFloats, anyTime, anyNonNull)
 
 	for i, e := range entities {
 		if i > 0 {
 			b.WriteString("\n")
 		}
-		writeEntityBlock(&b, e, markersByEntity[e.Name])
+		writeEntityBlock(&b, e, markersByEntity[e.Name], isDecoded[e.Name])
 	}
 
 	// The site-named record aliases (spec §2.1), after the entity blocks
@@ -116,9 +122,10 @@ func collectEdgeUnions(prepared []codegen.Query) ([]*codegen.EdgeUnion, map[stri
 }
 
 // modelImportNeeds reports whether the emitted file reaches the driver
-// package (neo4j.GetProperty) and whether it names time.
-func modelImportNeeds(entities []codegen.Entity) (anyNonNull, anyTime bool) {
-	for _, e := range entities {
+// package (neo4j.GetProperty), which only a decode helper does, and
+// whether it names time, which any entity struct can.
+func modelImportNeeds(entities, decoded []codegen.Entity) (anyNonNull, anyTime bool) {
+	for _, e := range decoded {
 		for _, f := range e.Fields {
 			// neo4j is emitted for GetProperty, which a property of no
 			// declared shape never reaches (ridesADriverCarrier) and a
@@ -127,6 +134,10 @@ func modelImportNeeds(entities []codegen.Entity) (anyNonNull, anyTime bool) {
 			if !f.Nullable && ridesADriverCarrier(f.GoType) {
 				anyNonNull = true
 			}
+		}
+	}
+	for _, e := range entities {
+		for _, f := range e.Fields {
 			// A list property names its leaf type, not its slice
 			// type, so an exact "time.Time" match misses
 			// LIST<TIMESTAMP> ([]time.Time) and its nestings and
@@ -143,42 +154,58 @@ func modelImportNeeds(entities []codegen.Entity) (anyNonNull, anyTime bool) {
 	return anyNonNull, anyTime
 }
 
-// writeModelImports emits the import block. dbtype is unconditional (every
-// helper's argument type); fmt gates on anyProp; math gates on
-// narrowsFloats; time gates on anyTime (TIMESTAMP property); neo4j gates
-// on anyNonNull. Alphabetical: fmt, math, time, then external neo4j /
-// dbtype.
-func writeModelImports(b *strings.Builder, target driverTarget, narrowsFloats, anyTime, anyNonNull bool) {
-	// fmt is unconditional once an entity exists: every decode helper
-	// opens with the wire-label guard, whose mismatch arm is a
-	// fmt.Errorf. It used to gate on a property whose read can fail,
-	// which left a zero-property entity's helper importing nothing —
-	// that helper now reports a wrong-labelled value like every other.
-	anyProp := true
-
-	b.WriteString("import (\n")
-	if anyProp {
-		b.WriteString("\t\"fmt\"\n")
+// writeModelImports emits the import block. dbtype gates on anyDecode
+// (every decode helper's argument type); fmt on anyDecode or narrows;
+// math on narrowsFloats; time on anyTime (TIMESTAMP property); neo4j on
+// anyNonNull. Alphabetical: fmt, math, time, then external neo4j /
+// dbtype. A file needing none of them — entity structs of no temporal
+// property, none decoded — has no import block.
+func writeModelImports(b *strings.Builder, target driverTarget, anyDecode, narrows, narrowsFloats, anyTime, anyNonNull bool) {
+	// Every decode helper opens with the wire-label guard, whose
+	// mismatch arm is a fmt.Errorf, and every narrowing helper's range
+	// check fails through one too.
+	var std, external []string
+	if anyDecode || narrows {
+		std = append(std, "fmt")
 	}
 	if narrowsFloats {
-		b.WriteString("\t\"math\"\n")
+		std = append(std, "math")
 	}
 	if anyTime {
-		b.WriteString("\t\"time\"\n")
-	}
-	if anyProp || narrowsFloats || anyTime {
-		b.WriteString("\n")
+		std = append(std, "time")
 	}
 	if anyNonNull {
-		b.WriteString("\t\"" + target.neo4jImport + "\"\n")
+		external = append(external, target.neo4jImport)
 	}
-	b.WriteString("\t\"" + target.dbtypeImport + "\"\n")
+	if anyDecode {
+		external = append(external, target.dbtypeImport)
+	}
+	writeImportGroups(b, std, external)
+}
+
+// writeImportGroups writes an import block of the standard-library group
+// and the external group, a blank line between them, and nothing at all
+// where both are empty.
+func writeImportGroups(b *strings.Builder, std, external []string) {
+	if len(std) == 0 && len(external) == 0 {
+		return
+	}
+	b.WriteString("import (\n")
+	for _, path := range std {
+		b.WriteString("\t\"" + path + "\"\n")
+	}
+	if len(std) > 0 && len(external) > 0 {
+		b.WriteString("\n")
+	}
+	for _, path := range external {
+		b.WriteString("\t\"" + path + "\"\n")
+	}
 	b.WriteString(")\n\n")
 }
 
 // writeEntityBlock emits one entity's struct declaration, its edgeUnion
-// marker methods and its decode helper.
-func writeEntityBlock(b *strings.Builder, e codegen.Entity, markers []string) {
+// marker methods and, where some query decodes it, its decode helper.
+func writeEntityBlock(b *strings.Builder, e codegen.Entity, markers []string, decoded bool) {
 	writeEntityStruct(b, e)
 	if len(markers) > 0 {
 		b.WriteString("\n")
@@ -186,8 +213,10 @@ func writeEntityBlock(b *strings.Builder, e codegen.Entity, markers []string) {
 			fmt.Fprintf(b, "func (%s) is%s() {}\n", e.Name, iface)
 		}
 	}
-	b.WriteString("\n")
-	writeEntityDecodeHelper(b, e)
+	if decoded {
+		b.WriteString("\n")
+		writeEntityDecodeHelper(b, e)
+	}
 }
 
 // writeEntityStruct emits the exported struct declaration for one entity.

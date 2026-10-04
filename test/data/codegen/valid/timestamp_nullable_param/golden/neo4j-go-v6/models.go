@@ -3,45 +3,11 @@
 package timestampnullableparam
 
 import (
-	"fmt"
 	"time"
-
-	"github.com/neo4j/neo4j-go-driver/v6/neo4j"
-	"github.com/neo4j/neo4j-go-driver/v6/neo4j/dbtype"
 )
 
 // Sample corresponds to the Sample node type.
 type Sample struct {
 	Id     int64
 	SeenAt *time.Time
-}
-
-// decodeSample decodes a driver dbtype.Node into a Sample struct,
-// enforcing the wire label and the per-property nullability the
-// schema declares.
-func decodeSample(node dbtype.Node) (Sample, error) {
-	has0 := false
-	for _, label := range node.Labels {
-		if label == "Sample" {
-			has0 = true
-			break
-		}
-	}
-	if !has0 {
-		return Sample{}, fmt.Errorf("decode Sample: expected a node labelled %q, got labels %q", "Sample", node.Labels)
-	}
-	var out Sample
-	value0, err := neo4j.GetProperty[int64](node, "id")
-	if err != nil {
-		return Sample{}, fmt.Errorf("decode Sample.Id: %w", err)
-	}
-	out.Id = value0
-	if v, ok := node.Props["seenAt"]; ok {
-		s, ok := v.(time.Time)
-		if !ok {
-			return Sample{}, fmt.Errorf("decode Sample.SeenAt: property %q: expected time.Time, got %T", "seenAt", v)
-		}
-		out.SeenAt = &s
-	}
-	return out, nil
 }

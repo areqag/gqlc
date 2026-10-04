@@ -6,38 +6,12 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"strconv"
-	"strings"
 )
 
 // Person corresponds to the Person node type.
 type Person struct {
 	Id   int64
 	Name string
-}
-
-// decodePerson decodes an agtype vertex into a Person struct, enforcing
-// the label and the per-property nullability the schema declares.
-func decodePerson(raw []byte) (Person, error) {
-	label, props, err := agtypeEntity(raw, "::vertex")
-	if err != nil {
-		return Person{}, fmt.Errorf("decode Person: %w", err)
-	}
-	if label != "Person" {
-		return Person{}, fmt.Errorf("decode Person: expected label %q, got %q", "Person", label)
-	}
-	var out Person
-	value0, err := agtypeProperty(props, "id", agtypeInt64)
-	if err != nil {
-		return Person{}, fmt.Errorf("decode Person.Id: %w", err)
-	}
-	out.Id = value0
-	value1, err := agtypeProperty(props, "name", agtypeString)
-	if err != nil {
-		return Person{}, fmt.Errorf("decode Person.Name: %w", err)
-	}
-	out.Name = value1
-	return out, nil
 }
 
 // agtypeString decodes an agtype string scalar. AGE renders one as a
@@ -58,19 +32,6 @@ func agtypeString(raw []byte) (string, error) {
 		return "", fmt.Errorf("gqlc: %q is not an agtype string", raw)
 	}
 	return *out, nil
-}
-
-// agtypeInt64 decodes an agtype integer scalar, whose range is Go's
-// int64. A value carrying the ::numeric annotation is one AGE evaluated
-// in arbitrary precision: it is an integer only if it survives the parse
-// as one, so a fractional part fails the decode rather than truncating
-// quietly.
-func agtypeInt64(raw []byte) (int64, error) {
-	out, err := strconv.ParseInt(strings.TrimSuffix(string(raw), "::numeric"), 10, 64)
-	if err != nil {
-		return 0, fmt.Errorf("gqlc: %q is not an agtype integer: %w", raw, err)
-	}
-	return out, nil
 }
 
 // agtypeSpan reports where the value at the front of b ends: the offset
@@ -110,75 +71,6 @@ func agtypeSpan(b []byte, stop byte) (int, error) {
 	return len(b), nil
 }
 
-// agtypeObject splits an agtype map into its members, each key holding
-// the undecoded text of its value. A map carries more than the schema
-// declares: AGE stores whatever a writer wrote, so a value here may be of
-// a shape no helper in this package reads, and only the ones a field asks
-// for are ever decoded.
-func agtypeObject(raw []byte) (map[string][]byte, error) {
-	body := bytes.TrimSpace(raw)
-	if len(body) < 2 || body[0] != '{' || body[len(body)-1] != '}' {
-		return nil, fmt.Errorf("gqlc: %q is not an agtype map", raw)
-	}
-	body = bytes.TrimSpace(body[1 : len(body)-1])
-	out := make(map[string][]byte)
-	for len(body) > 0 {
-		end, err := agtypeSpan(body, ',')
-		if err != nil {
-			return nil, err
-		}
-		member := bytes.TrimSpace(body[:end])
-		body = bytes.TrimSpace(body[min(end+1, len(body)):])
-
-		at, err := agtypeSpan(member, ':')
-		if err != nil {
-			return nil, err
-		}
-		if at == len(member) {
-			return nil, fmt.Errorf("gqlc: %q is not a key and a value", member)
-		}
-		key, err := agtypeString(bytes.TrimSpace(member[:at]))
-		if err != nil {
-			return nil, err
-		}
-		out[key] = bytes.TrimSpace(member[at+1:])
-	}
-	return out, nil
-}
-
-// agtypeEntity splits an agtype vertex or edge into the label it carries
-// and the undecoded text of each of its properties. A vertex and an edge
-// are the same object but for the annotation, so requiring the one the
-// caller named is what stands between an edge's decoder and a vertex
-// whose label happens to match it.
-func agtypeEntity(raw []byte, annotation string) (string, map[string][]byte, error) {
-	body, ok := bytes.CutSuffix(bytes.TrimSpace(raw), []byte(annotation))
-	if !ok {
-		return "", nil, fmt.Errorf("gqlc: %q does not carry the %s annotation", raw, annotation)
-	}
-	fields, err := agtypeObject(body)
-	if err != nil {
-		return "", nil, err
-	}
-	rawLabel, ok := fields["label"]
-	if !ok {
-		return "", nil, fmt.Errorf("gqlc: %q carries no label", raw)
-	}
-	label, err := agtypeString(rawLabel)
-	if err != nil {
-		return "", nil, err
-	}
-	rawProps, ok := fields["properties"]
-	if !ok {
-		return "", nil, fmt.Errorf("gqlc: %q carries no properties", raw)
-	}
-	props, err := agtypeObject(rawProps)
-	if err != nil {
-		return "", nil, err
-	}
-	return label, props, nil
-}
-
 // agtypeList decodes an agtype list, reading each element through the
 // decoder the caller supplies. The split steps over a nested string, map
 // or list whole, so a comma inside one separates nothing; an element the
@@ -215,17 +107,4 @@ func agtypeList[T any](raw []byte, decode func([]byte) (T, error)) ([]T, error) 
 // agtypeListOfString decodes an agtype list of string elements.
 func agtypeListOfString(raw []byte) ([]string, error) {
 	return agtypeList(raw, agtypeString)
-}
-
-// agtypeProperty reads one property the schema declares NOT NULL out of a
-// split entity. AGE drops a property whose value is null, so an absent
-// key is how a null arrives, and taking the Go zero for one would report
-// absence as a value the graph holds.
-func agtypeProperty[T any](props map[string][]byte, key string, decode func([]byte) (T, error)) (T, error) {
-	raw, ok := props[key]
-	if !ok {
-		var zero T
-		return zero, fmt.Errorf("gqlc: property %q is absent", key)
-	}
-	return decode(raw)
 }

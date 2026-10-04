@@ -5,47 +5,12 @@ package float32column
 import (
 	"fmt"
 	"math"
-
-	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
-	"github.com/neo4j/neo4j-go-driver/v5/neo4j/dbtype"
 )
 
 // Person corresponds to the Person node type.
 type Person struct {
 	Height float32
 	Id     int64
-}
-
-// decodePerson decodes a driver dbtype.Node into a Person struct,
-// enforcing the wire label and the per-property nullability the
-// schema declares.
-func decodePerson(node dbtype.Node) (Person, error) {
-	has0 := false
-	for _, label := range node.Labels {
-		if label == "Person" {
-			has0 = true
-			break
-		}
-	}
-	if !has0 {
-		return Person{}, fmt.Errorf("decode Person: expected a node labelled %q, got labels %q", "Person", node.Labels)
-	}
-	var out Person
-	value0, err := neo4j.GetProperty[float64](node, "height")
-	if err != nil {
-		return Person{}, fmt.Errorf("decode Person.Height: %w", err)
-	}
-	value0n, err := narrowFloat32(value0)
-	if err != nil {
-		return Person{}, fmt.Errorf("decode Person.Height: %w", err)
-	}
-	out.Height = value0n
-	value1, err := neo4j.GetProperty[int64](node, "id")
-	if err != nil {
-		return Person{}, fmt.Errorf("decode Person.Id: %w", err)
-	}
-	out.Id = value1
-	return out, nil
 }
 
 // narrowFloat32 converts a driver's float64 down to float32, refusing a
