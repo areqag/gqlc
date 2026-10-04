@@ -47,6 +47,7 @@ func (l *listener) build() (query.Query, error) {
 	if l.writeSeen {
 		q.StatementKind = query.StatementWrite
 	}
+	q.ComprehensionPaths = l.comprehensionPaths
 	return q, nil
 }
 
