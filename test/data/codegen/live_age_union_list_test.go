@@ -18,8 +18,8 @@
 // without the encoder in the loop, so a decoder that agreed only with its own
 // encoder could not pass.
 //
-// One row reads its null through union_only_carrier_list's package instead,
-// in a graph of its own since both fixtures declare a Ledger. That package
+// One row reads its null through union_only_carrier_list's package instead.
+// That package
 // has ONE union list, so its wrapper was bound to the right decoder even
 // before the gqlc-3s7q fix, and the row isolates the null: in the
 // two-widths package before the fix, the lists that reached agtypeValue
@@ -50,16 +50,18 @@ import (
 	unionpropage "github.com/areqag/gqlc/test/data/codegen/valid/union_property/golden/apache-age-pgx-v5"
 )
 
-// unionListSeed writes the rows whose elements are spelled as STORED literals
+// unionListSeed writes the row whose elements are spelled as STORED literals
 // rather than through the generated encoder. A DATE is stored as zero-padded
 // ISO text, which is what the emitted agtypeDate reads.
 const unionListSeed = `
 	CREATE (:Ledger {id: 2, dates: ['2024-01-02', null, 7], tags: ['a', null, 1], bag: [null, 'x']})
-	CREATE (:Row {id: 1})
 `
 
 // TestAGERoundTripsANullElementInAUnionList writes and reads back lists of
 // closed unions with a null element in them.
+//
+// Each subtest works in a graph of its own and puts there every row it
+// reads, so `-run` can pick out any one of them (bd gqlc-5hey).
 func TestAGERoundTripsANullElementInAUnionList(t *testing.T) {
 	if os.Getenv("GQLC_SKIP_LIVE") != "" {
 		t.Skip("GQLC_SKIP_LIVE set; skipping live backend containers")
@@ -69,25 +71,47 @@ func TestAGERoundTripsANullElementInAUnionList(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	t.Cleanup(cancel)
 
-	const graph = "gqlc_union_list"
 	endpoint := startAGEContainer(ctx, t)
 	createAGEAppRole(ctx, t, endpoint)
 	pool := openAGEPool(ctx, t, ageDSN(endpoint, ageAppRole, ageAppPassword, ageDatabase), ageSessionInit)
 
-	lists := unionlistage.New(pool, graph)
-	props := unionpropage.New(pool, graph)
-	require.NoError(t, lists.EnsureGraph(ctx), "ensure graph %s", graph)
-	t.Cleanup(func() { require.NoError(t, lists.DropGraph(ctx), "drop graph %s", graph) })
-
-	stmt := "SELECT * FROM ag_catalog.cypher('" + graph + "', $seed$" + unionListSeed + "$seed$) AS (v ag_catalog.agtype)"
-	_, err := pool.Exec(ctx, stmt)
-	require.NoError(t, err, "seed the graph")
+	// ownGraph creates the named graph through one generated package, drops
+	// it when the subtest ends, and runs the seed, if any, in it.
+	ownGraph := func(t *testing.T, name, seed string, q interface {
+		EnsureGraph(context.Context) error
+		DropGraph(context.Context) error
+	},
+	) {
+		t.Helper()
+		require.NoError(t, q.EnsureGraph(ctx), "ensure graph %s", name)
+		t.Cleanup(func() { require.NoError(t, q.DropGraph(ctx), "drop graph %s", name) })
+		if seed == "" {
+			return
+		}
+		_, err := pool.Exec(ctx, "SELECT * FROM ag_catalog.cypher('"+name+"', $seed$"+seed+"$seed$) AS (v ag_catalog.agtype)")
+		require.NoError(t, err, "seed graph %s", name)
+	}
 
 	jan2 := unionlistage.Date{Year: 2024, Month: 1, Day: 2}
 	wantDates := []any{jan2, nil, int64(7)}
 	wantTags := []any{"a", nil, int32(1)}
 
+	// encodeLedger writes Ledger 3, whose union lists hold a null element,
+	// through the generated encoder.
+	encodeLedger := func(t *testing.T, lists *unionlistage.Queries) {
+		t.Helper()
+		require.NoError(t, lists.CreateLedger(ctx, unionlistage.CreateLedgerParams{
+			Id:    3,
+			Dates: &[]any{jan2, nil, int64(7)},
+			Tags:  &[]any{"a", nil, int32(1)},
+		}), "bind union lists holding a null element")
+	}
+
 	t.Run("a seeded null element reads back as nil, each list through its own union", func(t *testing.T) {
+		const graph = "gqlc_union_list_seeded"
+		lists := unionlistage.New(pool, graph)
+		ownGraph(t, graph, unionListSeed, lists)
+
 		got, err := lists.LedgerWhole(ctx, 2)
 		require.NoError(t, err, "read a Ledger whose union lists hold a null element")
 		require.NotNil(t, got.Dates)
@@ -100,11 +124,10 @@ func TestAGERoundTripsANullElementInAUnionList(t *testing.T) {
 	})
 
 	t.Run("a null element written through the encoder reads back as nil", func(t *testing.T) {
-		require.NoError(t, lists.CreateLedger(ctx, unionlistage.CreateLedgerParams{
-			Id:    3,
-			Dates: &[]any{jan2, nil, int64(7)},
-			Tags:  &[]any{"a", nil, int32(1)},
-		}), "bind union lists holding a null element")
+		const graph = "gqlc_union_list_encoded"
+		lists := unionlistage.New(pool, graph)
+		ownGraph(t, graph, "", lists)
+		encodeLedger(t, lists)
 
 		got, err := lists.LedgerWhole(ctx, 3)
 		require.NoError(t, err)
@@ -116,9 +139,14 @@ func TestAGERoundTripsANullElementInAUnionList(t *testing.T) {
 	})
 
 	t.Run("the column position reads the same lists", func(t *testing.T) {
+		const graph = "gqlc_union_list_columns"
+		lists := unionlistage.New(pool, graph)
+		ownGraph(t, graph, unionListSeed, lists)
+		encodeLedger(t, lists)
+
 		rows, err := lists.LedgerLists(ctx)
 		require.NoError(t, err)
-		require.Len(t, rows, 2)
+		require.Len(t, rows, 2, "one seeded Ledger and one encoded")
 		for _, row := range rows {
 			require.NotNil(t, row.Dates)
 			require.NotNil(t, row.Tags)
@@ -128,6 +156,11 @@ func TestAGERoundTripsANullElementInAUnionList(t *testing.T) {
 	})
 
 	t.Run("a list parameter holding a null matches the stored list", func(t *testing.T) {
+		const graph = "gqlc_union_list_param"
+		lists := unionlistage.New(pool, graph)
+		ownGraph(t, graph, unionListSeed, lists)
+		encodeLedger(t, lists)
+
 		ids, err := lists.LedgersByTags(ctx, &[]any{"a", nil, int32(1)})
 		require.NoError(t, err)
 		require.ElementsMatch(t, []int64{2, 3}, ids)
@@ -138,13 +171,9 @@ func TestAGERoundTripsANullElementInAUnionList(t *testing.T) {
 	})
 
 	t.Run("a seeded null element reads back as nil through a lone union list", func(t *testing.T) {
-		const single = "gqlc_union_list_single"
-		carrier := carrierlistage.New(pool, single)
-		require.NoError(t, carrier.EnsureGraph(ctx), "ensure graph %s", single)
-		t.Cleanup(func() { require.NoError(t, carrier.DropGraph(ctx), "drop graph %s", single) })
-		_, err := pool.Exec(ctx, "SELECT * FROM ag_catalog.cypher('"+single+
-			"', $seed$ CREATE (:Ledger {id: 1, entries: ['2024-01-02', null, 7]}) $seed$) AS (v ag_catalog.agtype)")
-		require.NoError(t, err, "seed the graph")
+		const graph = "gqlc_union_list_single"
+		carrier := carrierlistage.New(pool, graph)
+		ownGraph(t, graph, "CREATE (:Ledger {id: 1, entries: ['2024-01-02', null, 7]})", carrier)
 
 		got, err := carrier.LedgerWhole(ctx, 1)
 		require.NoError(t, err, "read a Ledger whose union list holds a null element")
@@ -153,6 +182,10 @@ func TestAGERoundTripsANullElementInAUnionList(t *testing.T) {
 	})
 
 	t.Run("a bare nullable union property that was never stored reads back nil", func(t *testing.T) {
+		const graph = "gqlc_union_list_property"
+		props := unionpropage.New(pool, graph)
+		ownGraph(t, graph, "CREATE (:Row {id: 1})", props)
+
 		got, err := props.RowWhole(ctx)
 		require.NoError(t, err)
 		require.Nil(t, got.Pick)
