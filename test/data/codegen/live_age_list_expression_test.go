@@ -104,4 +104,24 @@ func TestAGEDecodesAListExpressionElementByItsWidth(t *testing.T) {
 		require.Len(t, *(*rows[0].Nest)[0], 1)
 		require.Equal(t, int32(2), (*(*rows[0].Nest)[0])[0].ZipCode)
 	})
+
+	// In a graph of its own, so the rows above keep reading one Account.
+	// An Account stored with no either makes [a.either] a list holding one
+	// null, which the nullable union wrapper passes through as nil and the
+	// constructor-only NOT NULL one would refuse.
+	t.Run("a null union element in a list literal reads back as nil", func(t *testing.T) {
+		const bare = "gqlc_list_expression_null"
+		qn := listexprage.New(pool, bare)
+		require.NoError(t, qn.EnsureGraph(ctx), "ensure graph %s", bare)
+		t.Cleanup(func() { require.NoError(t, qn.DropGraph(ctx), "drop graph %s", bare) })
+		_, err := pool.Exec(ctx, "SELECT * FROM ag_catalog.cypher('"+bare+
+			"', $seed$ CREATE (:Account {id: 2}) $seed$) AS (v ag_catalog.agtype)")
+		require.NoError(t, err, "seed the graph")
+
+		rows, err := qn.AccountLiterals(ctx)
+		require.NoError(t, err)
+		require.Len(t, rows, 1)
+		require.Equal(t, []any{nil}, rows[0].Eithers)
+		require.Equal(t, []any{nil}, rows[0].Narrows)
+	})
 }

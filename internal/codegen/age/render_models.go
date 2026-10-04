@@ -2140,11 +2140,6 @@ func agtypeNullableProperty[T any](props map[string][]byte, key string, decode f
 	}
 }
 
-// writeListHelper emits the named wrapper for one Go slice type: the
-// generic walk with this type's element decoder bound in. A named
-// wrapper rather than the generic at each call site because a nested
-// list's element decoder is the wrapper one level in, and a function
-// value is what agtypeList takes.
 // listElemDocName is how a list wrapper's doc line names its element:
 // the Go text, with a record leaf named by its carrier alias and a union
 // leaf by its width.
@@ -2182,6 +2177,11 @@ func listElemDocName(goType string, width graph.PropertyType) string {
 	return prefix + goType
 }
 
+// writeListHelper emits the named wrapper for one Go slice type: the
+// generic walk with this type's element decoder bound in. A named
+// wrapper rather than the generic at each call site because a nested
+// list's element decoder is the wrapper one level in, and a function
+// value is what agtypeList takes.
 func writeListHelper(b *strings.Builder, p listPlan) {
 	elem := strings.TrimPrefix(p.goType, "[]")
 	elemW := elemWidth(p.width)

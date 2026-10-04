@@ -925,9 +925,10 @@ func columnDecoder(f codegen.Row) string {
 // VALUE's text too, and a record's anonymous struct. A list of unions
 // read through agtypeValue and handed back a DATE member as its ISO
 // string and an INT32 member as int64, and a list of records failed
-// generation with decodeFunc's codegen-bug panic (bd gqlc-k1dg). Every
-// other element's text names its decoder, so the rebuilt width changes
-// nothing for it.
+// generation with decodeFunc's codegen-bug panic (bd gqlc-k1dg). The
+// rebuilt width does not move the decoder of an element whose text names
+// one: measured 2026-10-04 over INT8, INT32, UINT64, FLOAT32, DATE, LOCAL
+// TIME, DURATION, UUID and LIST<INT32>, whose wrappers came out the same.
 //
 // A level whose element resolved no property type — a scalar, a
 // temporal expression, a value of unknown type — has no width to give,
@@ -942,12 +943,14 @@ func rowWidth(f codegen.Row) graph.PropertyType {
 // listOfElem is the list width whose element is e, or the empty width
 // when e carries none.
 //
-// The element's NOT NULL is read off its plan, with the `any` carrier
-// taken as nullable whatever the plan says: propertyListElemPlan never
+// Only the `any` term decides a wrapper. propertyListElemPlan never
 // stars `any`, because it holds a null as nil, so Nullable reads false
 // for a union element that is nullable — and every union a schema can
 // spell is, its alternatives taking no NOT NULL. Read as NOT NULL it
-// would name the constructor-only wrapper that refuses a null element.
+// would name the constructor-only wrapper that refuses a null element
+// (nullableUnionElem). Every other element's Nullable is already the
+// star in its text, which is what listHelperName reads there, so the
+// plan's Nullable only keeps the rebuilt width agreeing with the text.
 func listOfElem(e *codegen.ListElem) graph.PropertyType {
 	elem := e.Width
 	if elem == "" && e.Kind == codegen.ColumnList && e.Nested != nil {
