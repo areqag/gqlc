@@ -621,9 +621,9 @@ adds the five new column-shape rows.
 | `ResolvedScalar{Int}` | `int64` | `*int64` |
 | `ResolvedScalar{Float}` | `float64` | `*float64` |
 | `ResolvedScalar{String}` | `string` | `*string` |
-| `ResolvedScalar{Null}` | `any` | `any` (pointer-to-any is silly; nullable stays `any`) |
+| `ResolvedScalar{Null}` | `any` | `any` (pointer-to-any is silly; nullable stays `any`) *Note (2026-10-04, bd gqlc-gem1p):* superseded — a null-scalar column is now planned nullable and emits `*any`, for the reason given on the `ResolvedUnknown` row below. |
 | `ResolvedScalar{Map}` | `map[string]any` | `map[string]any` (nil-map is null-map; pointer redundant) |
-| `ResolvedUnknown` | `any` | `any` (same reasoning as null; nullable stays `any`) |
+| `ResolvedUnknown` | `any` | `any` (same reasoning as null; nullable stays `any`) *Note (2026-10-04, bd gqlc-14u0l):* superseded — an unknown column is now planned nullable and emits `*any`, the spelling a nullable `ANY VALUE` column has had since #767 and ADR 0041 records for row fields. |
 | `ResolvedList{Element}` | `[]` + recurse via §4.7 | `*[]T` |
 
 - **`any` and `map[string]any` do not accept the nullable-pointer
@@ -637,6 +637,13 @@ adds the five new column-shape rows.
   is "nullable → pointer, uniformly" only where the underlying
   type has no null representation of its own; `any` and `map` do,
   and forcing `*any` would violate the rule's own rationale.
+  *Note (2026-10-05, bd gqlc-14u0l, gqlc-gem1p):* the `any` half is
+  superseded for whole-value positions. A nullable `ANY VALUE` column
+  has emitted `*any` since #767, ADR 0041's "Why" records row fields as
+  wrapped when nullable "including a shapeless `*any`", and unknown and
+  null-scalar columns now follow it. The carve-out survives only for
+  list elements (ADR 0041 "The rule"; CONTEXT.md's "Nullable" entry).
+  The `map[string]any` half is unchanged.
 - **`ResolvedTemporal{Time}` maps to `Time`, not `time.Time`** —
   openCypher TIME is zoned time-of-day (no date), which the
   emitted `Time` represents as a clock reading beside the UTC

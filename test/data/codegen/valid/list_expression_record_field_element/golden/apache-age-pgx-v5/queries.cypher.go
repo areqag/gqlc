@@ -64,7 +64,7 @@ const accountBareRecordFieldQueryText = `MATCH (a:Account) RETURN a.ul.u AS u OR
 // AccountBareRecordField executes the AccountBareRecordField query.
 //
 //	MATCH (a:Account) RETURN a.ul.u AS u ORDER BY a.id
-func (q *queries) AccountBareRecordField(ctx context.Context) ([]any, error) {
+func (q *queries) AccountBareRecordField(ctx context.Context) ([]*any, error) {
 	stmt, err := q.cypherStmt("$gqlc$", accountBareRecordFieldQueryText, "v0 ag_catalog.agtype")
 	if err != nil {
 		return nil, err
@@ -74,18 +74,19 @@ func (q *queries) AccountBareRecordField(ctx context.Context) ([]any, error) {
 		return nil, fmt.Errorf("AccountBareRecordField: %w", err)
 	}
 	defer rows.Close()
-	out := make([]any, 0)
+	out := make([]*any, 0)
 	for rows.Next() {
 		var raw0 []byte
 		if err := rows.Scan(&raw0); err != nil {
 			return nil, fmt.Errorf("AccountBareRecordField: scan row: %w", err)
 		}
-		if raw0 == nil {
-			return nil, fmt.Errorf("AccountBareRecordField: column %q is non-nullable but arrived null", "u")
-		}
-		value0, err := agtypeValue(raw0)
-		if err != nil {
-			return nil, fmt.Errorf("AccountBareRecordField: decode column %q: %w", "u", err)
+		var value0 *any
+		if raw0 != nil {
+			decoded, err := agtypeValue(raw0)
+			if err != nil {
+				return nil, fmt.Errorf("AccountBareRecordField: decode column %q: %w", "u", err)
+			}
+			value0 = &decoded
 		}
 		out = append(out, value0)
 	}

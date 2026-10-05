@@ -65,7 +65,7 @@ func TestAGEServesAnUnknownColumnAsAny(t *testing.T) {
 
 		got, err := q.AccountBareUnknown(ctx)
 		require.NoError(t, err)
-		require.Equal(t, []any{"2024-01-02"}, got)
+		require.Equal(t, []*any{ptr[any]("2024-01-02")}, got)
 	})
 
 	t.Run("a field of a record property reads back as agtype's value", func(t *testing.T) {
@@ -75,7 +75,7 @@ func TestAGEServesAnUnknownColumnAsAny(t *testing.T) {
 
 		got, err := q.AccountBareRecordField(ctx)
 		require.NoError(t, err)
-		require.Equal(t, []any{"x", int64(9)}, got)
+		require.Equal(t, []*any{ptr[any]("x"), ptr[any](int64(9))}, got)
 	})
 
 	// head(collect(p)) and startNode(k) are typed unknown and hold a whole
@@ -98,12 +98,14 @@ func TestAGEServesAnUnknownColumnAsAny(t *testing.T) {
 
 		first, err := q.FirstPerson(ctx)
 		require.NoError(t, err)
-		requirePerson(t, first, 1)
+		require.NotNil(t, first)
+		requirePerson(t, *first, 1)
 
 		knows, err := q.FirstKnows(ctx)
 		require.NoError(t, err)
-		k, ok := knows.(map[string]any)
-		require.Truef(t, ok, "want map[string]any, got %#v", knows)
+		require.NotNil(t, knows)
+		k, ok := (*knows).(map[string]any)
+		require.Truef(t, ok, "want map[string]any, got %#v", *knows)
 		require.Equal(t, "KNOWS", k["label"])
 		require.Equal(t, map[string]any{"since": int64(2019)}, k["properties"])
 		require.IsType(t, int64(0), k["start_id"])
@@ -116,15 +118,17 @@ func TestAGEServesAnUnknownColumnAsAny(t *testing.T) {
 		requirePerson(t, origins[0][0], 1)
 	})
 
-	// The unknown column carries no nullability, and the row field is
-	// planned non-nullable on every target, so a null is refused here as
-	// neo4j refuses it. Pinned so a change to that is deliberate.
-	t.Run("a null unknown column is refused as non-nullable", func(t *testing.T) {
+	// The unknown column says nothing about nullability (bd gqlc-14u0l): a
+	// missing property and an out-of-range index are nulls the graph holds.
+	t.Run("a null unknown column reads back as nil", func(t *testing.T) {
 		const graph = "gqlc_unknown_column_null"
 		q := unknownelemage.New(pool, graph)
-		ownGraph(t, graph, `CREATE (:Account {id: 1})`, q)
+		ownGraph(t, graph, `CREATE (:Account {id: 1}), (:Account {id: 2, dates: []})`, q)
 
-		_, err := q.AccountBareUnknown(ctx)
-		require.ErrorContains(t, err, `column "dated" is non-nullable but arrived null`)
+		got, err := q.AccountBareUnknown(ctx)
+		require.NoError(t, err)
+		require.Len(t, got, 2)
+		require.Nil(t, got[0], "id 1 has no dates property")
+		require.Nil(t, got[1], "id 2 has an empty dates list, so index 0 is out of range")
 	})
 }

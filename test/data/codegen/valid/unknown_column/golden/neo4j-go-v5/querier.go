@@ -5,7 +5,7 @@ package unknowncolumn
 import "context"
 
 type ReadQuerier interface {
-	OneUnknown(ctx context.Context) (any, error)
+	OneUnknown(ctx context.Context) (*any, error)
 }
 
 type WriteQuerier interface {

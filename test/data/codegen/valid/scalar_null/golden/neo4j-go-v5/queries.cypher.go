@@ -14,7 +14,7 @@ const oneNullQueryText = `RETURN null AS n`
 // OneNull executes the OneNull query.
 //
 //	RETURN null AS n
-func (q *queries) OneNull(ctx context.Context) (any, error) {
+func (q *queries) OneNull(ctx context.Context) (*any, error) {
 	records, err := q.db.run(ctx, oneNullQueryText, nil, neo4j.AccessModeRead)
 	if err != nil {
 		return nil, err
@@ -29,8 +29,9 @@ func (q *queries) OneNull(ctx context.Context) (any, error) {
 	if !ok {
 		return nil, fmt.Errorf("OneNull: decode column %q: key not found", "n")
 	}
-	if value == nil {
-		return nil, fmt.Errorf("OneNull: column %q is non-nullable but arrived null", "n")
+	var valuePtr *any
+	if value != nil {
+		valuePtr = &value
 	}
-	return value, nil
+	return valuePtr, nil
 }
