@@ -137,6 +137,10 @@ func runAnyParamTimestampRows(ctx context.Context, t *testing.T, arm anyParamTim
 		wipe(t)
 		s := zonedSlot()
 		require.NoError(t, arm.add(ctx, s))
+		// The matches below rebind s, so they test the walk only if the
+		// write left the caller's slice as it was built.
+		first, ok := s.loose[0].(time.Time)
+		require.True(t, ok && first.Location() == time.Local, "the bind rewrote the caller's []any in place: %v", s.loose[0])
 		// The control node holds other instants, in UTC so its own write
 		// never depended on the fix.
 		other := at.Add(time.Hour)
