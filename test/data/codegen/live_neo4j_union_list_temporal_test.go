@@ -132,6 +132,21 @@ func TestNeo4jRoundTripsANullableElementTemporalList(t *testing.T) {
 			runLivenessCheckMitigatesRows(ctx, t, a.open(ctx, t, boltURI, true))
 		})
 	}
+
+	// A stamp inside an ANY parameter (bd gqlc-nvb4), off the same
+	// container; its rows and arms are in live_neo4j_any_param_timestamp_test.go.
+	anyArms := []struct {
+		name string
+		open func(ctx context.Context, t *testing.T, boltURI string) anyParamTimestampArm
+	}{
+		{name: "neo4j-go-v5", open: openAnyParamTimestampArmV5},
+		{name: "neo4j-go-v6", open: openAnyParamTimestampArmV6},
+	}
+	for _, a := range anyArms {
+		t.Run("any-parameter/"+a.name, func(t *testing.T) {
+			runAnyParamTimestampRows(ctx, t, a.open(ctx, t, boltURI))
+		})
+	}
 }
 
 // The stamps are written at a non-UTC offset so the read-back is known to

@@ -43,6 +43,11 @@ type carrierUse struct {
 	// different parameter types and neither can stand for the other: a
 	// batch binding both shapes owes both bodies.
 	listElem, listElemPtr bool
+	// anyValue records that an ANY VALUE or LIST<ANY VALUE> parameter is
+	// bound, whose value may hold any carrier with no declared width to
+	// say so. Only TIMESTAMP's answer reads it, because fromAnyValue is
+	// emitted beside fromTimestamp (bd gqlc-nvb4).
+	anyValue bool
 }
 
 // conversionUses walks the prepared batch ONCE and answers, for both
@@ -196,7 +201,36 @@ func (w *conversionUseWalk) markEncode(goType string, width graph.PropertyType, 
 		}
 		return
 	}
+	if isAnyValueCarrier(goType) {
+		w.markAnyValue()
+		return
+	}
 	w.markCarrier(goType, set)
+}
+
+// markAnyValue marks what fromAnyValue calls: for TIMESTAMP and for every
+// neutral carrier, the helpers a value, a nullable value, a list and a
+// list of nullable elements bind through. A neutral carrier the package
+// does not declare is marked too, harmlessly: its bridge file is gated
+// on the package declaring it, and so is its arm.
+func (w *conversionUseWalk) markAnyValue() {
+	set := func(u *carrierUse) {
+		u.encode, u.encodePtr, u.list, u.listElem = true, true, true, true
+	}
+	w.timestamp.anyValue = true
+	set(&w.timestamp)
+	for _, name := range codegen.TemporalCarriers {
+		w.markCarrier(name, set)
+	}
+	w.markCarrier(codegen.UUIDCarrier, set)
+}
+
+// isAnyValueCarrier reports whether a parameter carrier is ANY VALUE's or
+// LIST<ANY VALUE>'s, whose bind walks the value (fromAnyValue). Asked only
+// after the union question, because `any` and `[]any` are also a closed
+// union's carriers and those bind through the union's own encode.
+func isAnyValueCarrier(goType string) bool {
+	return goType == "any" || goType == "[]any"
 }
 
 // encodeDirection answers which encode helper ONE parameter position
@@ -409,7 +443,9 @@ const timestampHelper = "Timestamp"
 // time.Now() is. A list element owes the same conversion, and so does a
 // *time.Time inside a list for its own reason: packV hands a
 // pointer-to-struct to packStruct still a pointer, and *time.Time is no
-// case there (bd gqlc-gk6q).
+// case there (bd gqlc-gk6q). Both hold for a value inside an ANY VALUE or
+// LIST<ANY VALUE> parameter, which has no declared width to dispatch on,
+// so fromAnyValue walks it (bd gqlc-nvb4).
 //
 // fromTimestamp converts only what the server would refuse or misread, and
 // sends every other value as it was. Cypher's = compares the zone FORM as
@@ -434,7 +470,7 @@ const timestampHelper = "Timestamp"
 // Its own file for the reason uuid_neo4j.go has one: the trigger is
 // independent of the temporal pair, since TIMESTAMP is no neutral carrier
 // and a batch reaching these helpers may name none of them.
-func renderTimestampConversions(pkg string, use carrierUse) []byte {
+func renderTimestampConversions(pkg string, use carrierUse, neutral []string) []byte {
 	var b strings.Builder
 	b.WriteString(codegen.Header())
 	b.WriteString("package ")
@@ -557,7 +593,66 @@ func fromNullableTimestampListPtr(v *[]*time.Time) any {
 `)
 		}
 	}
+	if use.anyValue {
+		writeAnyValueWalk(&b, neutral)
+	}
 	return []byte(b.String())
+}
+
+// writeAnyValueWalk emits fromAnyValue, the bind of an ANY VALUE or
+// LIST<ANY VALUE> parameter (bd gqlc-nvb4). Its value has no declared
+// width to choose a conversion by, so the walk asks the value's own Go
+// type, and every carrier it finds is bound through the helpers its
+// declared width would have used. neutral names the neutral carriers this
+// package declares: an arm for one it does not declare would not compile,
+// and a caller cannot hold one.
+func writeAnyValueWalk(b *strings.Builder, neutral []string) {
+	b.WriteString(`
+// fromAnyValue binds an ANY VALUE or LIST<ANY VALUE> parameter, whose
+// value has no declared width to choose a conversion by. A carrier in it
+// is bound through its own helper wherever it sits: bare, behind a
+// pointer, or as an element of a list of it or of a []any at any depth.
+// A nil pointer binds the Cypher null, and every other value is bound as
+// it is.
+func fromAnyValue(v any) any {
+	switch t := v.(type) {
+	case *any:
+		if t == nil {
+			return nil
+		}
+		return fromAnyValue(*t)
+	case *[]any:
+		if t == nil {
+			return nil
+		}
+		return fromAnyValue(*t)
+	case []any:
+		out := make([]any, len(t))
+		for i := range t {
+			out[i] = fromAnyValue(t[i])
+		}
+		return out
+`)
+	writeAnyValueArms(b, timestampCarrier, timestampHelper)
+	for _, name := range neutral {
+		writeAnyValueArms(b, name, name)
+	}
+	b.WriteString("\t}\n\treturn v\n}\n")
+}
+
+// writeAnyValueArms emits fromAnyValue's four arms for one carrier: the
+// value, a pointer to it, and the two list shapes. Each calls the helper
+// a parameter of that shape binds through, which markAnyValue marks.
+func writeAnyValueArms(b *strings.Builder, goType, helper string) {
+	fmt.Fprintf(b, `	case %[1]s:
+		return from%[2]s(t)
+	case *%[1]s:
+		return from%[2]sPtr(t)
+	case []%[1]s:
+		return %[3]s(t)
+	case []*%[1]s:
+		return %[4]s(t)
+`, goType, helper, temporalListHelper(helper, false), temporalListHelper(helper, true))
 }
 
 // narrowExpr renders the expression that turns a value of the driver
