@@ -418,9 +418,18 @@ const timestampHelper = "Timestamp"
 // accepts would stop a bound value matching one stored in its named form,
 // including a value this package just decoded (ADR 0033, note of
 // 2026-10-04). The five names it refuses although Go's tzdata loads them
-// were measured by sending every name under /usr/share/zoneinfo (598) to
-// the pinned image on 2026-10-04; a server refusing another fails loudly
-// at the send, it does not store a wrong value.
+// were measured on 2026-10-04 by sending each of the 598 names in Go's
+// lib/time/zoneinfo.zip (the host's top-level /usr/share/zoneinfo less
+// posixrules) to the image live_neo4j_test.go pins
+// (neo4j@sha256:362542416de6…). The server also refuses posixrules and
+// every posix/* and right/* name, which are not seeded: those, and any
+// name a later server refuses, fail loudly at the send rather than storing
+// a wrong value.
+//
+// The check reads the CLIENT's tzdata. On a host without any, a named
+// location built by LoadLocationFromTZData does not load, so it is sent as
+// an offset and loses = against values stored in that named zone; the
+// driver cannot decode a named zone on such a host either.
 //
 // Its own file for the reason uuid_neo4j.go has one: the trigger is
 // independent of the temporal pair, since TIMESTAMP is no neutral carrier
@@ -458,9 +467,13 @@ var (
 )
 
 // timestampZoneIsSendable reports whether v's location name is a zone id
-// the server accepts and resolves to the offset v reads. A name that loads
-// at a different offset is a FixedZone mislabelled with a real id, which
-// the server would store at the id's offset rather than v's.
+// the server accepts and that this host's tzdata resolves to the offset v
+// reads. A name that loads at a different offset is a FixedZone
+// mislabelled with a real id, which the server would store at the id's
+// offset rather than v's. The server's tzdb can itself disagree with Go's
+// for a few name and instant pairs (measured 2026-10-04: Africa/Casablanca
+// and Africa/El_Aaiun in 2040, CST6CDT, EST5EDT and PST8PDT in 1950); it
+// then stores its own offset at the same instant, as a bare send did.
 func timestampZoneIsSendable(v time.Time, offset int) bool {
 	name := v.Location().String()
 	timestampZonesMu.Lock()

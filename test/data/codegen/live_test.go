@@ -2186,11 +2186,21 @@ func timestampAnyZoneBinds(ctx context.Context, t *testing.T, b writeBackend) { 
 		// LoadLocation("") is UTC, so at offset 0 only the name tells it apart.
 		{"an unnamed time.FixedZone at offset 0", at.In(time.FixedZone("", 0))},
 		{"an abbreviated time.FixedZone", at.In(time.FixedZone("CEST", 2*3600))},
-		{"a time.FixedZone named for an id Go loads and the server refuses", at.In(time.FixedZone("EST", -5*3600))},
 		{"a time.FixedZone mislabelled with an id the server takes", at.In(time.FixedZone("CET", 5*3600))},
 		{"a time.FixedZone named UTC", at.In(time.FixedZone("UTC", 0))},
 		{"an IANA location", at.In(newYork)},
 		{"time.UTC", at},
+	}
+	// Every id Go's tzdata loads and the server refuses, each at the offset
+	// it loads to, so that dropping any one from fromTimestamp's seed sends
+	// it as a zone id the server refuses (bd gqlc-f7bh0).
+	for _, name := range []string{"EST", "HST", "MST", "ROC", "Factory"} {
+		loc, err := time.LoadLocation(name)
+		require.NoError(t, err, "the premise: Go's tzdata loads %s", name)
+		zones = append(zones, struct {
+			name string
+			at   time.Time
+		}{"time.LoadLocation(" + name + "), which the server refuses", at.In(loc)})
 	}
 	for i, z := range zones {
 		id := int64(100 + i)
