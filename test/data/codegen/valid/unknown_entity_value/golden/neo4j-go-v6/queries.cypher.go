@@ -14,7 +14,7 @@ const firstPersonQueryText = `MATCH (p:Person) WITH p ORDER BY p.id RETURN head(
 // FirstPerson executes the FirstPerson query.
 //
 //	MATCH (p:Person) WITH p ORDER BY p.id RETURN head(collect(p)) AS first
-func (q *queries) FirstPerson(ctx context.Context) (any, error) {
+func (q *queries) FirstPerson(ctx context.Context) (*any, error) {
 	records, err := q.db.run(ctx, firstPersonQueryText, nil, neo4j.AccessModeRead)
 	if err != nil {
 		return nil, err
@@ -29,10 +29,11 @@ func (q *queries) FirstPerson(ctx context.Context) (any, error) {
 	if !ok {
 		return nil, fmt.Errorf("FirstPerson: decode column %q: key not found", "first")
 	}
-	if value == nil {
-		return nil, fmt.Errorf("FirstPerson: column %q is non-nullable but arrived null", "first")
+	var valuePtr *any
+	if value != nil {
+		valuePtr = &value
 	}
-	return value, nil
+	return valuePtr, nil
 }
 
 const firstKnowsQueryText = `MATCH (:Person)-[k:KNOWS]->(:Person) RETURN head(collect(k)) AS first`
@@ -40,7 +41,7 @@ const firstKnowsQueryText = `MATCH (:Person)-[k:KNOWS]->(:Person) RETURN head(co
 // FirstKnows executes the FirstKnows query.
 //
 //	MATCH (:Person)-[k:KNOWS]->(:Person) RETURN head(collect(k)) AS first
-func (q *queries) FirstKnows(ctx context.Context) (any, error) {
+func (q *queries) FirstKnows(ctx context.Context) (*any, error) {
 	records, err := q.db.run(ctx, firstKnowsQueryText, nil, neo4j.AccessModeRead)
 	if err != nil {
 		return nil, err
@@ -55,10 +56,11 @@ func (q *queries) FirstKnows(ctx context.Context) (any, error) {
 	if !ok {
 		return nil, fmt.Errorf("FirstKnows: decode column %q: key not found", "first")
 	}
-	if value == nil {
-		return nil, fmt.Errorf("FirstKnows: column %q is non-nullable but arrived null", "first")
+	var valuePtr *any
+	if value != nil {
+		valuePtr = &value
 	}
-	return value, nil
+	return valuePtr, nil
 }
 
 const knowsStartsQueryText = `MATCH (:Person)-[k:KNOWS]->(:Person) RETURN [startNode(k)] AS origins ORDER BY k.since`

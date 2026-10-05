@@ -98,12 +98,14 @@ func TestAGEServesAnUnknownColumnAsAny(t *testing.T) {
 
 		first, err := q.FirstPerson(ctx)
 		require.NoError(t, err)
-		requirePerson(t, first, 1)
+		require.NotNil(t, first)
+		requirePerson(t, *first, 1)
 
 		knows, err := q.FirstKnows(ctx)
 		require.NoError(t, err)
-		k, ok := knows.(map[string]any)
-		require.Truef(t, ok, "want map[string]any, got %#v", knows)
+		require.NotNil(t, knows)
+		k, ok := (*knows).(map[string]any)
+		require.Truef(t, ok, "want map[string]any, got %#v", *knows)
 		require.Equal(t, "KNOWS", k["label"])
 		require.Equal(t, map[string]any{"since": int64(2019)}, k["properties"])
 		require.IsType(t, int64(0), k["start_id"])
