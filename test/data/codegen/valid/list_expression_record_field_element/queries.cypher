@@ -2,7 +2,7 @@
 // on purpose (bd gqlc-4ro6), for the reason list_expression_unknown_element
 // gives: a.ul.u is not literally a ref, so spec model-change-f45qn mints no
 // certificate and the element stays unknown. The bare a.ul.u resolves to the
-// same unknown, which this backend serves as an `any` column
+// same unknown, which this backend serves as a nullable `*any` column
 // (AccountBareRecordField; refused until bd gqlc-2omj).
 //
 // What would type these wrongly is reading a.ul.u as the ref a.ul: the

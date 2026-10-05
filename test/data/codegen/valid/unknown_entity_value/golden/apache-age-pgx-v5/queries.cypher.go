@@ -12,7 +12,7 @@ const firstPersonQueryText = `MATCH (p:Person) WITH p ORDER BY p.id RETURN head(
 // FirstPerson executes the FirstPerson query.
 //
 //	MATCH (p:Person) WITH p ORDER BY p.id RETURN head(collect(p)) AS first
-func (q *queries) FirstPerson(ctx context.Context) (any, error) {
+func (q *queries) FirstPerson(ctx context.Context) (*any, error) {
 	stmt, err := q.cypherStmt("$gqlc$", firstPersonQueryText, "v0 ag_catalog.agtype")
 	if err != nil {
 		return nil, err
@@ -38,12 +38,13 @@ func (q *queries) FirstPerson(ctx context.Context) (any, error) {
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("FirstPerson: %w", err)
 	}
-	if raw0 == nil {
-		return nil, fmt.Errorf("FirstPerson: column %q is non-nullable but arrived null", "first")
-	}
-	value0, err := agtypeValue(raw0)
-	if err != nil {
-		return nil, fmt.Errorf("FirstPerson: decode column %q: %w", "first", err)
+	var value0 *any
+	if raw0 != nil {
+		decoded, err := agtypeValue(raw0)
+		if err != nil {
+			return nil, fmt.Errorf("FirstPerson: decode column %q: %w", "first", err)
+		}
+		value0 = &decoded
 	}
 	return value0, nil
 }
@@ -53,7 +54,7 @@ const firstKnowsQueryText = `MATCH (:Person)-[k:KNOWS]->(:Person) RETURN head(co
 // FirstKnows executes the FirstKnows query.
 //
 //	MATCH (:Person)-[k:KNOWS]->(:Person) RETURN head(collect(k)) AS first
-func (q *queries) FirstKnows(ctx context.Context) (any, error) {
+func (q *queries) FirstKnows(ctx context.Context) (*any, error) {
 	stmt, err := q.cypherStmt("$gqlc$", firstKnowsQueryText, "v0 ag_catalog.agtype")
 	if err != nil {
 		return nil, err
@@ -79,12 +80,13 @@ func (q *queries) FirstKnows(ctx context.Context) (any, error) {
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("FirstKnows: %w", err)
 	}
-	if raw0 == nil {
-		return nil, fmt.Errorf("FirstKnows: column %q is non-nullable but arrived null", "first")
-	}
-	value0, err := agtypeValue(raw0)
-	if err != nil {
-		return nil, fmt.Errorf("FirstKnows: decode column %q: %w", "first", err)
+	var value0 *any
+	if raw0 != nil {
+		decoded, err := agtypeValue(raw0)
+		if err != nil {
+			return nil, fmt.Errorf("FirstKnows: decode column %q: %w", "first", err)
+		}
+		value0 = &decoded
 	}
 	return value0, nil
 }

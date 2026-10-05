@@ -5,8 +5,8 @@ package unknownentityvalue
 import "context"
 
 type ReadQuerier interface {
-	FirstPerson(ctx context.Context) (any, error)
-	FirstKnows(ctx context.Context) (any, error)
+	FirstPerson(ctx context.Context) (*any, error)
+	FirstKnows(ctx context.Context) (*any, error)
 	KnowsStarts(ctx context.Context) ([][]any, error)
 }
 

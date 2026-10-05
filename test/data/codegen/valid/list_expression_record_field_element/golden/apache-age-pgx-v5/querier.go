@@ -6,7 +6,7 @@ import "context"
 
 type ReadQuerier interface {
 	AccountRecordFieldElements(ctx context.Context) ([]AccountRecordFieldElementsRow, error)
-	AccountBareRecordField(ctx context.Context) ([]any, error)
+	AccountBareRecordField(ctx context.Context) ([]*any, error)
 }
 
 type WriteQuerier interface {

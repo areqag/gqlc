@@ -6,7 +6,7 @@ import "context"
 
 type ReadQuerier interface {
 	AccountUnknownElements(ctx context.Context) ([]AccountUnknownElementsRow, error)
-	AccountBareUnknown(ctx context.Context) ([]any, error)
+	AccountBareUnknown(ctx context.Context) ([]*any, error)
 }
 
 type WriteQuerier interface {

@@ -14,7 +14,7 @@ const oneUnknownQueryText = `MATCH (p:Person) RETURN foo(p.id) AS r`
 // OneUnknown executes the OneUnknown query.
 //
 //	MATCH (p:Person) RETURN foo(p.id) AS r
-func (q *queries) OneUnknown(ctx context.Context) (any, error) {
+func (q *queries) OneUnknown(ctx context.Context) (*any, error) {
 	records, err := q.db.run(ctx, oneUnknownQueryText, nil, neo4j.AccessModeRead)
 	if err != nil {
 		return nil, err
@@ -29,8 +29,9 @@ func (q *queries) OneUnknown(ctx context.Context) (any, error) {
 	if !ok {
 		return nil, fmt.Errorf("OneUnknown: decode column %q: key not found", "r")
 	}
-	if value == nil {
-		return nil, fmt.Errorf("OneUnknown: column %q is non-nullable but arrived null", "r")
+	var valuePtr *any
+	if value != nil {
+		valuePtr = &value
 	}
-	return value, nil
+	return valuePtr, nil
 }

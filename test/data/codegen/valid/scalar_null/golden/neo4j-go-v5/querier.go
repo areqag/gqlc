@@ -5,7 +5,7 @@ package scalarnull
 import "context"
 
 type ReadQuerier interface {
-	OneNull(ctx context.Context) (any, error)
+	OneNull(ctx context.Context) (*any, error)
 }
 
 type WriteQuerier interface {
