@@ -10,6 +10,7 @@ import (
 type ReadQuerier interface {
 	EventsAfter(ctx context.Context, arg time.Time) ([]int64, error)
 	EventsSeenAfter(ctx context.Context, arg *time.Time) ([]int64, error)
+	EventsAt(ctx context.Context, arg time.Time) ([]int64, error)
 	EventAt(ctx context.Context, arg int64) (time.Time, error)
 	EventSeenAt(ctx context.Context, arg int64) (*time.Time, error)
 	OneEvent(ctx context.Context, arg int64) (Event, error)

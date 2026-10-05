@@ -2,12 +2,68 @@
 
 package nullabletimestamplistelement
 
-import "time"
+import (
+	"sync"
+	"time"
+)
+
+// fromTimestamp binds a TIMESTAMP in a form the server accepts. A value
+// whose zone the driver sends as an id the server takes is sent as it is
+// (time.UTC among them: LoadLocation("UTC") is time.UTC); any other is
+// moved, same instant and same offset, into a fixed zone named "Offset",
+// which the driver sends as an offset instead.
+func fromTimestamp(v time.Time) time.Time {
+	_, offset := v.Zone()
+	if timestampZoneIsSendable(v, offset) {
+		return v
+	}
+	return v.In(time.FixedZone("Offset", offset))
+}
+
+// timestampZones caches time.LoadLocation by name, guarded by
+// timestampZonesMu; a nil entry is a name not to send as a zone id. It is
+// seeded with the names the server refuses that LoadLocation would not
+// reject: "" and "Local", which it resolves to UTC and to time.Local, and
+// the five ids Go's tzdata loads and the server does not.
+var (
+	timestampZonesMu sync.Mutex
+	timestampZones   = map[string]*time.Location{
+		"": nil, "Local": nil, "EST": nil, "HST": nil, "MST": nil, "ROC": nil, "Factory": nil,
+	}
+)
+
+// timestampZoneIsSendable reports whether v's location name is a zone id
+// the server accepts and resolves to the offset v reads. A name that loads
+// at a different offset is a FixedZone mislabelled with a real id, which
+// the server would store at the id's offset rather than v's.
+func timestampZoneIsSendable(v time.Time, offset int) bool {
+	name := v.Location().String()
+	timestampZonesMu.Lock()
+	loc, ok := timestampZones[name]
+	if !ok {
+		loc, _ = time.LoadLocation(name)
+		timestampZones[name] = loc
+	}
+	timestampZonesMu.Unlock()
+	if loc == nil {
+		return false
+	}
+	_, want := v.In(loc).Zone()
+	return want == offset
+}
+
+// fromTimestampList binds a list of TIMESTAMPs element by element.
+func fromTimestampList(v []time.Time) []any {
+	out := make([]any, len(v))
+	for i := range v {
+		out[i] = fromTimestamp(v[i])
+	}
+	return out
+}
 
 // fromNullableTimestampList binds a list of nullable TIMESTAMPs element
-// by element. The driver packs a time.Time but not a *time.Time inside a
-// list, so each element is dereferenced; a nil element binds the Cypher
-// null the schema's element nullability declared.
+// by element; a nil element binds the Cypher null the schema's element
+// nullability declared.
 func fromNullableTimestampList(v []*time.Time) []any {
 	out := make([]any, len(v))
 	for i := range v {
@@ -15,7 +71,7 @@ func fromNullableTimestampList(v []*time.Time) []any {
 			out[i] = nil
 			continue
 		}
-		out[i] = *v[i]
+		out[i] = fromTimestamp(*v[i])
 	}
 	return out
 }

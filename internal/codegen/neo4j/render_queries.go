@@ -650,7 +650,9 @@ func paramsMapText(p codegen.Query, hoisted map[string]string) string {
 // parameter marshalling has no encoding for, so each converts to its
 // dbtype counterpart first. That includes the nullable arm, where the
 // pass-the-pointer-through shape does not survive — *Date reaches the
-// same reflective path as Date, one dereference later.
+// same reflective path as Date, one dereference later. TIMESTAMP's
+// time.Time is an exception on both arms too, which the driver does pack
+// but in a zone the server may refuse (renderTimestampConversions).
 //
 // Slices are asked separately, and must not be routed through
 // driverCarrier: that function answers which neo4j.GetRecordValue[T] the
@@ -664,6 +666,12 @@ func paramBindExpr(f codegen.Param, access string) string {
 	}
 	if isSliceType(f.GoType) {
 		return sliceParamBindExpr(f.GoType, f.Width, f.Nullable, access)
+	}
+	if f.GoType == timestampCarrier {
+		if f.Nullable {
+			return fmt.Sprintf("from%sPtr(%s)", timestampHelper, access)
+		}
+		return fmt.Sprintf("from%s(%s)", timestampHelper, access)
 	}
 	if f.Nullable {
 		if isNeutralCarrier(f.GoType) {
@@ -819,20 +827,19 @@ func outrangesTheSignedCarrier(goType string) bool {
 // driver's own array carrier, mirroring the per-element narrow the decode
 // side has had since walkListElemBody.
 //
-// time.Time IS among them, but only by value. packV's pointer arm hands a
-// pointer-to-struct to packStruct still a pointer, and *time.Time is no
-// case: v5.28.4 raises UnsupportedTypeError and v6.2.0 falls through to
-// mapping.StructAsMap and packs an empty map (bd gqlc-gk6q). A pointer to a
-// scalar takes the other branch and is indirected, so []*int32 and the rest
-// bind bare.
+// time.Time IS among them, and owes a conversion anyway: packStruct sends
+// its location's name as a zone id the server may refuse, and a *time.Time
+// element is no case there at all (renderTimestampConversions has both). A
+// pointer to a scalar takes packV's indirecting branch, so []*int32 and the
+// rest bind bare.
 func sliceParamBindExpr(goType string, width graph.PropertyType, nullable bool, access string) string {
 	leaf, leafWidth := leafType(goType), leafWidth(width)
 	var helper string
 	switch {
 	case isNeutralCarrier(leaf):
 		helper = temporalListHelper(leaf, listElemIsNullable(goType))
-	case leaf == timestampCarrier && listElemIsNullable(goType):
-		helper = nullableTimestampListHelper
+	case leaf == timestampCarrier:
+		helper = temporalListHelper(timestampHelper, listElemIsNullable(goType))
 	case codegen.IsDeclaredRecord(leaf, leafWidth):
 		// The second leaf packStruct refuses, and it arrives here for
 		// exactly the reason the paragraph above gives: packV walks the

@@ -481,6 +481,14 @@ func (a timestampRoundtripAGE) eventsAfter(ctx context.Context, since time.Time)
 	return a.q.EventsAfter(ctx, since)
 }
 
+func (a timestampRoundtripAGE) eventsSeenAfter(ctx context.Context, seenAfter *time.Time) ([]int64, error) {
+	return a.q.EventsSeenAfter(ctx, seenAfter)
+}
+
+func (a timestampRoundtripAGE) eventsAt(ctx context.Context, at time.Time) ([]int64, error) {
+	return a.q.EventsAt(ctx, at)
+}
+
 func (a timestampRoundtripAGE) eventAt(ctx context.Context, id int64) (time.Time, error) {
 	return a.q.EventAt(ctx, id)
 }

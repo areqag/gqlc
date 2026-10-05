@@ -36,7 +36,8 @@ import (
 // packStruct's cases are dbtype.Point2D/3D, time.Time and the five dbtype
 // temporals, and its default raises UnsupportedTypeError. gqlc's own
 // neutral carriers (ADR 0033) are not among them, so a slice whose leaf is
-// one of those five is the sole slice shape that still owes a conversion.
+// one of those five is the slice shape that still owes a conversion, beside
+// time.Time's (TestParamBindExprTimestamp).
 func TestParamBindExprSlices(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -49,7 +50,6 @@ func TestParamBindExprSlices(t *testing.T) {
 		{"narrow int list", "[]int32", false, "arg"},
 		{"narrow float list", "[]float32", false, "arg"},
 		{"bool list", "[]bool", false, "arg"},
-		{"driver-native temporal list", "[]time.Time", false, "arg"},
 		{"nested string list", "[][]string", false, "arg"},
 
 		// Already bare before this fix, and must stay so: neither is a
@@ -106,29 +106,30 @@ func TestParamBindExprTemporalLists(t *testing.T) {
 	}
 }
 
-// TestParamBindExprNullableTimestampList pins the one list shape whose leaf the
-// driver packs and whose ELEMENT it does not (bd gqlc-gk6q).
+// TestParamBindExprTimestamp pins that a TIMESTAMP binds through a helper at
+// every position (bd gqlc-m3ax). The driver packs a time.Time, but sends its
+// location's name as a zone id the server refuses unless it is an IANA one,
+// so time.Now() and an unnamed time.FixedZone were refused bare. A *time.Time
+// inside a list is not packed at all (bd gqlc-gk6q).
 //
-// time.Time is among packStruct's cases, so []time.Time binds bare. But packV's
-// pointer arm hands a pointer-to-struct to packStruct as the pointer, and
-// *time.Time is not a case: v5.28.4 raises UnsupportedTypeError and v6.2.0
-// falls through to mapping.StructAsMap and packs an empty map. A pointer to a
-// scalar takes packV's other branch and is indirected, which is why the
-// numeric rows below bind bare — measured on both majors against the pinned
-// image, nil elements included, and they are here so a fix that routed every
-// element-nullable list through a helper fails rather than passes.
-func TestParamBindExprNullableTimestampList(t *testing.T) {
+// The numeric rows are the controls for the element-nullable shape: a pointer
+// to a scalar takes packV's indirecting branch, measured on both majors
+// against the pinned image with nil elements included, so they bind bare and
+// a fix that routed every element-nullable list through a helper fails here.
+func TestParamBindExprTimestamp(t *testing.T) {
 	tests := []struct {
 		name     string
 		goType   string
 		nullable bool
 		want     string
 	}{
+		{"timestamp", "time.Time", false, "fromTimestamp(arg)"},
+		{"nullable timestamp", "time.Time", true, "fromTimestampPtr(arg)"},
+		{"timestamp list", "[]time.Time", false, "fromTimestampList(arg)"},
+		{"nullable timestamp list", "[]time.Time", true, "fromTimestampListPtr(arg)"},
 		{"nullable-element timestamp list", "[]*time.Time", false, "fromNullableTimestampList(arg)"},
 		{"nullable list of nullable timestamps", "[]*time.Time", true, "fromNullableTimestampListPtr(arg)"},
 
-		{"NOT NULL-element timestamp list", "[]time.Time", false, "arg"},
-		{"nullable NOT NULL-element timestamp list", "[]time.Time", true, "arg"},
 		{"nullable-element int64 list", "[]*int64", false, "arg"},
 		{"nullable-element int32 list", "[]*int32", false, "arg"},
 		{"nullable-element float32 list", "[]*float32", true, "arg"},

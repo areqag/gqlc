@@ -113,6 +113,46 @@ func (q *queries) EventsSeenAfter(ctx context.Context, arg *time.Time) ([]int64,
 	return out, nil
 }
 
+const eventsAtQueryText = `MATCH (e:Event) WHERE e.occurredAt = $at RETURN e.id AS id ORDER BY e.id`
+
+// EventsAt executes the EventsAt query.
+//
+//	MATCH (e:Event) WHERE e.occurredAt = $at RETURN e.id AS id ORDER BY e.id
+func (q *queries) EventsAt(ctx context.Context, arg time.Time) ([]int64, error) {
+	stmt, err := q.cypherStmt("$gqlc$", eventsAtQueryText, "v0 ag_catalog.agtype")
+	if err != nil {
+		return nil, err
+	}
+	args, err := agtypeArgs(map[string]any{"at": agtypeMicros(arg)})
+	if err != nil {
+		return nil, err
+	}
+	rows, err := q.db.Query(ctx, stmt, args)
+	if err != nil {
+		return nil, fmt.Errorf("EventsAt: %w", err)
+	}
+	defer rows.Close()
+	out := make([]int64, 0)
+	for rows.Next() {
+		var raw0 []byte
+		if err := rows.Scan(&raw0); err != nil {
+			return nil, fmt.Errorf("EventsAt: scan row: %w", err)
+		}
+		if raw0 == nil {
+			return nil, fmt.Errorf("EventsAt: column %q is non-nullable but arrived null", "id")
+		}
+		value0, err := agtypeInt64(raw0)
+		if err != nil {
+			return nil, fmt.Errorf("EventsAt: decode column %q: %w", "id", err)
+		}
+		out = append(out, value0)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("EventsAt: %w", err)
+	}
+	return out, nil
+}
+
 const eventAtQueryText = `MATCH (e:Event) WHERE e.id = $id RETURN e.occurredAt AS occurredAt`
 
 // EventAt executes the EventAt query.

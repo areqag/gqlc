@@ -304,6 +304,14 @@ func (a timestampRoundtripV5) eventsAfter(ctx context.Context, since time.Time) 
 	return a.q.EventsAfter(ctx, since)
 }
 
+func (a timestampRoundtripV5) eventsSeenAfter(ctx context.Context, seenAfter *time.Time) ([]int64, error) {
+	return a.q.EventsSeenAfter(ctx, seenAfter)
+}
+
+func (a timestampRoundtripV5) eventsAt(ctx context.Context, at time.Time) ([]int64, error) {
+	return a.q.EventsAt(ctx, at)
+}
+
 func (a timestampRoundtripV5) eventAt(ctx context.Context, id int64) (time.Time, error) {
 	return a.q.EventAt(ctx, id)
 }
@@ -909,6 +917,14 @@ func (a timestampRoundtripV6) addEvent(ctx context.Context, id int64, occurredAt
 
 func (a timestampRoundtripV6) eventsAfter(ctx context.Context, since time.Time) ([]int64, error) {
 	return a.q.EventsAfter(ctx, since)
+}
+
+func (a timestampRoundtripV6) eventsSeenAfter(ctx context.Context, seenAfter *time.Time) ([]int64, error) {
+	return a.q.EventsSeenAfter(ctx, seenAfter)
+}
+
+func (a timestampRoundtripV6) eventsAt(ctx context.Context, at time.Time) ([]int64, error) {
+	return a.q.EventsAt(ctx, at)
 }
 
 func (a timestampRoundtripV6) eventAt(ctx context.Context, id int64) (time.Time, error) {

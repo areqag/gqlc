@@ -22,7 +22,7 @@ type AddEventParams struct {
 //
 //	CREATE (e:Event {id: $id, occurredAt: $occurredAt})
 func (q *queries) AddEvent(ctx context.Context, arg AddEventParams) error {
-	_, err := q.db.run(ctx, addEventQueryText, map[string]any{"id": arg.Id, "occurredAt": arg.OccurredAt}, neo4j.AccessModeWrite)
+	_, err := q.db.run(ctx, addEventQueryText, map[string]any{"id": arg.Id, "occurredAt": fromTimestamp(arg.OccurredAt)}, neo4j.AccessModeWrite)
 	return err
 }
 
@@ -32,7 +32,7 @@ const eventsAfterQueryText = `MATCH (e:Event) WHERE e.occurredAt > $since RETURN
 //
 //	MATCH (e:Event) WHERE e.occurredAt > $since RETURN e.id AS id ORDER BY e.occurredAt
 func (q *queries) EventsAfter(ctx context.Context, arg time.Time) ([]int64, error) {
-	records, err := q.db.run(ctx, eventsAfterQueryText, map[string]any{"since": arg}, neo4j.AccessModeRead)
+	records, err := q.db.run(ctx, eventsAfterQueryText, map[string]any{"since": fromTimestamp(arg)}, neo4j.AccessModeRead)
 	if err != nil {
 		return nil, err
 	}
@@ -56,7 +56,7 @@ const eventsSeenAfterQueryText = `MATCH (e:Event) WHERE e.seenAt > $seenAfter RE
 //
 //	MATCH (e:Event) WHERE e.seenAt > $seenAfter RETURN e.id AS id ORDER BY e.seenAt
 func (q *queries) EventsSeenAfter(ctx context.Context, arg *time.Time) ([]int64, error) {
-	records, err := q.db.run(ctx, eventsSeenAfterQueryText, map[string]any{"seenAfter": arg}, neo4j.AccessModeRead)
+	records, err := q.db.run(ctx, eventsSeenAfterQueryText, map[string]any{"seenAfter": fromTimestampPtr(arg)}, neo4j.AccessModeRead)
 	if err != nil {
 		return nil, err
 	}
@@ -68,6 +68,30 @@ func (q *queries) EventsSeenAfter(ctx context.Context, arg *time.Time) ([]int64,
 		}
 		if isNil {
 			return nil, fmt.Errorf("EventsSeenAfter: column %q is non-nullable but arrived null", "id")
+		}
+		out = append(out, value)
+	}
+	return out, nil
+}
+
+const eventsAtQueryText = `MATCH (e:Event) WHERE e.occurredAt = $at RETURN e.id AS id ORDER BY e.id`
+
+// EventsAt executes the EventsAt query.
+//
+//	MATCH (e:Event) WHERE e.occurredAt = $at RETURN e.id AS id ORDER BY e.id
+func (q *queries) EventsAt(ctx context.Context, arg time.Time) ([]int64, error) {
+	records, err := q.db.run(ctx, eventsAtQueryText, map[string]any{"at": fromTimestamp(arg)}, neo4j.AccessModeRead)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]int64, 0, len(records))
+	for _, record := range records {
+		value, isNil, err := neo4j.GetRecordValue[int64](record, "id")
+		if err != nil {
+			return nil, fmt.Errorf("EventsAt: decode column %q: %w", "id", err)
+		}
+		if isNil {
+			return nil, fmt.Errorf("EventsAt: column %q is non-nullable but arrived null", "id")
 		}
 		out = append(out, value)
 	}

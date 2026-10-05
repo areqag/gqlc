@@ -82,10 +82,10 @@ func generate(in codegen.Input, target driverTarget, packageName string) ([]code
 		)
 	}
 
-	// The nullable-element TIMESTAMP list helpers (bd gqlc-gk6q), gated on
-	// a site calling one. The plain helper stands under its Ptr wrapper, so
-	// the one bit answers for the file.
-	if timestampUse.listElem {
+	// TIMESTAMP's encode helpers (bd gqlc-m3ax), gated on a parameter
+	// binding one. Every other helper calls fromTimestamp, so the two bits
+	// that mark it answer for the file.
+	if timestampUse.encode || timestampUse.encodePtr {
 		files = append(files, codegen.File{
 			Path:     "timestamp_neo4j.go",
 			Contents: renderTimestampConversions(pkg, timestampUse),
