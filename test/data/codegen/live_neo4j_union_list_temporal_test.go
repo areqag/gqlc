@@ -119,14 +119,17 @@ func TestNeo4jRoundTripsANullableElementTemporalList(t *testing.T) {
 	// are in live_neo4j_refusal_poisons_next_query_test.go.
 	poisonArms := []struct {
 		name string
-		open func(ctx context.Context, t *testing.T, boltURI string) poisonedConnectionArm
+		open func(ctx context.Context, t *testing.T, boltURI string, checkEveryBorrow bool) poisonedConnectionArm
 	}{
 		{name: "neo4j-go-v5", open: openPoisonedConnectionArmV5},
 		{name: "neo4j-go-v6", open: openPoisonedConnectionArmV6},
 	}
 	for _, a := range poisonArms {
 		t.Run("a refusal poisons the next query/"+a.name, func(t *testing.T) {
-			runRefusalPoisonsNextQueryRows(ctx, t, a.open(ctx, t, boltURI))
+			runRefusalPoisonsNextQueryRows(ctx, t, a.open(ctx, t, boltURI, false))
+		})
+		t.Run("a liveness check on every borrow mitigates it/"+a.name, func(t *testing.T) {
+			runLivenessCheckMitigatesRows(ctx, t, a.open(ctx, t, boltURI, true))
 		})
 	}
 }

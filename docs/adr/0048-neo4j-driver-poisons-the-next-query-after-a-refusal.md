@@ -8,8 +8,8 @@ happens, the NEXT query on the same pooled connection fails client-side with
 query after that one succeeds. gqlc's generated code surfaces the failure on
 whichever unrelated query is unlucky enough to borrow that connection.
 
-This ADR records the measurement and decides not to work around it in emitted
-code.
+This ADR records the measurement, names the caller-side mitigation, and
+decides not to work around it in emitted code.
 
 ## Measured
 
@@ -23,11 +23,19 @@ for every row:
 | new session per call, managed transaction (what `driverDB.run` emits) | `invalid state 4` | ok | ok |
 | `ExecuteQuery` | `invalid state 4` | ok | ok |
 | new session, auto-commit `session.Run` | `invalid state 4` | ok | ok |
-| new session, explicit transaction (what `txDB` runs inside) | `invalid state 4` | ok | ok |
+| new session, explicit transaction (generated `Begin`, then `txDB`) | `invalid state 4` at `BeginTransaction` | ok | ok |
 
 `MaxConnectionPoolSize` 1 and 100 gave the same result: the pool hands the
 poisoned connection out next either way. The emitted session handling neither
 causes this nor makes it worse.
+
+The failure is only ever met when a connection is borrowed, because that is
+when `assertState` first runs on it. A transaction borrows its connection
+once, at `Begin`. So on a poisoned pool the generated `q.Begin` itself fails,
+and the statements inside a transaction that did begin succeed (re-measured
+2026-10-05 on both majors, pool sizes 1 and 100). The failure never surfaces
+in the middle of a transaction. Wherever it does surface, it is the first
+message on a borrowed connection, before anything reached the server.
 
 ## Cause, read off a bolt trace and the v5.28.4 source
 
@@ -52,19 +60,37 @@ In v6.2.0, `bolt5.Reset`, `ForceReset` and `assertState` are byte-identical
 to v5.28.4's, and so is `isFatalError` (diffed 2026-10-04). The bolt trace
 was taken on v5 only; the v6 row in the table above is the behavioural match.
 
+## Mitigation: a liveness check on every borrow
+
+A caller can avoid the defect by setting
+`ConnectionLivenessCheckTimeout = 0` in the driver config (it has the same
+name in v5 and v6). The pool then runs its health check, a `ForceReset`, on
+every borrow. On the poisoned connection that RESET meets EOF, so the
+connection is marked dead and discarded, a fresh one is dialled, and the
+query succeeds.
+
+Measured on 2026-10-05 on both majors, pool sizes 1 and 100, through the
+generated query and the generated `Begin`:
+
+| `ConnectionLivenessCheckTimeout` | next query after a refusal | the one after |
+|---|---|---|
+| default | `invalid state 4` | ok |
+| 1h | `invalid state 4` | ok |
+| 0 | ok | ok |
+
+The cost is one RESET round trip on every borrow. That is the caller's trade
+to make, and gqlc cannot make it for them: the generated `New(driver)` takes
+the caller's driver, and the driver's configuration is the caller's.
+
 ## Decision: no workaround in emitted code
 
-A workaround would have to recognise the failure and retry. Both halves are
-unsafe or brittle here:
-
-- The error is an untyped `fmt.Errorf("invalid state %d, expected: %+v")`, so
-  the only way to recognise it is matching the message text. A driver release
-  that rewords it would silently disable the retry.
-- A retry is safe only where nothing reached the server. That holds for the
-  managed transaction `driverDB.run` opens. It does not hold inside a
-  caller's explicit transaction (`txDB`): there the connection is the
-  transaction's, and retrying one statement on a fresh connection would run it
-  outside the transaction the caller opened.
+A workaround in emitted code would have to recognise the failure and retry.
+A retry would be safe at every point the failure surfaces, since nothing has
+reached the server yet (above). Recognising it is the problem: the error is an
+untyped `fmt.Errorf("invalid state %d, expected: %+v")`, so the only test is
+matching the message text, and a driver release that rewords it would
+silently disable the retry. The supported remedy is also already in the
+caller's hands, as the driver setting above, which gqlc does not own.
 
 The trigger is also narrow. Since bead `gqlc-m3ax`, gqlc's own TIMESTAMP binds
 no longer send a zone id the server refuses, apart from names its census found
@@ -81,7 +107,12 @@ notes and has not been filed.
 The rows in `test/data/codegen/live_neo4j_refusal_poisons_next_query_test.go`
 pin the defect on both majors. They provoke a refusal through a raw session,
 then require the next generated query to fail with `invalid state 4` and the
-one after it to succeed.
+one after it to succeed. An allow-pin beside them opens the same arm with
+`ConnectionLivenessCheckTimeout = 0` and requires the next generated query to
+succeed, so the mitigation this ADR names is held by a test, not only
+described.
 
 **What would falsify this ADR:** a driver release that fixes the defect. Those
-rows then go red, and this ADR's caveat should be removed.
+rows then go red, and this ADR's caveat should be removed. If the allow-pin
+goes red, the mitigation has stopped working, and this ADR must stop
+recommending it.

@@ -16,6 +16,9 @@
 // is handed the poisoned connection on every run, not only when the pool
 // happens to pick it.
 //
+// The second set of rows is the allow-pin for the mitigation ADR 0048 names:
+// the same arm with ConnectionLivenessCheckTimeout = 0 must not fail.
+//
 // It rides TestNeo4jRoundTripsANullableElementTemporalList's container rather
 // than booting one of its own.
 
@@ -54,15 +57,33 @@ func runRefusalPoisonsNextQueryRows(ctx context.Context, t *testing.T, arm poiso
 
 	err = arm.next(ctx)
 	require.ErrorContains(t, err, "invalid state 4",
-		"the query after a refusal no longer fails: the driver defect ADR 0048 records is gone, so its caveat is stale")
+		"the query after a refusal no longer fails with invalid state 4: if the driver defect ADR 0048 records is gone, its caveat is stale")
 
 	require.NoError(t, arm.next(ctx), "the second query after a refusal is handed a fresh connection")
 }
 
-func openPoisonedConnectionArmV5(ctx context.Context, t *testing.T, boltURI string) poisonedConnectionArm {
+// runLivenessCheckMitigatesRows holds the caller-side mitigation ADR 0048
+// names: with ConnectionLivenessCheckTimeout = 0 the pool RESETs a connection
+// on every borrow, the poisoned one meets EOF there and is discarded, and the
+// query after a refusal succeeds. The arm must be opened with that setting.
+func runLivenessCheckMitigatesRows(ctx context.Context, t *testing.T, arm poisonedConnectionArm) {
+	t.Helper()
+	err := arm.refuse(ctx)
+	require.ErrorContains(t, err, "Neo.ClientError.Request.Invalid", "the premise: the server refuses the zone id")
+
+	require.NoError(t, arm.next(ctx),
+		"with a liveness check on every borrow the query after a refusal must succeed, as ADR 0048 tells callers")
+}
+
+func openPoisonedConnectionArmV5(ctx context.Context, t *testing.T, boltURI string, checkEveryBorrow bool) poisonedConnectionArm {
 	t.Helper()
 	driver, err := neo4jv5.NewDriverWithContext(boltURI, neo4jv5.BasicAuth(neo4jUser, neo4jPassword, ""),
-		func(c *cfgv5.Config) { c.MaxConnectionPoolSize = 1 })
+		func(c *cfgv5.Config) {
+			c.MaxConnectionPoolSize = 1
+			if checkEveryBorrow {
+				c.ConnectionLivenessCheckTimeout = 0
+			}
+		})
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		if err := driver.Close(ctx); err != nil {
@@ -82,10 +103,15 @@ func openPoisonedConnectionArmV5(ctx context.Context, t *testing.T, boltURI stri
 	}
 }
 
-func openPoisonedConnectionArmV6(ctx context.Context, t *testing.T, boltURI string) poisonedConnectionArm {
+func openPoisonedConnectionArmV6(ctx context.Context, t *testing.T, boltURI string, checkEveryBorrow bool) poisonedConnectionArm {
 	t.Helper()
 	driver, err := neo4jv6.NewDriver(boltURI, neo4jv6.BasicAuth(neo4jUser, neo4jPassword, ""),
-		func(c *cfgv6.Config) { c.MaxConnectionPoolSize = 1 })
+		func(c *cfgv6.Config) {
+			c.MaxConnectionPoolSize = 1
+			if checkEveryBorrow {
+				c.ConnectionLivenessCheckTimeout = 0
+			}
+		})
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		if err := driver.Close(ctx); err != nil {
