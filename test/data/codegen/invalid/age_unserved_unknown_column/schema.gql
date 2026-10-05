@@ -1,5 +1,0 @@
-CREATE PROPERTY GRAPH TYPE AgeUnservedUnknownColumn AS {
-    (:Person {
-        id :: INT64 NOT NULL
-    })
-}

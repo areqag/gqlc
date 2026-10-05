@@ -68,3 +68,39 @@ func (q *queries) AccountUnknownElements(ctx context.Context) ([]AccountUnknownE
 	}
 	return out, nil
 }
+
+const accountBareUnknownQueryText = `MATCH (a:Account) RETURN a.dates[0] AS dated ORDER BY a.id`
+
+// AccountBareUnknown executes the AccountBareUnknown query.
+//
+//	MATCH (a:Account) RETURN a.dates[0] AS dated ORDER BY a.id
+func (q *queries) AccountBareUnknown(ctx context.Context) ([]any, error) {
+	stmt, err := q.cypherStmt("$gqlc$", accountBareUnknownQueryText, "v0 ag_catalog.agtype")
+	if err != nil {
+		return nil, err
+	}
+	rows, err := q.db.Query(ctx, stmt, "{}")
+	if err != nil {
+		return nil, fmt.Errorf("AccountBareUnknown: %w", err)
+	}
+	defer rows.Close()
+	out := make([]any, 0)
+	for rows.Next() {
+		var raw0 []byte
+		if err := rows.Scan(&raw0); err != nil {
+			return nil, fmt.Errorf("AccountBareUnknown: scan row: %w", err)
+		}
+		if raw0 == nil {
+			return nil, fmt.Errorf("AccountBareUnknown: column %q is non-nullable but arrived null", "dated")
+		}
+		value0, err := agtypeValue(raw0)
+		if err != nil {
+			return nil, fmt.Errorf("AccountBareUnknown: decode column %q: %w", "dated", err)
+		}
+		out = append(out, value0)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("AccountBareUnknown: %w", err)
+	}
+	return out, nil
+}

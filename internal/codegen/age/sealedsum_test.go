@@ -83,10 +83,9 @@ type shadowEdgeUnion struct{ resolver.ResolvedEdgeUnion }
 // expression: see the row that reads shadowListText.
 type shadowList struct{ resolver.ResolvedList }
 
-// shadowListText is deliberately something the list arm does not return: that
-// arm answers `"projects " + ct.String()` for resolver.ResolvedList and
-// resolver.ResolvedUnknown, and the row reading this const asserts against
-// both of those Stringers rather than against a copy of their text.
+// shadowListText is deliberately something no arm returns, and the row
+// reading this const asserts against the bare list's Stringer rather than
+// against a copy of its text.
 const shadowListText = "CALLER-CHOSE-THIS"
 
 func (shadowList) String() string { return shadowListText }
@@ -150,11 +149,12 @@ type inhabitant struct {
 //
 // The value forms are chosen to be SERVED wherever an arm serves anything, so
 // that the pointer and embedded rows record a flip from "" to a refusal rather
-// than a refusal either way. That splits the eight three ways, not two.
+// than a refusal either way. That splits the eight two ways.
 //
-// Five flip: resolver.ResolvedNode, resolver.ResolvedProperty,
-// resolver.ResolvedEdge, resolver.ResolvedScalar and resolver.ResolvedTemporal
-// are served in their value form, so their rows read "" against a refusal.
+// Six flip: resolver.ResolvedNode, resolver.ResolvedProperty,
+// resolver.ResolvedEdge, resolver.ResolvedScalar, resolver.ResolvedTemporal and
+// resolver.ResolvedUnknown are served in their value form, so their rows read
+// "" against a refusal.
 //
 // Two refuse either way, with a DIFFERENT refusal: resolver.ResolvedEdgeUnion
 // and resolver.ResolvedList. For the edge union's value — probeEdgeUnion, two
@@ -169,17 +169,6 @@ type inhabitant struct {
 // into the element and names the one it has no carrier for, so its value row
 // reads "projects a list of node" where the fall-through would read "projects
 // list".
-//
-// One refuses either way, and for the value THIS table hands it the refusal is
-// character-identical: resolver.ResolvedUnknown. Its arm returns `"projects " +
-// ct.String()`, the expression the fall-through also returns, and the Stringer
-// it reaches returns a string literal (internal/resolver/validated.go). So on
-// that row the text does not say which path produced it. That is a fact about
-// that form and not about the arm:
-// a_shadowing_list_embedder_is_outside_the_list_arm's_range hands a variant to
-// the fall-through under a caller's own String and asserts a text no arm can
-// return. Its row here carries the compile-time inhabitation and the refusal;
-// which code path produced it is what the arms row covers instead.
 var inhabitants = map[string]inhabitant{
 	"ResolvedNode": {
 		value:    resolver.ResolvedNode{},
@@ -237,10 +226,11 @@ var inhabitants = map[string]inhabitant{
 		valueReason: "projects a list of node",
 	},
 	"ResolvedUnknown": {
-		value:       resolver.ResolvedUnknown{},
-		pointer:     &resolver.ResolvedUnknown{},
-		embedded:    embedUnknown{},
-		valueReason: "projects unknown",
+		value:    resolver.ResolvedUnknown{},
+		pointer:  &resolver.ResolvedUnknown{},
+		embedded: embedUnknown{},
+		// Served as `any` since bd gqlc-2omj; it refused until then.
+		valueReason: "",
 	},
 }
 
@@ -424,18 +414,15 @@ func TestUnservedColumnFallThroughIsNotANinthVariant(t *testing.T) {
 			// The fall-through's exact text. Asserting the text rather
 			// than only non-emptiness separates "reached the
 			// fall-through" from "reached an arm that also refuses" on
-			// one of the three rows where that distinction arises, not
-			// on all eight. Three have an arm that refuses the value
-			// this table hands it — the 2 and the 1 of the partition
-			// above: resolver.ResolvedEdgeUnion, resolver.ResolvedList
-			// and resolver.ResolvedUnknown. The edge-union arm answers
-			// with the candidate list and the list arm with the element
-			// it has no carrier for, neither of which `"projects " +
-			// String()` carries, so on those two rows the text does
-			// separate the two paths. The unknown arm builds its text
-			// from the expression this row asserts, so on that one it
-			// does not. The other five have an arm that serves, which
-			// non-emptiness alone would have separated.
+			// the two rows where that distinction arises, not on all
+			// eight: resolver.ResolvedEdgeUnion and resolver.ResolvedList,
+			// the two of the partition above whose arm refuses the value
+			// this table hands it. The edge-union arm answers with the
+			// candidate list and the list arm with the element it has no
+			// carrier for, neither of which `"projects " + String()`
+			// carries, so on those rows the text separates the two paths.
+			// The other six have an arm that serves, which non-emptiness
+			// alone would have separated.
 			require.Equalf(t, "projects "+in.pointer.String(), age.UnservedColumn(in.pointer),
 				"*%s must reach unservedColumn's fall-through; every marker and String on the variants takes a value receiver, and a pointer's method set contains its value methods, so the pointer satisfies resolver.ResolvedType while `case resolver.%s:` does not match it",
 				name, name)
@@ -547,21 +534,16 @@ func TestUnservedColumnFallThroughIsNotANinthVariant(t *testing.T) {
 			"the shadowing String must differ from the promoted one, or this row witnesses nothing")
 	})
 
-	// The ResolvedUnknown row above cannot say which path answered it, because
-	// its arm returns the expression the fall-through returns. That is a fact
-	// about that row's form, and this row is why it does not generalise into
-	// "the arm and the fall-through are indistinguishable": what a variant's
-	// own arm can return is "projects " and then that variant's Stringer. The
-	// assertions below are written against the two Stringers a list-shaped
-	// embedder could reach, so they say "outside what those arms return"
-	// whatever internal/resolver makes them say, and they hold.
+	// What a variant's own arm can return is "projects " and then that
+	// variant's Stringer, or a reason naming more than the Stringer does. The
+	// assertion below is written against the Stringer a list-shaped embedder
+	// could reach, so it says "outside what that arm returns" whatever
+	// internal/resolver makes it say, and it holds.
 	t.Run("a shadowing list embedder is outside the list arm's range", func(t *testing.T) {
 		require.Equal(t, "projects "+shadowListText, age.UnservedColumn(shadowList{}),
 			"struct{ resolver.ResolvedList } declaring its own String reaches the fall-through, which returns that String")
 		require.NotEqual(t, "projects "+resolver.ResolvedList{}.String(), age.UnservedColumn(shadowList{}),
 			"the fall-through returns this for a bare list, so a row equal to it would witness nothing")
-		require.NotEqual(t, "projects "+resolver.ResolvedUnknown{}.String(), age.UnservedColumn(shadowList{}),
-			"the unknown arm returns this")
 	})
 
 	// The key set is held against the arms below, and that says nothing about

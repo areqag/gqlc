@@ -265,6 +265,10 @@ const (
 	marker = `{"id": 1407374883553281, "label": "Marker", "properties": {}}::vertex`
 	actedIn = `{"id": 1125899906842625, "label": "ACTED_IN", "end_id": 844424930131970, "start_id": 844424930131969, "properties": {"since": 2019}}::edge`
 
+	// A path is the list of the entities it walks, each carrying its own
+	// annotation, and the list carrying one more.
+	actedInPath = `[{"id": 844424930131969, "label": "Person", "properties": {"id": 1, "name": "Alice", "rank": 3, "score": 9.5, "tally": 7, "active": true}}::vertex, {"id": 1125899906842625, "label": "ACTED_IN", "end_id": 844424930131970, "start_id": 844424930131969, "properties": {"since": 2019}}::edge, {"id": 844424930131970, "label": "Person", "properties": {"id": 2, "name": "Bob", "rank": 4, "score": 1.0, "tally": 8, "active": false, "weight": 0.5, "middleName": "Q"}}::vertex]::path`
+
 	// AGE stores whatever a writer wrote, so a vertex carrying the KEY
 	// label a query matched on may hold properties the schema never
 	// declared, of shapes it never declares. Reaching `name` here means
@@ -942,6 +946,68 @@ func TestAgtypeValue(t *testing.T) {
 		`{"a": 1`,
 		`{"a"}`,
 		`1 2`,
+	} {
+		if got, err := agtypeValue([]byte(raw)); err == nil {
+			t.Errorf("agtypeValue(%s) = %#v, want an error", raw, got)
+		}
+	}
+}
+
+// A value of unknown type may be a whole vertex, edge or path — the
+// resolver types head(collect(p)) and startNode(k) as unknown — and AGE
+// suffixes each with its annotation. agtypeValue reads the body under it:
+// a vertex or edge lands on the map[string]any of what the object carries,
+// id, label and properties and an edge's start_id and end_id, and a path
+// on the []any of its entities.
+func TestAgtypeValueReadsAnAnnotatedEntity(t *testing.T) {
+	vertex, err := agtypeValue([]byte(alice))
+	if err != nil {
+		t.Fatalf("agtypeValue(alice) = error %v", err)
+	}
+	v, ok := vertex.(map[string]any)
+	if !ok || len(v) != 3 || v["id"] != int64(844424930131969) || v["label"] != "Person" {
+		t.Fatalf("agtypeValue(alice) = %#v", vertex)
+	}
+	if props, ok := v["properties"].(map[string]any); !ok || props["name"] != "Alice" || props["active"] != true {
+		t.Errorf("agtypeValue(alice)[properties] = %#v", v["properties"])
+	}
+
+	edge, err := agtypeValue([]byte(actedIn))
+	if err != nil {
+		t.Fatalf("agtypeValue(actedIn) = error %v", err)
+	}
+	e, ok := edge.(map[string]any)
+	if !ok || len(e) != 5 || e["label"] != "ACTED_IN" ||
+		e["start_id"] != int64(844424930131969) || e["end_id"] != int64(844424930131970) {
+		t.Fatalf("agtypeValue(actedIn) = %#v", edge)
+	}
+
+	path, err := agtypeValue([]byte(actedInPath))
+	if err != nil {
+		t.Fatalf("agtypeValue(actedInPath) = error %v", err)
+	}
+	steps, ok := path.([]any)
+	if !ok || len(steps) != 3 {
+		t.Fatalf("agtypeValue(actedInPath) = %#v, want a []any of 3", path)
+	}
+	for i, label := range []string{"Person", "ACTED_IN", "Person"} {
+		if step, ok := steps[i].(map[string]any); !ok || step["label"] != label {
+			t.Errorf("agtypeValue(actedInPath)[%d] = %#v, want a %s", i, steps[i], label)
+		}
+	}
+
+	// The annotation is read off the whole value, so a string that happens
+	// to end in one is still the string, and an annotation over the wrong
+	// body is refused rather than read as that body.
+	if got, err := agtypeValue([]byte(`"a::vertex"`)); err != nil || got != "a::vertex" {
+		t.Errorf("agtypeValue(\"a::vertex\") = %#v, %v", got, err)
+	}
+	for _, raw := range []string{
+		`1::vertex`,
+		`[1]::vertex`,
+		`[1]::edge`,
+		`{"a": 1}::path`,
+		`::vertex`,
 	} {
 		if got, err := agtypeValue([]byte(raw)); err == nil {
 			t.Errorf("agtypeValue(%s) = %#v, want an error", raw, got)

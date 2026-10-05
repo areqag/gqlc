@@ -107,6 +107,13 @@ var agtypeLiveCaptures = []agtypeGraph{
 				want:      `{"id": 1125899906842625, "label": "ACTED_IN", "end_id": 844424930131970, "start_id": 844424930131969, "properties": {"since": 2019}}::edge`,
 			},
 			{
+				// Writes nothing, so it leaves the ids the rows after it
+				// reproduce where they were.
+				constName: "actedInPath",
+				cypher:    `MATCH p = (:Person {id: 1})-[:ACTED_IN]->(:Person {id: 2}) RETURN p`,
+				want:      `[{"id": 844424930131969, "label": "Person", "properties": {"id": 1, "name": "Alice", "rank": 3, "score": 9.5, "tally": 7, "active": true}}::vertex, {"id": 1125899906842625, "label": "ACTED_IN", "end_id": 844424930131970, "start_id": 844424930131969, "properties": {"since": 2019}}::edge, {"id": 844424930131970, "label": "Person", "properties": {"id": 2, "name": "Bob", "rank": 4, "score": 1.0, "tally": 8, "active": false, "weight": 0.5, "middleName": "Q"}}::vertex]::path`,
+			},
+			{
 				constName: "marker",
 				cypher:    `CREATE (n:Marker) RETURN n`,
 				want:      `{"id": 1407374883553281, "label": "Marker", "properties": {}}::vertex`,
