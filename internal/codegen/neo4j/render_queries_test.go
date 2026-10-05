@@ -52,12 +52,11 @@ func TestParamBindExprSlices(t *testing.T) {
 		{"bool list", "[]bool", false, "arg"},
 		{"nested string list", "[][]string", false, "arg"},
 
-		// Already bare before this fix, and must stay so: neither is a
-		// list width. []byte is BYTES, which the driver hands back and
-		// takes as a Go slice of its own; []any is LIST<ANY VALUE>,
-		// already the driver's own array carrier.
+		// Already bare before this fix, and must stay so: BYTES is no
+		// list width, and the driver hands it back and takes it as a Go
+		// slice of its own. []any, LIST<ANY VALUE>, is not bare either,
+		// for a TIMESTAMP's reason (TestParamBindExprTimestamp).
 		{"bytes", "[]byte", false, "arg"},
-		{"any list", "[]any", false, "arg"},
 
 		// Nullable slices bind the pointer through: packX's reflect.Ptr
 		// arm indirects to the slice and packs it, and a nil pointer
@@ -110,7 +109,9 @@ func TestParamBindExprTemporalLists(t *testing.T) {
 // every position (bd gqlc-m3ax). The driver packs a time.Time, but sends its
 // location's name as a zone id the server refuses unless it is an IANA one,
 // so time.Now() and an unnamed time.FixedZone were refused bare. A *time.Time
-// inside a list is not packed at all (bd gqlc-gk6q).
+// inside a list is not packed at all (bd gqlc-gk6q). Both hold inside an ANY
+// value, measured on both majors through fixture any_param_timestamp (bd
+// gqlc-nvb4).
 //
 // The numeric rows are the controls for the element-nullable shape: a pointer
 // to a scalar takes packV's indirecting branch, measured on both majors
@@ -129,6 +130,14 @@ func TestParamBindExprTimestamp(t *testing.T) {
 		{"nullable timestamp list", "[]time.Time", true, "fromTimestampListPtr(arg)"},
 		{"nullable-element timestamp list", "[]*time.Time", false, "fromNullableTimestampList(arg)"},
 		{"nullable list of nullable timestamps", "[]*time.Time", true, "fromNullableTimestampListPtr(arg)"},
+
+		// An ANY value may hold a TIMESTAMP with no declared width to say
+		// so, so every ANY carrier binds through the walk (bd gqlc-nvb4).
+		// One helper for both nullabilities: its pointer arms answer nil.
+		{"any value", "any", false, "fromAnyValue(arg)"},
+		{"nullable any value", "any", true, "fromAnyValue(arg)"},
+		{"any list", "[]any", false, "fromAnyValue(arg)"},
+		{"nullable any list", "[]any", true, "fromAnyValue(arg)"},
 
 		{"nullable-element int64 list", "[]*int64", false, "arg"},
 		{"nullable-element int32 list", "[]*int32", false, "arg"},

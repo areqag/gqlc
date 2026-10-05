@@ -1,6 +1,7 @@
 package neo4j_test
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -133,6 +134,10 @@ func TestTimestampUsesMarksTheHelperEachBindCalls(t *testing.T) {
 	})
 	recordText, ok := tm.Property(record)
 	require.True(t, ok)
+	anyRecord := graph.RecordOf([]graph.RecordField{{Name: "payload", Type: graph.TypeAnyPropertyValue}})
+	anyRecordText, ok := tm.Property(anyRecord)
+	require.True(t, ok)
+	anyValueFlags := neo4j.CarrierUseFlags{Encode: true, EncodePtr: true, List: true, ListElem: true, AnyValue: true}
 	tests := []struct {
 		name  string
 		param codegen.Param
@@ -189,6 +194,30 @@ func TestTimestampUsesMarksTheHelperEachBindCalls(t *testing.T) {
 			codegen.Param{GoType: recordText, Width: record},
 			neo4j.CarrierUseFlags{Encode: true, EncodePtr: true},
 		},
+		// fromAnyValue, for each ANY carrier and for one in a record
+		// field. Its TIMESTAMP arms call the plain, Ptr, list and
+		// nullable-element list helpers, so all four are owed beside it;
+		// the list Ptr wrappers are not, since no arm calls them.
+		{
+			"any value",
+			codegen.Param{GoType: "any", Width: graph.TypeAnyPropertyValue},
+			anyValueFlags,
+		},
+		{
+			"nullable any value",
+			codegen.Param{GoType: "any", Width: graph.TypeAnyPropertyValue, Nullable: true},
+			anyValueFlags,
+		},
+		{
+			"nullable any list",
+			codegen.Param{GoType: "[]any", Width: graph.ListOf(graph.TypeAnyPropertyValue, false), Nullable: true},
+			anyValueFlags,
+		},
+		{
+			"record any field",
+			codegen.Param{GoType: anyRecordText, Width: anyRecord},
+			anyValueFlags,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -200,18 +229,52 @@ func TestTimestampUsesMarksTheHelperEachBindCalls(t *testing.T) {
 
 // TestTemporalUsesIgnoresNonCarrierParameters pins the other half of the
 // parameter walk: leafType strips the slice, and a leaf that is not one of
-// codegen.TemporalCarriers reaches no site. []any and []byte are the two that
-// matter — both are slices, so both take the list arm and would mark a carrier
-// if the arm marked unconditionally (raised while reviewing PR #2287).
+// codegen.TemporalCarriers reaches no site. []string and []byte stand for it
+// — both are slices, so both take the list arm and would mark a carrier if
+// the arm marked unconditionally (raised while reviewing PR #2287). []any
+// was the third row until bd gqlc-nvb4: an ANY carrier now marks every
+// carrier on purpose (TestAnyValueMarksEveryNeutralCarrier).
 //
 // Asserted as an empty map rather than by looking up a name: naming a key here
 // would only prove that ONE spelling was ignored, and the claim is that neither
 // reaches anything.
 func TestTemporalUsesIgnoresNonCarrierParameters(t *testing.T) {
 	require.Empty(t, neo4j.TemporalUseNames(paramsOf(
-		codegen.Param{RawName: "a", Field: "A", GoType: "[]any", Nullable: true},
+		codegen.Param{RawName: "a", Field: "A", GoType: "[]string", Nullable: true},
 		codegen.Param{RawName: "b", Field: "B", GoType: "[]byte", Nullable: false},
 	), neo4j.TypeMap{}), "a non-carrier leaf reached an emission site")
+}
+
+// TestAnyValueMarksEveryNeutralCarrier pins what an ANY parameter owes the
+// neutral carriers' bridge files: fromAnyValue has an arm for each carrier
+// the package declares, calling its plain, Ptr, list and nullable-element
+// list helpers (bd gqlc-nvb4). The walk cannot see which carriers the
+// package declares, so it marks all six; a bridge file the package does
+// not emit reads none of them.
+func TestAnyValueMarksEveryNeutralCarrier(t *testing.T) {
+	want := neo4j.CarrierUseFlags{Encode: true, EncodePtr: true, List: true, ListElem: true}
+	for _, goType := range []string{"any", "[]any"} {
+		prepared := paramsOf(codegen.Param{RawName: "p", Field: "P", GoType: goType})
+		for _, name := range append(slices.Clone(codegen.TemporalCarriers), codegen.UUIDCarrier) {
+			require.Equal(t, want, neo4j.TemporalUseOf(prepared, name, neo4j.TypeMap{}), "%s parameter, carrier %s", goType, name)
+		}
+	}
+}
+
+// TestAnyValueWalkNamesOnlyTheDeclaredCarriers pins the other half: an arm
+// for a carrier the package does not declare names a type that does not
+// exist, and the package does not compile. TIMESTAMP's arms are always
+// there, since time.Time needs no declaration.
+func TestAnyValueWalkNamesOnlyTheDeclaredCarriers(t *testing.T) {
+	none := neo4j.RenderAnyValueWalk(nil)
+	require.Contains(t, none, "\tcase time.Time:\n\t\treturn fromTimestamp(t)\n")
+	for _, name := range append(slices.Clone(codegen.TemporalCarriers), codegen.UUIDCarrier) {
+		require.NotContains(t, none, "case "+name+":", "no carrier is declared, so no arm may name %s", name)
+	}
+
+	uuidOnly := neo4j.RenderAnyValueWalk([]string{codegen.UUIDCarrier})
+	require.Contains(t, uuidOnly, "\tcase []*UUID:\n\t\treturn fromNullableUUIDList(t)\n")
+	require.NotContains(t, uuidOnly, "case Date:")
 }
 
 // TestTemporalUsesSeesACarrierHidingInsideARecord is a reproduction, and

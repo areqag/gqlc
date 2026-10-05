@@ -1,0 +1,7 @@
+CREATE PROPERTY GRAPH TYPE AnyParamNoCarrier AS {
+    (:Slot {
+        id      :: INT64 NOT NULL,
+        payload :: ANY VALUE,
+        bag     :: LIST<ANY VALUE>
+    })
+}
