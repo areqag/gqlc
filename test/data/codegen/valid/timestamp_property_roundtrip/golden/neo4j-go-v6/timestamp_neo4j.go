@@ -33,9 +33,13 @@ var (
 )
 
 // timestampZoneIsSendable reports whether v's location name is a zone id
-// the server accepts and resolves to the offset v reads. A name that loads
-// at a different offset is a FixedZone mislabelled with a real id, which
-// the server would store at the id's offset rather than v's.
+// the server accepts and that this host's tzdata resolves to the offset v
+// reads. A name that loads at a different offset is a FixedZone
+// mislabelled with a real id, which the server would store at the id's
+// offset rather than v's. The server's tzdb can itself disagree with Go's
+// for a few name and instant pairs (measured 2026-10-04: Africa/Casablanca
+// and Africa/El_Aaiun in 2040, CST6CDT, EST5EDT and PST8PDT in 1950); it
+// then stores its own offset at the same instant, as a bare send did.
 func timestampZoneIsSendable(v time.Time, offset int) bool {
 	name := v.Location().String()
 	timestampZonesMu.Lock()
