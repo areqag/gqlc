@@ -2721,6 +2721,7 @@ func TestAnUntypedColumnIsPlannedNullable(t *testing.T) {
 		require.True(t, row.Nullable, "column %q: a non-nullable untyped column fails the row on a null the graph holds", row.ColumnName)
 	}
 	require.Equal(t, "any", rows[0].GoType)
+	require.Equal(t, "scalar:null", rows[1].GoType, "the null scalar's carrier comes from the type map")
 	require.Equal(t, codegen.ColumnScalar, rows[2].Kind)
 	require.False(t, rows[2].Nullable, "a literal string is never null")
 }

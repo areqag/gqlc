@@ -64,6 +64,8 @@ func TestNeo4jPassesANullAnyColumnAsNil(t *testing.T) {
 		require.NoError(t, err, "a null in an unknown column is a value the graph holds, not a broken NOT NULL")
 		require.Len(t, got, 3)
 		require.NotNil(t, got[0], "id 1 holds a date at index 0")
+		require.Equal(t, neo4jv5.Date(time.Date(2024, 1, 2, 0, 0, 0, 0, time.UTC)), *got[0],
+			"an unknown reaches the caller as the driver's own value")
 		require.Nil(t, got[1], "id 2 has no dates property")
 		require.Nil(t, got[2], "id 3 has an empty dates list, so index 0 is out of range")
 	})

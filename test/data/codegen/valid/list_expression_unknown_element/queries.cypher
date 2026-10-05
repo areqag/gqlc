@@ -10,8 +10,8 @@
 // certificate is not minted and []any is the answer that spec rules permanent
 // for heterogeneous elements and rich operands. It is not a width a backend
 // lost: the bare a.dates[0] resolves to the same unknown, which every target
-// serves as an `any` column (AccountBareUnknown; AGE refused it until bd
-// gqlc-2omj).
+// serves as a nullable `*any` column (AccountBareUnknown; AGE refused it until
+// bd gqlc-2omj, and a null failed the row until bd gqlc-14u0l).
 //
 // The regression these columns are for is a typing that fills the leaves
 // anyway. Filled from its ref, a.dates[0] would type as LIST<DATE>, which is
