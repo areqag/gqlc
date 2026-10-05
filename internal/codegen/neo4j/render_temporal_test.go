@@ -110,45 +110,92 @@ func TestElementNullabilityPicksADisjointListHelper(t *testing.T) {
 	require.False(t, dur.ListElemPtr, "likewise its wrapper")
 }
 
-// TestTimestampUsesMarksOnlyTheElementNullableList pins the gate on
-// timestamp_neo4j.go (bd gqlc-gk6q). Its helpers are called for a list of
-// NULLABLE TIMESTAMPs alone; time.Time binds bare at every other position, so
-// a mark there would emit a helper nothing calls, which compiles and which
-// `unused` over the goldens reports by name.
+// TestTimestampUsesMarksTheHelperEachBindCalls pins the gate on each helper
+// in timestamp_neo4j.go. Every TIMESTAMP bind calls one (bd gqlc-m3ax), and
+// each shape calls a different one, so a missing mark is a name the emitted
+// package does not declare and an extra one is a helper nothing calls, which
+// compiles and which `unused` over the goldens reports by name.
 //
-// The union member is the second route to the helper: writeUnionEncode binds
-// a member through paramBindExpr, and the walk marks a member as a NON-nullable
-// parameter whatever the position above it was, so it owes the plain helper
-// and never the Ptr wrapper.
-func TestTimestampUsesMarksOnlyTheElementNullableList(t *testing.T) {
+// Each row is its own Prepared because conversionUses folds every TIMESTAMP
+// position into one answer: two rows in one batch would score the union and
+// the assertion could not tell which parameter set which bit.
+//
+// The union member and the record field are the routes that do not pass
+// through a top-level parameter: writeUnionEncode and the record encode body
+// bind through paramBindExpr. A member is marked as a NON-nullable parameter
+// whatever the position above it was, so it owes the plain helper and never
+// the Ptr wrapper; a record field is marked by its own nullability.
+func TestTimestampUsesMarksTheHelperEachBindCalls(t *testing.T) {
 	tm := neo4j.TargetV5.Types()
-
-	bare := neo4j.TimestampUseOf(paramsOf(
-		codegen.Param{RawName: "a", Field: "A", GoType: "time.Time"},
-		codegen.Param{RawName: "b", Field: "B", GoType: "time.Time", Nullable: true},
-		codegen.Param{RawName: "c", Field: "C", GoType: "[]time.Time", Nullable: true},
-	), tm)
-	require.False(t, bare.ListElem, "no parameter here holds a nullable TIMESTAMP element")
-	require.False(t, bare.ListElemPtr)
-
-	elem := neo4j.TimestampUseOf(paramsOf(
-		codegen.Param{RawName: "a", Field: "A", GoType: "[]*time.Time"},
-	), tm)
-	require.True(t, elem.ListElem, "a []*time.Time parameter did not reach the helper it calls")
-	require.False(t, elem.ListElemPtr, "the whole list is not nullable, so no Ptr wrapper is owed")
-
-	both := neo4j.TimestampUseOf(paramsOf(
-		codegen.Param{RawName: "a", Field: "A", GoType: "[]*time.Time", Nullable: true},
-	), tm)
-	require.True(t, both.ListElem, "the Ptr wrapper calls the plain helper, so it is owed too")
-	require.True(t, both.ListElemPtr, "a nullable list of nullable TIMESTAMPs owes the Ptr wrapper")
-
-	width := graph.UnionOf([]graph.UnionMember{{Type: graph.ListOf(graph.TypeTimestamp, false)}, {Type: graph.TypeInt64}})
-	member := neo4j.TimestampUseOf(paramsOf(
-		codegen.Param{RawName: "u", Field: "U", GoType: codegen.UnionCarrierText, Width: width, Nullable: true},
-	), tm)
-	require.True(t, member.ListElem, "the union's LIST<TIMESTAMP> member arm calls the helper")
-	require.False(t, member.ListElemPtr, "a member is bound non-nullable; the union's own Ptr wrapper spent the outer null")
+	record := graph.RecordOf([]graph.RecordField{
+		{Name: "at", Type: graph.TypeTimestamp, NotNull: true},
+		{Name: "seen", Type: graph.TypeTimestamp},
+	})
+	recordText, ok := tm.Property(record)
+	require.True(t, ok)
+	tests := []struct {
+		name  string
+		param codegen.Param
+		want  neo4j.CarrierUseFlags
+	}{
+		{
+			"scalar",
+			codegen.Param{GoType: "time.Time"},
+			neo4j.CarrierUseFlags{Encode: true},
+		},
+		{
+			"nullable scalar",
+			codegen.Param{GoType: "time.Time", Nullable: true},
+			neo4j.CarrierUseFlags{EncodePtr: true},
+		},
+		{
+			"list",
+			codegen.Param{GoType: "[]time.Time"},
+			neo4j.CarrierUseFlags{Encode: true, List: true},
+		},
+		{
+			"nullable list",
+			codegen.Param{GoType: "[]time.Time", Nullable: true},
+			neo4j.CarrierUseFlags{Encode: true, List: true, ListPtr: true},
+		},
+		{
+			"nullable-element list",
+			codegen.Param{GoType: "[]*time.Time"},
+			neo4j.CarrierUseFlags{Encode: true, ListElem: true},
+		},
+		{
+			"nullable list of nullable elements",
+			codegen.Param{GoType: "[]*time.Time", Nullable: true},
+			neo4j.CarrierUseFlags{Encode: true, ListElem: true, ListElemPtr: true},
+		},
+		{
+			"union member",
+			codegen.Param{
+				GoType: codegen.UnionCarrierText, Nullable: true,
+				Width: graph.UnionOf([]graph.UnionMember{{Type: graph.TypeTimestamp}, {Type: graph.TypeInt64}}),
+			},
+			neo4j.CarrierUseFlags{Encode: true},
+		},
+		{
+			"union list member",
+			codegen.Param{
+				GoType: codegen.UnionCarrierText, Nullable: true,
+				Width: graph.UnionOf([]graph.UnionMember{{Type: graph.ListOf(graph.TypeTimestamp, false)}, {Type: graph.TypeInt64}}),
+			},
+			neo4j.CarrierUseFlags{Encode: true, ListElem: true},
+		},
+		{
+			"record fields",
+			codegen.Param{GoType: recordText, Width: record},
+			neo4j.CarrierUseFlags{Encode: true, EncodePtr: true},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tt.param.RawName, tt.param.Field = "p", "P"
+			require.Equal(t, tt.want, neo4j.TimestampUseOf(paramsOf(tt.param), tm))
+		})
+	}
 }
 
 // TestTemporalUsesIgnoresNonCarrierParameters pins the other half of the

@@ -24,6 +24,7 @@ package fixtures_test
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -156,6 +157,76 @@ func runNullableTimestampListRows(ctx context.Context, t *testing.T, arm nullabl
 		require.Empty(t, none, "a stamp list no node holds must match no node")
 	})
 
+	// The live half of bd gqlc-m3ax for the three list shapes: a stamp
+	// whose location is not UTC, an IANA name or "Offset" was sent as a
+	// zone id the server refuses. The offset is compared as well as the
+	// instant, because the server stores the offset it was sent and the
+	// bind is where it could be lost.
+	t.Run("each list binds a stamp in any zone, offset kept", func(t *testing.T) {
+		wipe(t)
+		at := time.Date(2024, 2, 29, 21, 30, 0, 0, time.UTC)
+		zoned := []time.Time{
+			at.In(time.Local),
+			at.In(time.FixedZone("", 2*3600)),
+			at.In(time.FixedZone("CEST", -3*3600-1800)),
+			// The server takes "CET" and would store it at CET's +01:00.
+			at.In(time.FixedZone("CET", 5*3600)),
+		}
+		stamps := make([]*time.Time, len(zoned))
+		for i := range zoned {
+			stamps[i] = ptr(zoned[i])
+		}
+		maybe := []*time.Time{ptr(zoned[1])}
+		want := timestampEntry{id: 1, stamps: stamps, maybe: &maybe, fixed: zoned}
+		require.NoError(t, arm.open(ctx, want), "a list of stamps outside UTC was refused")
+
+		got, err := arm.read(ctx, 1)
+		require.NoError(t, err)
+		require.NotNil(t, got.maybe)
+		require.Len(t, got.stamps, len(zoned))
+		require.Len(t, *got.maybe, 1)
+		require.Len(t, got.fixed, len(zoned))
+		requireSameInstantAndOffset(t, zoned[1], *(*got.maybe)[0], "maybe 0")
+		for i := range zoned {
+			require.NotNil(t, got.stamps[i])
+			requireSameInstantAndOffset(t, zoned[i], *got.stamps[i], fmt.Sprintf("stamps %d", i))
+			requireSameInstantAndOffset(t, zoned[i], got.fixed[i], fmt.Sprintf("fixed %d", i))
+		}
+
+		matched, err := arm.matching(ctx, stamps, zoned)
+		require.NoError(t, err, "a list parameter of stamps outside UTC was refused")
+		require.Equal(t, []int64{1}, matched)
+	})
+
+	// The premise of the next row, measured: = on a ZONED DATETIME compares
+	// the zone's form as well as the instant, so an offset and a named zone
+	// at the same instant and offset are not equal.
+	t.Run("premise: = tells a named zone from the same offset", func(t *testing.T) {
+		rows := arm.raw(ctx, t, "RETURN datetime('2024-02-29T21:30Z') = datetime('2024-02-29T21:30Z[UTC]') AS utc, "+
+			"datetime('2024-02-29T16:30-05:00') = datetime('2024-02-29T16:30[America/New_York]') AS region")
+		require.Equal(t, []map[string]any{{"utc": false, "region": false}}, rows)
+	})
+
+	// Values stored in a named zone — by gqlc before bd gqlc-m3ax, which
+	// sent every location bare, or by any other writer — must still match
+	// their own read-back with =. A bind that rewrote UTC or an IANA region
+	// into an offset would miss them, with nothing reporting it.
+	t.Run("a list stored in named zones matches its own read-back with =", func(t *testing.T) {
+		wipe(t)
+		named := "[datetime('2024-02-29T21:30Z[UTC]'), datetime('2024-02-29T16:30[America/New_York]'), " +
+			"datetime('2024-02-29T21:30Z[GMT]')]"
+		arm.raw(ctx, t, "CREATE (:Entry {id: 1, stamps: "+named+", fixed: "+named+"})")
+
+		got, err := arm.read(ctx, 1)
+		require.NoError(t, err)
+		require.Len(t, got.fixed, 3)
+		require.Equal(t, time.UTC, got.fixed[0].Location(), "the premise: the driver decodes Z[UTC] to time.UTC")
+
+		matched, err := arm.matching(ctx, got.stamps, got.fixed)
+		require.NoError(t, err)
+		require.Equal(t, []int64{1}, matched, "a read-back value, bound again, must match the node it was read from")
+	})
+
 	t.Run("a nil element reaches the server as null", func(t *testing.T) {
 		wipe(t)
 		e := full()
@@ -165,6 +236,17 @@ func runNullableTimestampListRows(ctx context.Context, t *testing.T, arm nullabl
 		require.ErrorContains(t, err, nullInArrayRefusal,
 			"the nil element did not arrive as a Cypher null")
 	})
+}
+
+// requireSameInstantAndOffset compares two stamps by instant and by the
+// offset from UTC they read at. The location itself is not compared: the
+// driver hands back its own.
+func requireSameInstantAndOffset(t *testing.T, want, got time.Time, name string) {
+	t.Helper()
+	require.True(t, want.Equal(got), "%s: wrote %s, read %s", name, want, got)
+	_, wantOffset := want.Zone()
+	_, gotOffset := got.Zone()
+	require.Equal(t, wantOffset, gotOffset, "%s: wrote %s, read %s", name, want, got)
 }
 
 // requireStampPtrsEqual compares two lists of nullable stamps by instant.

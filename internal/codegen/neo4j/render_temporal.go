@@ -79,7 +79,7 @@ type carrierUse struct {
 //
 // The fourth answer is TIMESTAMP's, which is no neutral carrier and so
 // has no place in the first map: renderTimestampConversions reads its
-// element-nullable list bits and nothing else.
+// encode bits.
 func conversionUses(prepared codegen.Prepared, tm typeMap) (map[string]carrierUse, map[graph.PropertyType]carrierUse, map[graph.PropertyType]carrierUse, carrierUse) {
 	w := conversionUseWalk{
 		tm:      tm,
@@ -386,38 +386,138 @@ func temporalListHelper(leaf string, elemNullable bool) string {
 	return "from" + leaf + "List"
 }
 
-// timestampCarrier is TIMESTAMP's carrier text. The driver packs it by
-// value and hands it back as itself, so it binds and decodes bare at every
-// position but one: an element of a list, behind the star a nullable
-// element carries (see sliceParamBindExpr).
+// timestampCarrier is TIMESTAMP's carrier text. The driver hands it back
+// as itself, so it decodes bare; it does not bind bare at any position
+// (see renderTimestampConversions).
 const timestampCarrier = "time.Time"
 
-// nullableTimestampListHelper names that position's helper, in
-// temporalListHelper's spelling with the width's name standing in for a
-// carrier's: "Time" is taken, by ZONED TIME's carrier. The bodies
-// renderTimestampConversions emits spell it literally.
-const nullableTimestampListHelper = "fromNullableTimestampList"
+// timestampHelper is the name TIMESTAMP's encode helpers are spelled from,
+// in temporalListHelper's scheme with the width's name standing in for a
+// carrier's: "Time" is taken, by ZONED TIME's carrier.
+const timestampHelper = "Timestamp"
 
-// renderTimestampConversions emits timestamp_neo4j.go: the helper pair a
-// list of nullable TIMESTAMPs binds through, for whichever of the two the
-// batch calls. use is conversionUses' timestamp answer, and only its
-// element-nullable list bits are read; the other bits are marked by the
-// same walk and name nothing, because time.Time is bound bare there.
+// renderTimestampConversions emits timestamp_neo4j.go: TIMESTAMP's encode
+// helpers, for whichever the batch calls. use is conversionUses' timestamp
+// answer; its decode bit names nothing, because time.Time decodes bare.
+//
+// Every bind goes through fromTimestamp because of the drivers' packStruct
+// (v5.28.4 and v6.2.0, neo4j/internal/bolt/outgoing.go): a time.Time whose
+// zone is not named "Offset" is sent as the location's name, which the
+// server takes as a zone id. Measured against the pinned image on both
+// majors (bd gqlc-m3ax): time.Local ("Local", whenever TZ is unset), an
+// unnamed time.FixedZone and an abbreviated one ("CEST") are refused, so
+// time.Now() is. A list element owes the same conversion, and so does a
+// *time.Time inside a list for its own reason: packV hands a
+// pointer-to-struct to packStruct still a pointer, and *time.Time is no
+// case there (bd gqlc-gk6q).
+//
+// fromTimestamp converts only what the server would refuse or misread, and
+// sends every other value as it was. Cypher's = compares the zone FORM as
+// well as the instant — datetime('…Z') = datetime('…Z[UTC]') is false,
+// and MERGE and DISTINCT follow it — so rewriting a zone the server
+// accepts would stop a bound value matching one stored in its named form,
+// including a value this package just decoded (ADR 0033, note of
+// 2026-10-04). The five names it refuses although Go's tzdata loads them
+// were measured by sending every name under /usr/share/zoneinfo (598) to
+// the pinned image on 2026-10-04; a server refusing another fails loudly
+// at the send, it does not store a wrong value.
 //
 // Its own file for the reason uuid_neo4j.go has one: the trigger is
 // independent of the temporal pair, since TIMESTAMP is no neutral carrier
-// and a batch reaching this helper may name none of them.
+// and a batch reaching these helpers may name none of them.
 func renderTimestampConversions(pkg string, use carrierUse) []byte {
 	var b strings.Builder
 	b.WriteString(codegen.Header())
 	b.WriteString("package ")
 	b.WriteString(pkg)
-	b.WriteString("\n\nimport \"time\"\n")
+	b.WriteString("\n\nimport (\n\t\"sync\"\n\t\"time\"\n)\n")
 	b.WriteString(`
+// fromTimestamp binds a TIMESTAMP in a form the server accepts. A value
+// whose zone the driver sends as an id the server takes is sent as it is
+// (time.UTC among them: LoadLocation("UTC") is time.UTC); any other is
+// moved, same instant and same offset, into a fixed zone named "Offset",
+// which the driver sends as an offset instead.
+func fromTimestamp(v time.Time) time.Time {
+	_, offset := v.Zone()
+	if timestampZoneIsSendable(v, offset) {
+		return v
+	}
+	return v.In(time.FixedZone("Offset", offset))
+}
+
+// timestampZones caches time.LoadLocation by name, guarded by
+// timestampZonesMu; a nil entry is a name not to send as a zone id. It is
+// seeded with the names the server refuses that LoadLocation would not
+// reject: "" and "Local", which it resolves to UTC and to time.Local, and
+// the five ids Go's tzdata loads and the server does not.
+var (
+	timestampZonesMu sync.Mutex
+	timestampZones   = map[string]*time.Location{
+		"": nil, "Local": nil, "EST": nil, "HST": nil, "MST": nil, "ROC": nil, "Factory": nil,
+	}
+)
+
+// timestampZoneIsSendable reports whether v's location name is a zone id
+// the server accepts and resolves to the offset v reads. A name that loads
+// at a different offset is a FixedZone mislabelled with a real id, which
+// the server would store at the id's offset rather than v's.
+func timestampZoneIsSendable(v time.Time, offset int) bool {
+	name := v.Location().String()
+	timestampZonesMu.Lock()
+	loc, ok := timestampZones[name]
+	if !ok {
+		loc, _ = time.LoadLocation(name)
+		timestampZones[name] = loc
+	}
+	timestampZonesMu.Unlock()
+	if loc == nil {
+		return false
+	}
+	_, want := v.In(loc).Zone()
+	return want == offset
+}
+`)
+	if use.encodePtr {
+		b.WriteString(`
+// fromTimestampPtr binds a nullable TIMESTAMP parameter: a nil pointer is
+// the Cypher null the schema's nullability declared.
+func fromTimestampPtr(v *time.Time) any {
+	if v == nil {
+		return nil
+	}
+	return fromTimestamp(*v)
+}
+`)
+	}
+	if use.list {
+		b.WriteString(`
+// fromTimestampList binds a list of TIMESTAMPs element by element.
+func fromTimestampList(v []time.Time) []any {
+	out := make([]any, len(v))
+	for i := range v {
+		out[i] = fromTimestamp(v[i])
+	}
+	return out
+}
+`)
+		if use.listPtr {
+			b.WriteString(`
+// fromTimestampListPtr binds a nullable list of TIMESTAMPs: a nil pointer
+// is the Cypher null the schema's nullability declared, not an empty list.
+func fromTimestampListPtr(v *[]time.Time) any {
+	if v == nil {
+		return nil
+	}
+	return fromTimestampList(*v)
+}
+`)
+		}
+	}
+	if use.listElem {
+		b.WriteString(`
 // fromNullableTimestampList binds a list of nullable TIMESTAMPs element
-// by element. The driver packs a time.Time but not a *time.Time inside a
-// list, so each element is dereferenced; a nil element binds the Cypher
-// null the schema's element nullability declared.
+// by element; a nil element binds the Cypher null the schema's element
+// nullability declared.
 func fromNullableTimestampList(v []*time.Time) []any {
 	out := make([]any, len(v))
 	for i := range v {
@@ -425,13 +525,13 @@ func fromNullableTimestampList(v []*time.Time) []any {
 			out[i] = nil
 			continue
 		}
-		out[i] = *v[i]
+		out[i] = fromTimestamp(*v[i])
 	}
 	return out
 }
 `)
-	if use.listElemPtr {
-		b.WriteString(`
+		if use.listElemPtr {
+			b.WriteString(`
 // fromNullableTimestampListPtr binds a nullable list of nullable
 // TIMESTAMPs: a nil pointer is the Cypher null the schema's nullability
 // declared, not an empty list.
@@ -442,6 +542,7 @@ func fromNullableTimestampListPtr(v *[]*time.Time) any {
 	return fromNullableTimestampList(*v)
 }
 `)
+		}
 	}
 	return []byte(b.String())
 }

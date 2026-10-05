@@ -42,6 +42,7 @@ package fixtures_test
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"testing"
 	"time"
@@ -219,6 +220,29 @@ func runUnionListTemporalRows(ctx context.Context, t *testing.T, arm unionListTe
 		gotStamps, ok := (*whole.stamps).([]*time.Time)
 		require.True(t, ok, "the stamps must come back as the LIST<TIMESTAMP> member, got %T", *whole.stamps)
 		requireStampPtrsEqual(t, wantStamps, gotStamps, "stamps")
+	})
+
+	// bd gqlc-m3ax through a union member: the encode arm binds the member
+	// by the parameter rules, so a stamp outside UTC, an IANA name or
+	// "Offset" was sent as a zone id the server refuses.
+	t.Run("a TIMESTAMP list member binds a stamp in any zone, offset kept", func(t *testing.T) {
+		wipe(t)
+		at := time.Date(2024, 2, 29, 21, 30, 0, 0, time.UTC)
+		zoned := []*time.Time{ptr(at.In(time.Local)), ptr(at.In(time.FixedZone("", 2*3600)))}
+		var stamps any = zoned
+		require.NoError(t, arm.open(ctx, 1, diaryUnions{stamps: &stamps}),
+			"a LIST<TIMESTAMP> member holding stamps outside UTC was refused")
+
+		whole, err := arm.whole(ctx, 1)
+		require.NoError(t, err)
+		require.NotNil(t, whole.stamps)
+		gotStamps, ok := (*whole.stamps).([]*time.Time)
+		require.True(t, ok, "got %T", *whole.stamps)
+		require.Len(t, gotStamps, len(zoned))
+		for i := range zoned {
+			require.NotNil(t, gotStamps[i])
+			requireSameInstantAndOffset(t, *zoned[i], *gotStamps[i], fmt.Sprintf("stamps %d", i))
+		}
 	})
 }
 

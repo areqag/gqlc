@@ -164,3 +164,40 @@ identical public surface, and swapping targets recompiles callers untouched.
 The remaining AGE temporal gap is expressions, not columns, and it is refused
 loudly at generate time. Execution is split across three beads (neo4j switch +
 gates; AGE non-zoned admission; AGE zoned TIME), each gated on this design.
+
+## Note, 2026-10-04: on neo4j a TIMESTAMP's zone form is part of its equality
+
+A TIMESTAMP is an instant, but the neo4j server stores it with the zone it was
+sent: a named zone (`…Z[UTC]`, `…[America/New_York]`) or an offset (`…Z`,
+`…-05:00`). Cypher's `=` compares that form as well as the instant. `IN`,
+`MERGE` and `DISTINCT` follow `=`, and only the ordering operators compare the
+instant alone. Measured against the pinned image on 2026-10-04 (bd
+`gqlc-m3ax`):
+
+- `datetime('2024-01-01T00:00Z') = datetime('2024-01-01T00:00Z[UTC]')` is
+  false;
+- `datetime('…-05:00') = datetime('…[America/New_York]')` at the same instant
+  is false;
+- a `MERGE` on the offset form beside a node holding the named form creates a
+  second node.
+
+The stored form is therefore not an encoding detail the generated code may
+choose freely. The neo4j encode, `fromTimestamp` in `timestamp_neo4j.go`,
+sends a value in the form its location already names, and rewrites it to an
+offset only where the server would refuse that name or read it at a different
+offset. The cases it rewrites are `Local`, an unnamed `time.FixedZone`, an
+abbreviation, a name Go loads but the server refuses, and a name mislabelled
+with another offset. A value gqlc decodes from a named zone is therefore bound
+back in that same zone, and still matches with `=`.
+
+Rejected: rewriting every value to an offset. It is one rule, it matches what
+Cypher's own `datetime()` stores (an offset), and AGE keeps no region anyway.
+But it would silently stop `=` and `MERGE` matching every TIMESTAMP already
+stored in a named zone, including UTC values gqlc itself wrote before this
+note.
+
+What this note does not cover: AGE, which stores the instant and at most an
+offset sidecar, so it has no zone form to compare.
+
+What would falsify it: a pinned-image upgrade where the first bullet reads
+true.
