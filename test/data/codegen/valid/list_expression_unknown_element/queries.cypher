@@ -9,9 +9,9 @@
 // ref without being its value, and `null` is no ref at all, so the
 // certificate is not minted and []any is the answer that spec rules permanent
 // for heterogeneous elements and rich operands. It is not a width a backend
-// lost: the bare a.dates[0] resolves to the same unknown, which neo4j serves
-// as `any` and AGE refuses as a column it has no Go type to declare
-// (measured 2026-10-04 on 43422c03).
+// lost: the bare a.dates[0] resolves to the same unknown, which every target
+// serves as an `any` column (AccountBareUnknown; AGE refused it until bd
+// gqlc-2omj).
 //
 // The regression these columns are for is a typing that fills the leaves
 // anyway. Filled from its ref, a.dates[0] would type as LIST<DATE>, which is
@@ -25,3 +25,6 @@
 
 // name: AccountUnknownElements :many
 MATCH (a:Account) RETURN [a.dates[0]] AS dated, [a.either, null] AS mixed, [a.n, null] AS mixed_scalar ORDER BY a.id
+
+// name: AccountBareUnknown :many
+MATCH (a:Account) RETURN a.dates[0] AS dated ORDER BY a.id

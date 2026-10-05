@@ -120,18 +120,17 @@ scalar kinds is a decode helper, which is a different fix — below.
   That refusal is load-bearing, but not for the reason first recorded here. It
   is not propping up a missing helper. `decodeFunc` answers both texts — `"any"`
   with `agtypeValue`, `"map[string]any"` with `agtypeMap` — and both helpers are
-  emitted, gated together on `helpers.value`. Six goldens carry them, and they
-  arrive by two routes rather than one. Four declare an ANY width in the SCHEMA,
-  as a property or inside a list of one: `schema_any_property`,
-  `schema_any_property_alone`, `schema_list_any_property` and
-  `nested_list_property`. Two declare no ANY width at all —
-  `certified_list_element`, whose widest declared property is `INT64`, and
-  `list_unknown`, which declares one `INT64` property and nothing else — and get
-  the carrier from a list expression whose element type the resolver does not
-  fix: `RETURN [foo(p.id)]`, an unknown function's result, and `RETURN [p.id +
-  p.age]`, a fold over two declared `INT64` properties that mints no element
-  certificate. Neither route is a scalar column, which is the thing this bullet
-  is about. In each of the six, `agtypeMap` is named three times: its own
+  emitted, gated together on `helpers.value`. They reach a golden by more than
+  one route, and none of those routes is a null or map scalar column, which is
+  the thing this bullet is about. Measured 2026-10-04: at `cfe4a533`, 11 AGE
+  goldens emit `agtypeValue`, by two routes — an ANY width declared in the
+  SCHEMA (as a property, inside a list, or as a record field), and a list
+  expression whose element the resolver does not fix (`list_unknown`'s
+  `RETURN [foo(p.id)]`, `certified_list_element`'s `RETURN [p.id + p.age]`).
+  bd gqlc-2omj adds a third, a bare column of unknown type (`unknown_column`,
+  `unknown_entity_value`), and 13 goldens on that branch. The count is a
+  measurement at those commits, not a census that holds afterwards: grep the
+  goldens for `func agtypeValue` to re-take it. In each of the six, `agtypeMap` is named three times: its own
   declaration, that declaration's doc comment, and `agtypeValue`'s call on the
   `'{'` arm, which is the only CALL outside the helper.
   `agtypeMap` returns `map[string]any`, the same text the
@@ -314,6 +313,30 @@ scalar kinds is a decode helper, which is a different fix — below.
   failed. Inert today — neo4j refuses no temporal kind and no width the shared
   phases reach — and pre-existing for the width sentinel. The sentinel's doc
   states only what holds.
+
+- **A column of unknown type is served on AGE as `any`, and its dynamic type is
+  agtype's, not neo4j's.** Amended 2026-10-04 (bd gqlc-2omj, GH #2997). Until
+  then `unservedColumn` refused a bare unknown column, a refusal left over from
+  the scalar-only read path (#657), while neo4j served it and AGE already served
+  the same unknown as a list element. Both backends now plan it as `ColumnAny`
+  and hand the caller an `any`, but what is inside differs. The AGE column was
+  measured live on the pinned image; the neo4j column is the driver's
+  documented mapping and was not re-run for this amendment:
+
+  | value | neo4j | AGE |
+  |---|---|---|
+  | `a.dates[0]` over a `LIST<DATE>` | `dbtype.Date` | `string`, the ISO text AGE stores |
+  | `head(collect(p))`, `startNode(k)` | `dbtype.Node` / `dbtype.Relationship` | `map[string]any` of the object's `id`, `label`, `properties` (and an edge's `start_id`, `end_id`) |
+
+  The AGE half is `agtypeValue` reading the `::vertex` / `::edge` annotation off
+  the value; before this amendment it refused the annotated text, so an unknown
+  LIST ELEMENT holding an entity (`[startNode(k)]`) generated and then failed
+  every row. A `::path` is read as the `[]any` of its entities, but no path
+  reaches codegen today: the resolver refuses a path binding at R0. A caller
+  that type-switches on an `any` column has to know which backend it is
+  reading; neither backend narrows it. What would falsify the table: an `any`
+  column whose dynamic type is the same on both backends for one of those rows.
+  The AGE rows are pinned by `TestAGEServesAnUnknownColumnAsAny`.
 
 - `gqlc-yr3n` records the separate gap that AGE's served `Scalar` arms have no
   corpus reach: they are checked by a hand-written mirror of the table rather

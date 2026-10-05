@@ -251,12 +251,31 @@ func agtypeList[T any](raw []byte, decode func([]byte) (T, error)) ([]T, error) 
 // which is enough because agtype's structured values are self-delimiting
 // and its scalars share no opening byte.
 //
+// A whole vertex, edge or path is a value too, suffixed with the
+// annotation naming it. Under ::vertex or ::edge is a map — id, label,
+// properties, and an edge's start_id and end_id — and it lands on
+// map[string]any; under ::path is the list of the entities it walks, each
+// annotated in turn, and it lands on []any. An annotation over any other
+// body is refused rather than read as that body.
+//
 // Text outside that vocabulary is refused rather than carried through as
 // a string: a value of unknown shape is still a value, and reading
 // something that is not one as a value would put a fabricated Go value
 // in a caller's hands.
 func agtypeValue(raw []byte) (any, error) {
 	body := bytes.TrimSpace(raw)
+	for _, annotated := range [...]struct {
+		name string
+		open byte
+	}{{"vertex", '{'}, {"edge", '{'}, {"path", '['}} {
+		if entity, ok := bytes.CutSuffix(body, []byte("::"+annotated.name)); ok {
+			body = bytes.TrimSpace(entity)
+			if len(body) == 0 || body[0] != annotated.open {
+				return nil, fmt.Errorf("gqlc: %q is not an agtype %s", raw, annotated.name)
+			}
+			break
+		}
+	}
 	if len(body) == 0 {
 		return nil, fmt.Errorf("gqlc: %q is not an agtype value", raw)
 	}
