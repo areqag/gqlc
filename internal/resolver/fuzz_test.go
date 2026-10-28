@@ -161,8 +161,12 @@ func FuzzResolve(f *testing.F) {
 func openFinding(violation string) string {
 	if strings.Contains(violation, "is not unique") {
 		// Duplicate result column names (openCypher ColumnNameConflict) are
-		// checked by neither the parser nor the resolver. What this hides:
-		// nothing else, since wellFormedViolation checks names last.
+		// accepted by the parser and the resolver on purpose: ADR 0007 keeps
+		// ColumnNameConflict "accept-and-ignore, because generation-time
+		// acceptance plus runtime rejection on the original text is still the
+		// correct treatment", and codegen refuses two columns deriving one Row
+		// field (ErrRowFieldCollision). What this hides: nothing else, since
+		// wellFormedViolation checks names last.
 		return "gqlc-jjot2.19"
 	}
 	return ""
