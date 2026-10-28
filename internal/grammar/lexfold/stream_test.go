@@ -1,4 +1,4 @@
-package lexfold
+package lexfold_test
 
 import (
 	"fmt"
@@ -11,6 +11,7 @@ import (
 
 	cyphergen "github.com/areqag/gqlc/internal/grammar/cypher/gen"
 	gqlgen "github.com/areqag/gqlc/internal/grammar/gql/gen"
+	"github.com/areqag/gqlc/internal/grammar/lexfold"
 )
 
 // pieces mixes the syntax that opens each lexer context with a rune from every
@@ -65,11 +66,11 @@ func run(newLexer func(antlr.CharStream) antlr.Lexer, in antlr.CharStream) ([]le
 func TestFoldPreservesTokens(t *testing.T) {
 	lexers := []struct {
 		name  string
-		table Table
+		table lexfold.Table
 		new   func(antlr.CharStream) antlr.Lexer
 	}{
-		{"gql", GQL, func(s antlr.CharStream) antlr.Lexer { return gqlgen.NewGQLLexer(s) }},
-		{"cypher", Cypher, func(s antlr.CharStream) antlr.Lexer { return cyphergen.NewCypherLexer(s) }},
+		{"gql", lexfold.GQL, func(s antlr.CharStream) antlr.Lexer { return gqlgen.NewGQLLexer(s) }},
+		{"cypher", lexfold.Cypher, func(s antlr.CharStream) antlr.Lexer { return cyphergen.NewCypherLexer(s) }},
 	}
 	rng := rand.New(rand.NewPCG(1, 2))
 	for _, l := range lexers {
@@ -80,7 +81,7 @@ func TestFoldPreservesTokens(t *testing.T) {
 			}
 			src := b.String()
 			wantToks, wantErrs := run(l.new, antlr.NewIoStream(strings.NewReader(src)))
-			gotToks, gotErrs := run(l.new, NewStream(strings.NewReader(src), l.table))
+			gotToks, gotErrs := run(l.new, lexfold.NewStream(strings.NewReader(src), l.table))
 			require.Equal(t, wantToks, gotToks, "%s #%d tokens of %q", l.name, i, src)
 			require.Equal(t, wantErrs, gotErrs, "%s #%d errors of %q", l.name, i, src)
 		}
