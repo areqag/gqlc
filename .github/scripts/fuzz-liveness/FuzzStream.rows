@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+# Liveness rows for FuzzStream (internal/fuzzkit), run by `just fuzz-liveness
+# FuzzStream`: each row plants one defect in Stream with sed, in a scratch copy
+# of HEAD, and asks whether the harness reports it. The protocol and the
+# verdicts are driver.sh's; the recorded run, with every row's diff, is
+# docs/mutation/fuzz-liveness-FuzzStream.md.
+#
+# R2's condition — Byte returning 0xa7 straight after a 0x3c — is one no
+# committed seed meets (none carries 0xa7; the driver re-checks that on the
+# mutant before it fuzzes) and one a single inserted byte after the `<` in the
+# `compare` seed does.
+set -euo pipefail
+
+# SC1091: `just lint-hooks` runs shellcheck without -x, so it cannot follow the
+# source; driver.sh is linted in its own right by the same sweep.
+# shellcheck source=driver.sh disable=SC1091
+. "$(dirname "${BASH_SOURCE[0]}")/driver.sh"
+
+file=internal/fuzzkit/stream.go
+byte_fn='/^func (s \*Stream) Byte() byte {$/,/^}$/'
+seeds="go test -count=1 -run '^FuzzStream\$' ./internal/fuzzkit"
+# Expanded by driver.sh's `bash -c` in the copy, not here.
+# shellcheck disable=SC2016
+fuzz='just fuzz FuzzStream "$LIVENESS_BUDGET"'
+
+liveness_begin FuzzStream internal/fuzzkit
+
+liveness_control C1 "$seeds"
+liveness_control C2 "$fuzz"
+
+# R1 seed-reach: every input builds a Stream.
+liveness_row R1 "$file" \
+    '/^func NewStream(b \[\]byte) \*Stream {$/,/^}$/s/^\treturn &Stream{b: b}$/\tpanic("planted: R1")/' \
+    'panic: planted: R1' seeds "$seeds"
+
+# R2 mutation-reach.
+liveness_row R2 "$file" \
+    "${byte_fn}"'s/^\ts\.i++$/\ts.i++\n\tif c == 0xa7 {\n\t\tif s.i >= 2 \&\& s.b[s.i-2] == 0x3c {\n\t\t\tpanic("planted: R2")\n\t\t}\n\t}/' \
+    'panic: planted: R2' fuzz "$fuzz"
+
+# R3 slow call: R2's condition, sleeping 3 s instead of panicking. Both of
+# FuzzStream's streams read the trigger, so one guarded call takes ~6 s: past
+# Guard's 2 s limit and short of its 10 s watchdog, so this row is Guard's
+# after-the-fact report and nothing else.
+liveness_row R3 "$file" \
+    's/^import "strings"$/import (\n\t"strings"\n\t"time"\n)/
+'"${byte_fn}"'s/^\ts\.i++$/\ts.i++\n\tif c == 0xa7 {\n\t\tif s.i >= 2 \&\& s.b[s.i-2] == 0x3c {\n\t\t\ttime.Sleep(3 * time.Second)\n\t\t}\n\t}/' \
+    'fuzzkit\.Guard: slow input' fuzz "$fuzz"
+
+# R3b hang: R2's condition, never returning. Guard's watchdog ends the worker;
+# the engine reports a worker that terminated unexpectedly (the worker's own
+# panic text does not reach the coordinator's log) and writes the input.
+liveness_row R3b "$file" \
+    "${byte_fn}"'s/^\ts\.i++$/\ts.i++\n\tif c == 0xa7 {\n\t\tif s.i >= 2 \&\& s.b[s.i-2] == 0x3c {\n\t\t\tfor {\n\t\t\t}\n\t\t}\n\t}/' \
+    'hung or terminated unexpectedly|fuzzkit\.Guard: watchdog' fuzz "$fuzz"
+
+# R4a property: exhaustion stops reading as zeros. No panic follows from it.
+# Every seed reads past its end, so the seed pass kills this one.
+liveness_row R4a "$file" \
+    "${byte_fn}"'s/^\t\treturn 0$/\t\treturn 0xff/' \
+    'property exhaustion' property "$fuzz"
+
+# R4b property: Ident may return one rune more than maxLen. No panic follows,
+# and an exhausted stream still reads Int as 0, so the exhaustion property
+# cannot report it first.
+liveness_row R4b "$file" \
+    's/^\tn := 1 + s\.Int(maxLen)$/\tn := 1 + s.Int(maxLen+1)/' \
+    'property Ident length' property "$fuzz"
+
+liveness_end

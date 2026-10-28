@@ -4925,3 +4925,277 @@ pr-ready-drift:
 [private]
 check-pr-ready:
     python3 .github/scripts/pr_ready.py --self-test
+
+# ---- Nightly fuzzing (docs/specs/nightly-fuzzing-plan.md §9) ----
+#
+# None of these is a required context and `gates` does not call them: the
+# nightly workflow and a target's author run them, and nothing in .githooks/
+# does. The target set is never written down. `fuzz-list` derives it from the
+# tree on every call, and every other recipe here resolves a name through it,
+# so a target nobody enrolled is still fuzzed and a name the tree does not
+# have is refused rather than fuzzed as nothing.
+#
+# GQLC_FUZZ_CACHEDIR, when set, replaces $(go env GOCACHE)/fuzz as the root of
+# the engine's grown corpus for `fuzz`, `fuzz-smoke` and the three corpus
+# recipes alike. The liveness rows set it per row, so that a row's time-to-kill
+# is measured from the seeds alone and a mutant's corpus never lands in the
+# developer's real one.
+
+# Derives `name<TAB>package` for every Fuzz target in the root module from
+# `go test -list` (§8.2). `--json` prints the GitHub matrix instead, an array
+# of {name, package}; `--only=A,B` keeps the named targets and refuses a name
+# the tree does not have. Refuses an empty list and a duplicate name. ~8 s warm:
+# -list builds every test binary. Targets in a nested module (test/data/codegen)
+# are not discovered: `./...` stops at a module boundary.
+[positional-arguments]
+fuzz-list *flags:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    json=0
+    only=""
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --json) json=1 ;;
+            --only=*) only="${1#--only=}" ;;
+            *)
+                echo "error: fuzz-list: unknown flag '$1' (known: --json, --only=NAME[,NAME...])" >&2
+                exit 2
+                ;;
+        esac
+        shift
+    done
+    command -v jq >/dev/null 2>&1 || { echo "error: fuzz-list: jq is not installed" >&2; exit 1; }
+    scratch="$(mktemp -d)"
+    trap 'rm -rf "$scratch"' EXIT
+    cd {{ quote(justfile_directory()) }}
+    if ! go test -list '^Fuzz' -json ./... >"$scratch/list.json" 2>"$scratch/err"; then
+        echo "error: fuzz-list: go test -list failed, so the target set is unknown:" >&2
+        jq -r 'select(.Output != null and (.Action == "output" or .Action == "build-output")) | .Output' \
+            "$scratch/list.json" | command grep -v -e '^ok ' -e '^?' -e '^[[:space:]]*$' >&2 || true
+        cat "$scratch/err" >&2
+        exit 1
+    fi
+    # A name is an output line of its own package's test binary; -json carries
+    # the package on the line, so nothing here depends on line order.
+    jq -r 'select(.Action == "output" and (.Output | test("^Fuzz[A-Za-z0-9_]*\n$")))
+        | "\(.Output | rtrimstr("\n"))\t\(.Package)"' "$scratch/list.json" | sort >"$scratch/all"
+    if [ ! -s "$scratch/all" ]; then
+        echo "error: fuzz-list: no Fuzz target found under ./..., so a fuzz run would fuzz nothing and pass." >&2
+        exit 1
+    fi
+    dups="$(cut -f1 "$scratch/all" | uniq -d)"
+    if [ -n "$dups" ]; then
+        echo "error: fuzz-list: these names are declared in more than one package, so a name cannot pick one:" >&2
+        command grep -F -w -f <(printf '%s\n' "$dups") "$scratch/all" | sed 's/^/  /' >&2
+        exit 1
+    fi
+    if [ -n "$only" ]; then
+        : >"$scratch/picked"
+        IFS=, read -r -a wanted <<<"$only"
+        for w in "${wanted[@]}"; do
+            w="${w// /}"
+            [ -n "$w" ] || continue
+            if ! awk -F'\t' -v n="$w" '$1 == n { print; found = 1 } END { exit !found }' "$scratch/all" >>"$scratch/picked"; then
+                echo "error: fuzz-list: no Fuzz target named '$w' in the tree. Known:" >&2
+                cut -f1 "$scratch/all" | sed 's/^/  /' >&2
+                exit 1
+            fi
+        done
+        sort -u "$scratch/picked" >"$scratch/all"
+        if [ ! -s "$scratch/all" ]; then
+            echo "error: fuzz-list: --only='$only' names no target" >&2
+            exit 1
+        fi
+    fi
+    if [ "$json" -eq 1 ]; then
+        jq -cRn '[inputs | split("\t") | {name: .[0], package: .[1]}]' "$scratch/all"
+    else
+        cat "$scratch/all"
+    fi
+
+# Fuzzes one target for fuzztime (any Go duration), passing go's exit status
+# through: a crasher or a slow input is a red exit and a file under the
+# target's testdata/fuzz/<name>/. parallel empty means GOMAXPROCS. Prints where
+# the grown corpus lives at the end, red or green.
+fuzz name fuzztime="1m" parallel="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    line="$('{{ just_executable() }}' --justfile '{{ justfile() }}' fuzz-resolve {{ quote(name) }})"
+    '{{ just_executable() }}' --justfile '{{ justfile() }}' fuzz-run "${line%%$'\t'*}" "${line#*$'\t'}" {{ quote(fuzztime) }} {{ quote(parallel) }}
+
+# Every target in turn, fuzztime each: what a target's author runs before
+# opening the PR. Runs them all and then exits 1 naming the red ones.
+fuzz-smoke fuzztime="20s":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    list="$('{{ just_executable() }}' --justfile '{{ justfile() }}' fuzz-list)"
+    red=()
+    fuzztime={{ quote(fuzztime) }}
+    while IFS=$'\t' read -r name pkg; do
+        echo "== $name ($pkg) for $fuzztime"
+        '{{ just_executable() }}' --justfile '{{ justfile() }}' fuzz-run "$name" "$pkg" "$fuzztime" "" </dev/null || red+=("$name")
+    done <<<"$list"
+    if [ "${#red[@]}" -ne 0 ]; then
+        echo "error: fuzz-smoke: red: ${red[*]}" >&2
+        exit 1
+    fi
+    echo "fuzz-smoke: $(wc -l <<<"$list") target(s) green for $fuzztime each"
+
+# The seed pass alone, over every package that declares a target: what `just
+# test` already runs, isolated and uncached so a slow seed set is visible.
+fuzz-seeds:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    list="$('{{ just_executable() }}' --justfile '{{ justfile() }}' fuzz-list)"
+    mapfile -t pkgs < <(cut -f2 <<<"$list" | sort -u)
+    cd {{ quote(justfile_directory()) }}
+    go test -count=1 -run '^Fuzz' "${pkgs[@]}"
+
+# Replays one crasher, hash being its file name under testdata/fuzz/<name>/.
+# Refuses a hash with no such file, and a run in which that subtest never
+# started: `go test -run` matching nothing exits 0. A started subtest is the
+# proof, not a finished one, because a hang crasher kills the binary (Guard's
+# watchdog) before `--- FAIL` is printed.
+fuzz-repro name hash:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    line="$('{{ just_executable() }}' --justfile '{{ justfile() }}' fuzz-resolve {{ quote(name) }})"
+    name="${line%%$'\t'*}"
+    pkg="${line#*$'\t'}"
+    hash={{ quote(hash) }}
+    case "$hash" in
+        "" | */* | .*) echo "error: fuzz-repro: '$hash' is not a crasher file name" >&2; exit 1 ;;
+    esac
+    cd {{ quote(justfile_directory()) }}
+    module="$(go list -m)"
+    file="${pkg#"$module"/}/testdata/fuzz/$name/$hash"
+    if [ ! -f "$file" ]; then
+        echo "error: fuzz-repro: no crasher at $file" >&2
+        exit 1
+    fi
+    scratch="$(mktemp -d)"
+    trap 'rm -rf "$scratch"' EXIT
+    rc=0
+    go test -count=1 -v -run "^${name}\$/^${hash}\$" "$pkg" 2>&1 | tee "$scratch/out" || rc=$?
+    if ! command grep -Eq -e "^=== RUN +${name}/${hash}\$" -e "--- (PASS|FAIL): ${name}/${hash} " "$scratch/out"; then
+        echo "error: fuzz-repro: $name/$hash never started, so nothing was replayed" >&2
+        exit 1
+    fi
+    exit "$rc"
+
+# Where the engine keeps one target's grown corpus (§8.4).
+fuzz-corpus-path name:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    line="$('{{ just_executable() }}' --justfile '{{ justfile() }}' fuzz-resolve {{ quote(name) }})"
+    root="${GQLC_FUZZ_CACHEDIR:-$(go env GOCACHE)/fuzz}"
+    echo "$root/${line#*$'\t'}/${line%%$'\t'*}"
+
+# Copies one target's grown corpus to .fuzz-corpus/<name> (gitignored),
+# replacing what was there, for the workflow's cache to save. A target with no
+# grown corpus yet exports an empty directory and says so.
+fuzz-corpus-export name:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    line="$('{{ just_executable() }}' --justfile '{{ justfile() }}' fuzz-resolve {{ quote(name) }})"
+    src="$('{{ just_executable() }}' --justfile '{{ justfile() }}' fuzz-corpus-path {{ quote(name) }})"
+    dst={{ quote(justfile_directory() + "/.fuzz-corpus/") }}"${line%%$'\t'*}"
+    case "$dst" in
+        */.fuzz-corpus/Fuzz*) ;;
+        *) echo "error: fuzz-corpus-export: refusing to replace '$dst'" >&2; exit 1 ;;
+    esac
+    rm -rf "$dst"
+    mkdir -p "$dst"
+    if [ -d "$src" ]; then
+        cp -R "$src/." "$dst/"
+    fi
+    echo "fuzz-corpus-export: $(find "$dst" -type f | wc -l) file(s) from $src to $dst"
+
+# Copies .fuzz-corpus/<name> into the engine's corpus directory, adding to what
+# is there. No exported corpus is a cold start, said and not refused.
+fuzz-corpus-import name:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    line="$('{{ just_executable() }}' --justfile '{{ justfile() }}' fuzz-resolve {{ quote(name) }})"
+    dst="$('{{ just_executable() }}' --justfile '{{ justfile() }}' fuzz-corpus-path {{ quote(name) }})"
+    src={{ quote(justfile_directory() + "/.fuzz-corpus/") }}"${line%%$'\t'*}"
+    if [ ! -d "$src" ]; then
+        echo "fuzz-corpus-import: no $src, so this is a cold start"
+        exit 0
+    fi
+    mkdir -p "$dst"
+    cp -R "$src/." "$dst/"
+    echo "fuzz-corpus-import: $(find "$src" -type f | wc -l) file(s) from $src to $dst"
+
+# Runs the liveness rows (§10) for one target, or for every discovered target.
+# Every target must have a rows file, and every rows file a target: a target
+# without rows is one nobody has shown can find anything.
+fuzz-liveness name="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    dir={{ quote(justfile_directory() + "/.github/scripts/fuzz-liveness") }}
+    name={{ quote(name) }}
+    if [ -n "$name" ]; then
+        names="$name"
+        '{{ just_executable() }}' --justfile '{{ justfile() }}' fuzz-resolve "$name" >/dev/null
+    else
+        names="$('{{ just_executable() }}' --justfile '{{ justfile() }}' fuzz-list | cut -f1)"
+        orphans="$(comm -13 <(sort <<<"$names") <(find "$dir" -name '*.rows' -printf '%f\n' | sed 's/\.rows$//' | sort))"
+        if [ -n "$orphans" ]; then
+            echo "error: fuzz-liveness: rows for targets the tree does not have: $orphans" >&2
+            exit 1
+        fi
+    fi
+    red=()
+    for n in $names; do
+        if [ ! -f "$dir/$n.rows" ]; then
+            echo "error: fuzz-liveness: $n has no $dir/$n.rows" >&2
+            red+=("$n")
+            continue
+        fi
+        "$dir/$n.rows" || red+=("$n")
+    done
+    if [ "${#red[@]}" -ne 0 ]; then
+        echo "error: fuzz-liveness: red: ${red[*]}" >&2
+        exit 1
+    fi
+
+# Resolves one target name to its single `name<TAB>package` line, for every
+# recipe above that takes one. Refuses what is not one name before fuzz-list
+# sees it: fuzz-list reads "" as every target and "A,B" as two, and a caller
+# that went on to `rm -rf` a per-name path would act on all of them.
+[private]
+fuzz-resolve name:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    name={{ quote(name) }}
+    if ! [[ "$name" =~ ^Fuzz[A-Za-z0-9_]*$ ]]; then
+        echo "error: '$name' is not one fuzz target name (want Fuzz followed by letters, digits or _)" >&2
+        exit 1
+    fi
+    lines="$('{{ just_executable() }}' --justfile '{{ justfile() }}' fuzz-list --only="$name")"
+    count="$(command grep -c '' <<<"$lines")"
+    if [ "$count" -ne 1 ]; then
+        echo "error: '$name' resolved to $count lines, not 1" >&2
+        exit 1
+    fi
+    printf '%s\n' "$lines"
+
+# The one go test -fuzz invocation every fuzzing recipe above shares.
+[private]
+fuzz-run name pkg fuzztime parallel:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    name={{ quote(name) }}
+    pkg={{ quote(pkg) }}
+    parallel={{ quote(parallel) }}
+    cd {{ quote(justfile_directory()) }}
+    root="${GQLC_FUZZ_CACHEDIR:-$(go env GOCACHE)/fuzz}"
+    args=(-run '^$' -fuzz "^${name}\$" -fuzztime {{ quote(fuzztime) }})
+    if [ -n "$parallel" ]; then
+        args+=(-parallel "$parallel")
+    fi
+    rc=0
+    go test "${args[@]}" "$pkg" -args -test.fuzzcachedir="$root/$pkg" || rc=$?
+    echo "corpus: $root/$pkg/$name"
+    exit "$rc"
