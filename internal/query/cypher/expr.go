@@ -485,20 +485,20 @@ func aggregateArity(fn query.AggregateFunc) int {
 	return 1
 }
 
-// refuseAggregateArity fails the parse when any aggregate function call in the
-// tree has fewer arguments than its arity (ErrAggregateArity). The grammar
-// admits any count, including none, and the aggregate classifier and typer read
-// their operand from the first argument.
-//
-// Too MANY arguments is not refused here: collect(x, y) and min(x, y) parse,
-// and aggregateLeavesAreRefs' len(args) == 1 clause is what keeps them from
-// minting (certificate_test.go pins both).
+// refuseCallArity fails the parse when any unnamespaced function call in the
+// tree is applied to the wrong number of arguments or nests an aggregate: an
+// aggregate whose argument count differs from its arity (ErrAggregateArity), an
+// aggregate inside another aggregate's arguments (ErrNestedAggregate), or a
+// built-in scalar function outside its arity range (ErrFunctionArity). The
+// grammar admits any count, including none, and the aggregate classifier and
+// typer read their operand from the first argument. bd gqlc-jjot2.12 extended
+// the refusal from too few aggregate arguments to the exact count.
 //
 // It is a pre-walk sweep, like refuseEmptyIdentifiers, so one check covers
-// every position an aggregate call reaches — RETURN, WITH, ORDER BY, a rich
-// expression, an EXISTS subquery — instead of one check per read site, and so
-// EXISTS suppression inside the collection walk cannot drop it.
-func (l *listener) refuseAggregateArity(t antlr.Tree) {
+// every position a call reaches — RETURN, WITH, ORDER BY, a rich expression,
+// an EXISTS subquery — instead of one check per read site, and so EXISTS
+// suppression inside the collection walk cannot drop it.
+func (l *listener) refuseCallArity(t antlr.Tree) {
 	if t == nil || l.err != nil {
 		return
 	}
@@ -506,17 +506,118 @@ func (l *listener) refuseAggregateArity(t antlr.Tree) {
 		if name, ok := functionName(fi); ok {
 			if fn, ok := aggregateFunc(name); ok {
 				want, got := aggregateArity(fn), len(fi.AllOC_Expression())
-				if got < want {
+				if got != want {
 					l.fail(fmt.Errorf("%w: %s expects %d argument(s), got %d", ErrAggregateArity, name, want, got))
 					return
 				}
+				l.refuseNestedAggregate(name, fi)
+			} else {
+				l.refuseScalarArity(name, fi)
 			}
 		}
 	}
 	// No stop at a match, unlike findNodesOfType: calls nest (toString(sum())).
+	// A failure above ends the descent at the next call's l.err check.
 	for i := 0; i < t.GetChildCount(); i++ {
-		l.refuseAggregateArity(t.GetChild(i))
+		l.refuseCallArity(t.GetChild(i))
 	}
+}
+
+// refuseNestedAggregate fails the parse when an aggregate call's arguments
+// contain another aggregate: a call by name, or the count(*) atom. openCypher
+// refuses count(count(n)) as SyntaxError: NestedAggregation. An EXISTS
+// subquery is a query of its own, so an aggregate inside one is not nested in
+// the enclosing call and the search does not enter it.
+func (l *listener) refuseNestedAggregate(outer string, fi gen.IOC_FunctionInvocationContext) {
+	for _, arg := range fi.AllOC_Expression() {
+		if inner := findAggregate(arg); inner != "" {
+			l.fail(fmt.Errorf("%w: %s inside %s", ErrNestedAggregate, inner, outer))
+			return
+		}
+	}
+}
+
+// findAggregate returns the name of the first aggregate call in t, count(*)
+// included, or "" when there is none. It does not enter an EXISTS subquery.
+func findAggregate(t antlr.Tree) string {
+	switch n := t.(type) {
+	case gen.IOC_ExistentialSubqueryContext:
+		return ""
+	case gen.IOC_FunctionInvocationContext:
+		if name, ok := functionName(n); ok {
+			if _, ok := aggregateFunc(name); ok {
+				return name
+			}
+		}
+	case gen.IOC_AtomContext:
+		if n.COUNT() != nil {
+			return "count(*)"
+		}
+	}
+	for i := 0; i < t.GetChildCount(); i++ {
+		if name := findAggregate(t.GetChild(i)); name != "" {
+			return name
+		}
+	}
+	return ""
+}
+
+// scalarArity is the argument count range of each built-in scalar function
+// refuseScalarArity checks, keyed by lowercased name; max < 0 means no upper
+// bound. It is the openCypher 9 function set plus the Neo4j 5 built-ins that
+// carry no namespace, and where the two disagree the range admits both — a
+// name absent here is not refused at any count, so the table can only
+// under-refuse. The temporal constructors take an optional argument
+// (date() is today).
+var scalarArity = map[string]struct{ min, max int }{
+	// Scalar.
+	"coalesce": {1, -1}, "elementid": {1, 1}, "endnode": {1, 1}, "head": {1, 1},
+	"id": {1, 1}, "last": {1, 1}, "length": {1, 1}, "nullif": {2, 2},
+	"properties": {1, 1}, "randomuuid": {0, 0}, "size": {1, 1}, "startnode": {1, 1},
+	"timestamp": {0, 0}, "type": {1, 1}, "valuetype": {1, 1},
+	"char_length": {1, 1}, "character_length": {1, 1},
+	"toboolean": {1, 1}, "tobooleanornull": {1, 1}, "tofloat": {1, 1},
+	"tofloatornull": {1, 1}, "tointeger": {1, 1}, "tointegerornull": {1, 1},
+	// List.
+	"keys": {1, 1}, "labels": {1, 1}, "nodes": {1, 1}, "range": {2, 3},
+	"relationships": {1, 1}, "reverse": {1, 1}, "tail": {1, 1},
+	"tobooleanlist": {1, 1}, "tofloatlist": {1, 1}, "tointegerlist": {1, 1},
+	"tostringlist": {1, 1}, "isempty": {1, 1},
+	// Mathematical.
+	"abs": {1, 1}, "ceil": {1, 1}, "floor": {1, 1}, "isnan": {1, 1}, "rand": {0, 0},
+	"round": {1, 3}, "sign": {1, 1}, "e": {0, 0}, "exp": {1, 1}, "log": {1, 1},
+	"log10": {1, 1}, "sqrt": {1, 1}, "acos": {1, 1}, "asin": {1, 1}, "atan": {1, 1},
+	"atan2": {2, 2}, "cos": {1, 1}, "cosh": {1, 1}, "cot": {1, 1}, "coth": {1, 1},
+	"degrees": {1, 1}, "haversin": {1, 1}, "pi": {0, 0}, "radians": {1, 1},
+	"sin": {1, 1}, "sinh": {1, 1}, "tan": {1, 1}, "tanh": {1, 1},
+	// String.
+	"btrim": {1, 2}, "left": {2, 2}, "lower": {1, 1}, "ltrim": {1, 2},
+	"normalize": {1, 2}, "replace": {3, 3}, "right": {2, 2}, "rtrim": {1, 2}, //nolint:misspell // a Cypher built-in's name, spelt as the server spells it
+	"split": {2, 2}, "substring": {2, 3}, "tolower": {1, 1}, "tostring": {1, 1},
+	"tostringornull": {1, 1}, "toupper": {1, 1}, "trim": {1, 2}, "upper": {1, 1},
+	// Spatial and temporal.
+	"point": {1, 1}, "date": {0, 1}, "datetime": {0, 1}, "localdatetime": {0, 1},
+	"localtime": {0, 1}, "time": {0, 1}, "duration": {1, 1},
+}
+
+// refuseScalarArity fails the parse when a built-in scalar function in
+// scalarArity is applied outside its arity range (ErrFunctionArity). openCypher
+// reports it as SyntaxError: InvalidNumberOfArguments, the class
+// ErrAggregateArity answers for aggregates.
+func (l *listener) refuseScalarArity(name string, fi gen.IOC_FunctionInvocationContext) {
+	r, ok := scalarArity[name]
+	got := len(fi.AllOC_Expression())
+	if !ok || (got >= r.min && (r.max < 0 || got <= r.max)) {
+		return
+	}
+	want := fmt.Sprint(r.min)
+	switch {
+	case r.max < 0:
+		want = "at least " + want
+	case r.max != r.min:
+		want = fmt.Sprintf("%d to %d", r.min, r.max)
+	}
+	l.fail(fmt.Errorf("%w: %s expects %s argument(s), got %d", ErrFunctionArity, name, want, got))
 }
 
 // aggregateLeavesAreRefs decides whether an aggregate call mints the

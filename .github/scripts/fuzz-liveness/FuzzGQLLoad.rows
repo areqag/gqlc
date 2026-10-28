@@ -1,0 +1,76 @@
+#!/usr/bin/env bash
+# Liveness rows for FuzzGQLLoad (internal/schema/gql), run by `just
+# fuzz-liveness FuzzGQLLoad`: each row plants one defect in the COPY OF Loader
+# with sed, in a scratch copy of HEAD, and asks whether the harness reports it.
+# The protocol and the verdicts are driver.sh's; the recorded run, with every
+# row's diff, is docs/mutation/fuzz-liveness-FuzzGQLLoad.md.
+#
+# R2's condition, a referenced file declaring a different graph type name of
+# two or more characters, is one no committed seed meets (the one misnamed seed
+# declares `x`; the driver re-checks on the mutant before it fuzzes) and one a
+# single inserted byte in any seed's referenced name does.
+set -euo pipefail
+
+# SC1091: `just lint-hooks` runs shellcheck without -x, so it cannot follow the
+# source; driver.sh is linted in its own right by the same sweep.
+# shellcheck source=driver.sh disable=SC1091
+. "$(dirname "${BASH_SOURCE[0]}")/driver.sh"
+
+loader=internal/schema/gql/loader.go
+seeds="go test -count=1 -run '^FuzzGQLLoad\$' ./internal/schema/gql"
+# Expanded by driver.sh's `bash -c` in the copy, not here.
+# shellcheck disable=SC2016
+fuzz='just fuzz FuzzGQLLoad "$LIVENESS_BUDGET"'
+# The site R2, R3 and R3b plant on: the name check on a referenced file.
+misnamed='s/^\t\tif next\.name != ref\.name() {$/\t\tif next.name != ref.name() \&\& len(next.name) > 1 {\n\t\t\tPLANT\n\t\t}\n&/'
+
+liveness_begin FuzzGQLLoad internal/schema/gql
+
+liveness_control C1 "$seeds"
+liveness_control C2 "$fuzz"
+
+# R1 seed-reach: every Load records its root before following a chain.
+liveness_row R1 "$loader" \
+    's/^\tvisited := \[\]string{name}$/\tpanic("planted: R1")\n&/' \
+    'panic: planted: R1' seeds "$seeds"
+
+# R2 mutation-reach.
+liveness_row R2 "$loader" \
+    "${misnamed/PLANT/panic(\"planted: R2\")}" \
+    'panic: planted: R2' fuzz "$fuzz"
+
+# R3 slow call: R2's condition, sleeping 7 s: past Guard's 2 s limit and short
+# of its 10 s watchdog, so this row is Guard's after-the-fact report alone. The
+# evidence asks for the 7 s, not any slow input: every file Load reads goes
+# through the parser, which has a real slow input of its own (bd
+# gqlc-jjot2.17), and a kill by that one would not be this row's.
+liveness_row R3 "$loader" \
+    "${misnamed/PLANT/time.Sleep(7 * time.Second)}
+s/^\t\"strings\"$/\t\"strings\"\n\t\"time\"/" \
+    'fuzzkit\.Guard: slow input: the call took 7\.' fuzz "$fuzz"
+
+# R3b hang: R2's condition, never returning. Guard's watchdog ends the worker;
+# the engine reports a worker that terminated unexpectedly and writes the input.
+liveness_row R3b "$loader" \
+    "${misnamed/PLANT/for \{\\n\\t\\t\\t\}}" \
+    'hung or terminated unexpectedly|fuzzkit\.Guard: watchdog' fuzz "$fuzz"
+
+# R4a never hangs on a cycle: the cycle check is gone, so a chain that returns
+# to a file it visited reads it again forever. The cycle seeds reach it and
+# Guard's watchdog ends the seed pass.
+liveness_row R4a "$loader" \
+    's/^\t\tif slices\.Contains(visited, target) {$/\t\tif false \&\& slices.Contains(visited, target) {/' \
+    'fuzzkit\.Guard: watchdog' seeds "$seeds"
+
+# R4b property load agrees with parse: Load renames what it resolved, so a root
+# file with no COPY OF loads differently from how it parses.
+liveness_row R4b "$loader" \
+    's/^\tresolved\.Name = declared$/\tresolved.Name = declared + "_"/' \
+    'property load agrees with parse' property "$seeds"
+
+# R4c property error class: a dangling reference stops wrapping its sentinel.
+liveness_row R4c "$loader" \
+    's/^\(\t\t\treturn schema\.Schema{}, fmt\.Errorf("%s: COPY OF %s: \)%w\(: %s", from, ref\.text, ErrDanglingReference, target)\)$/\1%v\2/' \
+    'property error class' property "$seeds"
+
+liveness_end

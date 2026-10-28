@@ -173,6 +173,31 @@ func TestClassifyErrorCoversEveryClass(t *testing.T) {
 	}
 }
 
+// TestClassifyInputErrorDefusesAnEchoedMarker: the message below is the shape
+// gqlc-jjot2.18 measured, a sentinel whose detail quotes a name from the input.
+func TestClassifyInputErrorDefusesAnEchoedMarker(t *testing.T) {
+	echoed := fmt.Errorf("%w: bug:x", errSentinel)
+	cases := []struct {
+		name  string
+		input string
+		err   error
+		want  fuzzkit.ErrClass
+	}{
+		{"echoed marker reads as its sentinel", "RETURN `bug:x`", echoed, fuzzkit.ClassSentinel},
+		{"echoed marker on a plain error is plain", "bug:", errors.New("bug: x"), fuzzkit.ClassPlain},
+		{"echoed marker on a syntax error is syntax", "bug:", errors.New("syntax error near bug: x"), fuzzkit.ClassSyntax},
+		{"nil", "bug:", nil, fuzzkit.ClassNil},
+		// Without the marker in the input, it is ClassifyError exactly.
+		{"marker not in input is a bug", "RETURN x", echoed, fuzzkit.ClassBug},
+		{"no marker anywhere", "RETURN x", errSentinel, fuzzkit.ClassSentinel},
+	}
+	for _, tc := range cases {
+		if got := fuzzkit.ClassifyInputError(tc.input, tc.err, isSyntax, errSentinel); got != tc.want {
+			t.Errorf("%s: ClassifyInputError(%q, %v) = %s, want %s", tc.name, tc.input, tc.err, got, tc.want)
+		}
+	}
+}
+
 func TestClassifyErrorNilPredicateMatchesNothing(t *testing.T) {
 	if got := fuzzkit.ClassifyError(errSyntax, nil); got != fuzzkit.ClassPlain {
 		t.Fatalf("nil isSyntax: got %s, want plain", got)

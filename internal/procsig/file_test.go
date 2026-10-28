@@ -259,6 +259,73 @@ func TestDecodeRejects(t *testing.T) {
 			body:    `[]`,
 			wantSub: "decode",
 		},
+		// encoding/json matches keys without regard to case; §3 does not.
+		{
+			name:    "case-variant signature key",
+			body:    `{"signatures": [{"nAme": "test.p", "params": [], "results": []}]}`,
+			wantSub: `signatures[0]: unknown key "nAme" (keys are case-sensitive: name, params, results)`,
+		},
+		{
+			name:    "case-variant top-level key overwriting signatures",
+			body:    `{"signatures": [{"name": "test.p", "params": [], "results": []}], "Signatures": []}`,
+			wantSub: `top-level value: unknown key "Signatures" (keys are case-sensitive: signatures, version)`,
+		},
+		{
+			name:    "case-variant column key overwriting type",
+			body:    `{"signatures": [{"name": "test.p", "params": [{"name":"in","type":"INTEGER","nullable":true,"Type":"STRING"}], "results": []}]}`,
+			wantSub: `signatures[0].params[0]: unknown key "Type" (keys are case-sensitive: name, type, nullable)`,
+		},
+		{
+			name:    "case-variant version key",
+			body:    `{"Version": 1, "signatures": []}`,
+			wantSub: `top-level value: unknown key "Version"`,
+		},
+		// §3.2 and §3.3: params, results and nullable are required.
+		{
+			name:    "column without nullable",
+			body:    `{"signatures": [{"name": "test.p", "params": [{"name":"in","type":"INTEGER"}], "results": []}]}`,
+			wantSub: `signatures[0].params[0]: missing required key "nullable"`,
+		},
+		{
+			name:    "result column with null nullable",
+			body:    `{"signatures": [{"name": "test.p", "params": [], "results": [{"name":"out","type":"STRING","nullable":null}]}]}`,
+			wantSub: `signatures[0].results[0]: required key "nullable" is null`,
+		},
+		{
+			name:    "signature without results",
+			body:    `{"signatures": [{"name": "test.p", "params": []}]}`,
+			wantSub: `signatures[0]: missing required key "results"`,
+		},
+		{
+			name:    "signature without params",
+			body:    `{"signatures": [{"name": "test.p", "results": []}]}`,
+			wantSub: `signatures[0]: missing required key "params"`,
+		},
+		{
+			name:    "null params",
+			body:    `{"signatures": [{"name": "test.p", "params": null, "results": []}]}`,
+			wantSub: `signatures[0]: required key "params" is null`,
+		},
+		{
+			name:    "null results",
+			body:    `{"signatures": [{"name": "test.p", "params": [], "results": null}]}`,
+			wantSub: `signatures[0]: required key "results" is null`,
+		},
+		{
+			name:    "signature without name",
+			body:    `{"signatures": [{"params": [], "results": []}]}`,
+			wantSub: `signatures[0]: missing required key "name"`,
+		},
+		{
+			name:    "null signature element",
+			body:    `{"signatures": [null]}`,
+			wantSub: `signatures[0] must be a JSON object, got null`,
+		},
+		{
+			name:    "missing signatures key",
+			body:    `{}`,
+			wantSub: `top-level value: missing required key "signatures"`,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

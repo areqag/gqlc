@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+# Liveness rows for FuzzConfigDecode (internal/config), run by `just
+# fuzz-liveness FuzzConfigDecode`: each row plants one defect with sed, in a
+# scratch copy of HEAD, and asks whether the harness reports it. The protocol
+# and the verdicts are driver.sh's; the recorded run, with every row's diff, is
+# docs/mutation/fuzz-liveness-FuzzConfigDecode.md.
+#
+# R2's condition — a gen.go.out containing "//" — is one no committed seed
+# meets (the driver re-checks that on the mutant before it fuzzes) and one a
+# single "/" inserted beside another in the canonical file's out does.
+set -euo pipefail
+
+# SC1091: `just lint-hooks` runs shellcheck without -x, so it cannot follow the
+# source; driver.sh is linted in its own right by the same sweep.
+# shellcheck source=driver.sh disable=SC1091
+. "$(dirname "${BASH_SOURCE[0]}")/driver.sh"
+
+file=internal/config/config.go
+values_fn='s/^func checkTargetValues(w wireTarget, g \*wireGo) error {$/&\n\tif strings.Contains(*g.Out, "\/\/") {\n\t\t'
+seeds="go test -count=1 -run '^FuzzConfigDecode\$' ./internal/config"
+# Expanded by driver.sh's `bash -c` in the copy, not here.
+# shellcheck disable=SC2016
+fuzz='just fuzz FuzzConfigDecode "$LIVENESS_BUDGET"'
+
+liveness_begin FuzzConfigDecode internal/config
+
+liveness_control C1 "$seeds"
+liveness_control C2 "$fuzz"
+
+# R1 seed-reach: the canonical file's targets are each decoded.
+liveness_row R1 "$file" \
+    's/^func decodeTarget(w wireTarget) (Target, error) {$/&\n\tpanic("planted: R1")/' \
+    'panic: planted: R1' seeds "$seeds"
+
+# R2 mutation-reach.
+liveness_row R2 "$file" \
+    "${values_fn}"'panic("planted: R2")\n\t}/' \
+    'panic: planted: R2' fuzz "$fuzz"
+
+# R3 slow call: R2's condition, sleeping 1.5 s. The target decodes twice under
+# one Guard, so one such target costs 3 s: past the 2 s limit and short of the
+# 10 s watchdog.
+liveness_row R3 "$file" \
+    's/^\t"strings"$/&\n\t"time"/
+'"${values_fn}"'time.Sleep(1500 * time.Millisecond)\n\t}/' \
+    'fuzzkit\.Guard: slow input' fuzz "$fuzz"
+
+# R3b hang: R2's condition, never returning. Guard's watchdog ends the worker.
+liveness_row R3b "$file" \
+    "${values_fn}"'for {\n\t\t}\n\t}/' \
+    'hung or terminated unexpectedly|fuzzkit\.Guard: watchdog' fuzz "$fuzz"
+
+# R4 property: an enum field accepts any scalar. No panic follows and every
+# seed's enums are in their vocabularies, so the seed pass is green; a mutated
+# driver or language value then decodes, and the enum property reports it.
+liveness_row R4 "$file" \
+    's/^\treturn zero, fmt\.Errorf("line %d: invalid %s %q (valid values: %s)", value\.Line, wireKey, value\.Value, joinValues(valid))$/\treturn T(value.Value), nil/' \
+    'property enum' fuzz "$fuzz"
+
+liveness_end

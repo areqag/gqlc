@@ -6,6 +6,7 @@ import (
 	"github.com/antlr4-go/antlr/v4"
 
 	"github.com/areqag/gqlc/internal/grammar/gql/gen"
+	"github.com/areqag/gqlc/internal/grammar/lexfold"
 	"github.com/areqag/gqlc/internal/schema"
 )
 
@@ -35,7 +36,7 @@ func (parser) Parse(r io.Reader) (schema.Schema, error) {
 // Loader share one reading of a file and differ only in what they do with a
 // reference.
 func parse(r io.Reader) (rawSchema, error) {
-	lex := gen.NewGQLLexer(antlr.NewIoStream(r))
+	lex := gen.NewGQLLexer(lexfold.NewStream(r, lexfold.GQL))
 	ts := antlr.NewCommonTokenStream(lex, antlr.TokenDefaultChannel)
 	gp := gen.NewGQLParser(ts)
 

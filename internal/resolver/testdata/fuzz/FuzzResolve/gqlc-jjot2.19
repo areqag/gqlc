@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("1invalid/schemas/narrowed_ends_disagree.gql\nRETURN 0,0")

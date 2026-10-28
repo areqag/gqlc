@@ -1,0 +1,14 @@
+// Every enrolled target: the check runs in Phase Z, ahead of any type table.
+//
+// The spelling half of ErrPropertyFieldCollision, as record_field_unspellable
+// is of ErrRecordFieldCollision one container in: `first-name` mangles to a
+// name that is not a Go identifier, so the entity struct it would be emitted
+// into does not parse. Without the check the refusal arrived from go/format
+// as ErrFormatFailure naming models.go and a line number, a template bug
+// reported to an author whose schema is at fault (gqlc-jjot2.23, found by
+// FuzzGenerate).
+CREATE PROPERTY GRAPH TYPE PropertyFieldUnspellable AS {
+    (:Person {
+        `first-name` :: STRING NOT NULL
+    })
+}

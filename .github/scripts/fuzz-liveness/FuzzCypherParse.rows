@@ -1,0 +1,110 @@
+#!/usr/bin/env bash
+# Liveness rows for FuzzCypherParse (internal/query/cypher), run by `just
+# fuzz-liveness FuzzCypherParse`: each row plants one defect with sed, in a
+# scratch copy of HEAD, and asks whether the harness reports it. The protocol
+# and the verdicts are driver.sh's; the recorded run, with every row's diff, is
+# docs/mutation/fuzz-liveness-FuzzCypherParse.md.
+#
+# R2's condition is §3's class, an argument count: an aggregate call given
+# exactly one argument more than its arity (count(a, b), percentileCont(a, b,
+# c)). The grammar admits it, and the plant sits ahead of the refusal the
+# parser gives it since bd gqlc-jjot2.12, so the refusal does not hide it. No
+# committed seed carries one (the driver re-checks that on the mutant before it
+# fuzzes), so the gqlc-jjot2.12 seeds are a zero-argument call and a nested
+# aggregate rather than the bead's too-many rows; one inserted ", x" inside any
+# seed's aggregate call does.
+set -euo pipefail
+
+# SC1091: `just lint-hooks` runs shellcheck without -x, so it cannot follow the
+# source; driver.sh is linted in its own right by the same sweep.
+# shellcheck source=driver.sh disable=SC1091
+. "$(dirname "${BASH_SOURCE[0]}")/driver.sh"
+
+pkg=internal/query/cypher
+expr="$pkg/expr.go"
+build="$pkg/build.go"
+# R2's condition with PLANT standing for its body. Each body is a variable of
+# its own because the replacement half of ${arity/PLANT/...} undergoes quote
+# removal, which would eat a literal \n.
+arity='s/^\t\t\t\twant, got := aggregateArity(fn), len(fi\.AllOC_Expression())$/&\n\t\t\t\tif got == want+1 {\n\t\t\t\t\tPLANT\n\t\t\t\t}/'
+plant_panic='panic("planted: R2")'
+plant_sleep='time.Sleep(3 * time.Second)'
+plant_hang='for {\n\t\t\t\t\t}'
+seeds="go test -count=1 -run '^FuzzCypherParse\$' ./$pkg"
+# Expanded by driver.sh's `bash -c` in the copy, not here.
+# shellcheck disable=SC2016
+fuzz='just fuzz FuzzCypherParse "$LIVENESS_BUDGET"'
+
+liveness_begin FuzzCypherParse "$pkg"
+
+liveness_control C1 "$seeds"
+liveness_control C2 "$fuzz"
+
+# R1 seed-reach: every input that walks without an error is built.
+liveness_row R1 "$build" \
+    '/^func (l \*listener) build() (query\.Query, error) {$/,/^}$/s/^\tbranches := make(\[\]query\.Branch, 0, len(l\.branches))$/\tpanic("planted: R1")\n&/' \
+    'panic: planted: R1' seeds "$seeds"
+
+# R2 mutation-reach.
+liveness_row R2 "$expr" \
+    "${arity/PLANT/$plant_panic}" \
+    'panic: planted: R2' fuzz "$fuzz"
+
+# R3 slow call: R2's condition, sleeping 3 s instead of panicking. Past
+# Guard's 2 s limit and short of its 10 s watchdog, so the first guarded call
+# returns late and Guard's Fatalf reports it.
+liveness_row R3 "$expr" \
+    's/^\t"fmt"$/&\n\t"time"/
+'"${arity/PLANT/$plant_sleep}" \
+    'fuzzkit\.Guard: slow input' fuzz "$fuzz"
+
+# R3b hang: R2's condition, never returning. Guard's watchdog ends the worker
+# and the engine reports a worker that terminated unexpectedly.
+liveness_row R3b "$expr" \
+    "${arity/PLANT/$plant_hang}" \
+    'hung or terminated unexpectedly|fuzzkit\.Guard: watchdog' fuzz "$fuzz"
+
+# The property rows. Each breaks one property without a panic, on a shape the
+# committed seeds already carry, so the seed pass reports it: they show the
+# property is checked, and name the property that fired.
+
+# R4a zero on error: a refused query comes back with a non-zero Query.
+liveness_row R4a "$pkg/parser.go" \
+    's/^\t\treturn query\.Query{}, err$/\t\treturn query.Query{StatementKind: query.StatementWrite}, err/' \
+    'property zero on error' property "$fuzz"
+
+# R4b error class: ErrAggregateArity's fail site formats the sentinel with %v,
+# so the error no longer wraps it and reads as plain. The F0 crasher
+# (testdata/fuzz/FuzzCypherParse/gqlc-jjot2.1) is the seed that reaches it.
+liveness_row R4b "$expr" \
+    's/fmt\.Errorf("%w: %s expects %d argument(s), got %d", ErrAggregateArity/fmt.Errorf("%v: %s expects %d argument(s), got %d", ErrAggregateArity/' \
+    'property error class: .* returned a plain error' property "$fuzz"
+
+# R4c model invariants: every parameter is listed twice.
+liveness_row R4c "$build" \
+    's/^\t\tparams = append(params, \*p)$/\t\tparams = append(params, *p, *p)/' \
+    'is not deduped' property "$fuzz"
+
+# R4d marshal: StatementKind refuses to marshal, so every parsed Query does.
+liveness_row R4d internal/query/query.go \
+    '/^func (k StatementKind) MarshalJSON() (\[\]byte, error) {$/,/^}$/s/^\treturn json\.Marshal(k\.String())$/\treturn nil, errors.New("planted: R4d")/' \
+    'property marshal' property "$fuzz"
+
+# R4e determinism: package state makes every second successful Parse report a
+# write statement, so the two calls on one input disagree.
+liveness_row R4e "$build" \
+    's/^func (l \*listener) build() (query\.Query, error) {$/var plantedCalls int\n\n&/
+s/^\tq\.ComprehensionPaths = l\.comprehensionPaths$/&\n\tplantedCalls++\n\tif plantedCalls%2 == 0 {\n\t\tq.StatementKind = query.StatementWrite\n\t}/' \
+    'property determinism' property "$fuzz"
+
+# R5 the classifier's defusing: without it, a query that spells "bug:" in a
+# delimited name is refused with a sentinel whose message echoes the marker,
+# and the marker reads as a bug. The committed seed
+# testdata/fuzz/FuzzCypherParse/echoed-bug-marker is that query. This row
+# mutates the kit's input-aware classifier (fuzzkit.ClassifyInputError,
+# gqlc-jjot2.18), not the parser: it shows the correction is load-bearing.
+liveness_row R5 internal/fuzzkit/fuzzkit.go \
+    's/^\treturn classify(err, !strings\.Contains(input, bugMarker), isSyntax, sentinels)$/\treturn classify(err, true, isSyntax, sentinels)/' \
+    'property error class: .* returned a bug error' property "$fuzz"
+
+liveness_end

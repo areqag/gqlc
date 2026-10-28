@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+# Liveness rows for FuzzPropertyType (internal/graph), run by `just
+# fuzz-liveness FuzzPropertyType`: each row plants one defect with sed, in a
+# scratch copy of HEAD, and asks whether the harness reports it. The protocol
+# and the verdicts are driver.sh's; the recorded run, with every row's diff, is
+# docs/mutation/fuzz-liveness-FuzzPropertyType.md.
+#
+# R2's condition — UnionOf handed exactly four members — is one no committed
+# seed meets (their unions have two or three; the driver re-checks that on the
+# mutant before it fuzzes) and one a single replaced count byte does.
+set -euo pipefail
+
+# SC1091: `just lint-hooks` runs shellcheck without -x, so it cannot follow the
+# source; driver.sh is linted in its own right by the same sweep.
+# shellcheck source=driver.sh disable=SC1091
+. "$(dirname "${BASH_SOURCE[0]}")/driver.sh"
+
+file=internal/graph/propertytype.go
+union_fn='s/^func UnionOf(members \[\]UnionMember) PropertyType {$/&\n\tif len(members) == 4 {\n\t\t'
+seeds="go test -count=1 -run '^FuzzPropertyType\$' ./internal/graph"
+# Expanded by driver.sh's `bash -c` in the copy, not here.
+# shellcheck disable=SC2016
+fuzz='just fuzz FuzzPropertyType "$LIVENESS_BUDGET"'
+
+liveness_begin FuzzPropertyType internal/graph
+
+liveness_control C1 "$seeds"
+liveness_control C2 "$fuzz"
+
+# R1 seed-reach: two seeds build records.
+liveness_row R1 "$file" \
+    's/^func RecordOf(fields \[\]RecordField) PropertyType {$/&\n\tpanic("planted: R1")/' \
+    'panic: planted: R1' seeds "$seeds"
+
+# R2 mutation-reach.
+liveness_row R2 "$file" \
+    "${union_fn}"'panic("planted: R2")\n\t}/' \
+    'panic: planted: R2' fuzz "$fuzz"
+
+# R3 slow call: R2's condition, sleeping 1 s. One exec builds the tree three
+# times and check rebuilds each subtree once per ancestor, so a four-member
+# union at the root costs 3 s and one at the deepest level about 7 s: past the
+# 2 s limit and short of the 10 s watchdog.
+liveness_row R3 "$file" \
+    's/^\t"strings"$/&\n\t"time"/
+'"${union_fn}"'time.Sleep(time.Second)\n\t}/' \
+    'fuzzkit\.Guard: slow input' fuzz "$fuzz"
+
+# R3b hang: R2's condition, never returning. Guard's watchdog ends the worker.
+liveness_row R3b "$file" \
+    "${union_fn}"'for {\n\t\t}\n\t}/' \
+    'hung or terminated unexpectedly|fuzzkit\.Guard: watchdog' fuzz "$fuzz"
+
+# R4 property: RecordOf stops sorting its fields. No panic follows; a seed
+# hands a record its fields as b, a, so the seed pass reports the
+# canonicalisation property (the reordered build differs) or read-back.
+liveness_row R4 "$file" \
+    '/^\tslices\.SortFunc(sorted, func(a, b RecordField) int { return strings\.Compare(a\.Name, b\.Name) })$/d' \
+    'property (canonicalisation|read-back)' property "$fuzz"
+
+liveness_end

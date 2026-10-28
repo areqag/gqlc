@@ -1,0 +1,2 @@
+go test fuzz v1
+string("MATCH r =()MATCH r =()RETURN 0")

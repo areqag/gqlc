@@ -873,15 +873,26 @@ func (s *scope) demoteGroupsOf(groups optionalGroups, v string) bool {
 // SeedLocalNullability's re-MATCH override or from the 5xg pre-pass) is a
 // proven witness for its carried group. Fire that closure before the
 // edge-driven fixed point so a carried group without a local edge witness
-// still demotes. Map iteration order is unobservable here: demoteGroup
-// writes false idempotently to each member's table entry, so any visit
-// order converges to the same fixed point.
+// still demotes.
+//
+// "Already false" means before this pass: the witnesses are collected first
+// and only then fired. Firing while ranging the map let a name this pass had
+// just demoted fire its own groups too, or not, depending on whether the map
+// reached it before or after the demotion. A carried name re-referenced by a
+// later OPTIONAL MATCH is a member of that group as well, so the later group's
+// nullability followed map order (gqlc-jjot2.20). Collecting first gives the
+// answer the same query gives without the WITH, where proving one member of
+// the first OPTIONAL group does not prove a later one that re-references it.
 func (s *scope) demoteProvenGroups(groups optionalGroups) {
-	for name, gs := range groups.groupsOf {
+	var proven []string
+	for name := range groups.groupsOf {
 		if nb, present := s.nullableBinding[name]; present && !nb {
-			for _, g := range gs {
-				s.demoteGroup(groups, g)
-			}
+			proven = append(proven, name)
+		}
+	}
+	for _, name := range proven {
+		for _, g := range groups.groupsOf[name] {
+			s.demoteGroup(groups, g)
 		}
 	}
 }

@@ -335,6 +335,11 @@ func TestEmittedScopeIsGeneratorOwned(t *testing.T) {
 // through every plan.
 const blankParam = "_"
 
+// unspellableParams are the parameter names whose mangle is not a Go
+// field name: $_ (empty), and a numbered parameter, which keeps its
+// leading digit (gqlc-jjot2.21, found by FuzzGenerate).
+var unspellableParams = []string{blankParam, "0"}
+
 // TestBlankParameterReachesOnlyTheSingleParameterForm holds both halves
 // of the residue $_ leaves, so neither can move unnoticed.
 //
@@ -367,28 +372,30 @@ func TestBlankParameterReachesOnlyTheSingleParameterForm(t *testing.T) {
 
 	probe := newScopeProbe(t)
 	for _, target := range probe.targets {
-		t.Run(target, func(t *testing.T) {
-			batch := probe.batch(target)
-			want := boundScopes(t, probe.emit(t, target, unclaimedParam, spellable))
-			require.NotEmpty(t, want, "the emission binds no identifiers to compare")
+		for _, name := range unspellableParams {
+			t.Run(target+"/$"+name, func(t *testing.T) {
+				batch := probe.batch(target)
+				want := boundScopes(t, probe.emit(t, target, unclaimedParam, spellable))
+				require.NotEmpty(t, want, "the emission binds no identifiers to compare")
 
-			in, err := batch.input(blankParam, spellable)
-			require.NoError(t, err, "a query parameter cannot be named %q", blankParam)
-			files := probe.generate(t, target, in)
-			requireParameterReachesTheWire(t, files, blankParam)
-			require.Equal(t, want, boundScopes(t, files),
-				"a query parameter named %q changed what the emission binds", blankParam)
+				in, err := batch.input(name, spellable)
+				require.NoError(t, err, "a query parameter cannot be named %q", name)
+				files := probe.generate(t, target, in)
+				requireParameterReachesTheWire(t, files, name)
+				require.Equal(t, want, boundScopes(t, files),
+					"a query parameter named %q changed what the emission binds", name)
 
-			all, err := batch.input(blankParam, probeParamPlans)
-			require.NoError(t, err)
-			_, err = probe.tryGenerate(t, target, all)
-			require.Error(t, err,
-				"the two-or-more form now emits for a $_ parameter: drop this arm and sweep $_ with every other candidate in TestEmittedScopeIsGeneratorOwned")
-			require.ErrorIs(t, err, codegen.ErrOutOfC6Scope,
-				"the two-or-more form refuses a $_ parameter for some other reason than having no Go field spelling; ErrFormatFailure here means the refusal moved back to gofmt")
-			require.Contains(t, err.Error(), "$"+blankParam,
-				"the refusal does not name the parameter the author has to rename")
-		})
+				all, err := batch.input(name, probeParamPlans)
+				require.NoError(t, err)
+				_, err = probe.tryGenerate(t, target, all)
+				require.Error(t, err,
+					"the two-or-more form now emits for a $%s parameter: drop it from unspellableParams and sweep it with every other candidate in TestEmittedScopeIsGeneratorOwned", name)
+				require.ErrorIs(t, err, codegen.ErrOutOfC6Scope,
+					"the two-or-more form refuses a $%s parameter for some other reason than having no Go field spelling; ErrFormatFailure here means the refusal moved back to gofmt", name)
+				require.Contains(t, err.Error(), "$"+name,
+					"the refusal does not name the parameter the author has to rename")
+			})
+		}
 	}
 }
 

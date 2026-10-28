@@ -1557,33 +1557,6 @@ var mustParse = map[string]struct {
 			},
 		}),
 	},
-	// aggregate-kind-rich-exprs spec §4.5 pin #11 — count(count(*))
-	// at unit level (Blocker 4). Today: functionArgRefs rejects the
-	// count(*) argument (star atom is not var/var.prop and not a
-	// scalar literal) → fall through → classifyRichExpression yields
-	// ExprProjection{nil, TypeInt} (inner count(*) types TypeInt via
-	// typeAtom.COUNT arm, outer aggregateResultType(AggCount, TypeInt)
-	// = TypeInt). Target: AggregateProjection{AggCount, nil, false,
-	// TypeInt} — the outer count's kind enters the model; the inner
-	// count(*) stays a rich sub-expression the model does NOT expose
-	// (spec §1.3 asymmetry: outer aggregate visible, inner aggregate
-	// invisible). Parser disposition preserved bit-for-bit: the engine
-	// still raises NestedAggregation at compile time (bucket 3 per
-	// ADR 0007). Godog-corpus scenario [14] Aggregates in aggregates
-	// remains skiplist-pending under catGroupingKeySemantic (§4.7).
-	"aggregate count of count star": {
-		src: "RETURN count(count(*))",
-		want: oneBranch(query.Part{
-			Returns: []query.ReturnItem{
-				{Name: "count(count(*))", Value: query.NewAggregateProjection(
-					query.AggCount,
-					nil,
-					false,
-					query.TypeInt{},
-				)},
-			},
-		}),
-	},
 	// Stage 11 — EXISTS inline-pattern form inside WHERE (ExistentialSubquery1
 	// [1]). The subquery's inner NodeBinding (the anonymous target of `(n)-->()`)
 	// must NOT leak into the outer part's Bindings: after Stage 11 the outer
@@ -3223,13 +3196,43 @@ var mustReject = map[string]struct {
 	// grammar admits any argument count and no TCK scenario writes one,
 	// so there is nothing verbatim to take; the query is the fuzz probe's
 	// reproducer, which panicked the aggregate classifier before the
-	// refusal existed. Fail-site: refuseAggregateArity, the pre-walk
+	// refusal existed. Fail-site: refuseCallArity, the pre-walk
 	// sweep in listener.walk. The per-function and per-position rows live
 	// in aggregate_arity_test.go; this pin exists so the sentinel is
 	// reachable from the canonical sweep.
 	"zero-argument aggregate call": {
 		query: "RETURN Count()",
 		want:  cypher.ErrAggregateArity,
+	},
+	// AUTHORED (gqlc-jjot2.16): a hop-range bound past int64. The grammar
+	// admits an integer literal of any length and no TCK scenario writes
+	// one; the query is the fuzz finding's reproducer. Fail-site:
+	// edgeHopsFromRangeLiteral. The per-position and per-spelling rows live
+	// in hop_range_test.go; this pin exists so the sentinel is reachable
+	// from the canonical sweep.
+	"hop-range bound past int64": {
+		query: "MATCH()-[*9227000000000000000]-()RETURN 0",
+		want:  cypher.ErrIntegerOverflow,
+	},
+	// VERBATIM from Return6 [14] Aggregates in aggregates, which expects
+	// SyntaxError: NestedAggregation. Until gqlc-jjot2.12 this was a
+	// mustParse row and the scenario sat on the skiplist under
+	// catGroupingKeySemantic: the outer count entered the model and the
+	// inner count(*) stayed an invisible rich sub-expression. Fail-site:
+	// refuseNestedAggregate, under the pre-walk sweep refuseCallArity. The
+	// per-shape rows live in aggregate_arity_test.go.
+	"aggregates in aggregates": {
+		query: "RETURN count(count(*))",
+		want:  cypher.ErrNestedAggregate,
+	},
+	// AUTHORED (gqlc-jjot2.12): a built-in scalar function with no
+	// argument. The grammar admits any argument count and no TCK scenario
+	// writes one. Fail-site: refuseScalarArity, under the pre-walk sweep
+	// refuseCallArity. The per-function rows live in
+	// aggregate_arity_test.go.
+	"zero-argument scalar function call": {
+		query: "RETURN size()",
+		want:  cypher.ErrFunctionArity,
 	},
 }
 
@@ -3571,7 +3574,10 @@ func TestPropertyReferentialIntegrity(t *testing.T) {
 // endpoints) resolve against that part's bindings OR a name the prior part's WITH
 // exported into it (the per-part scope §4). It threads the exported-name set left
 // to right across parts within each branch; parameters are query-wide and must
-// resolve against the union of every part's bindings.
+// resolve against the union of every part's bindings and projected names. The
+// projected names are there because a WHERE after a WITH compares against the
+// WITH's aliases (`WITH count(a) AS c WHERE c = $p`, admitted by gqlc-dvd1), so
+// a parameter use may name an alias that no MATCH bound.
 func assertReferentialIntegrity(rt *rapid.T, q query.Query, src string) {
 	allNamed := make(map[string]bool)
 	for _, br := range q.Branches {
@@ -3580,6 +3586,9 @@ func assertReferentialIntegrity(rt *rapid.T, q query.Query, src string) {
 				if v := bindingVariable(b); v != "" {
 					allNamed[v] = true
 				}
+			}
+			for _, r := range part.Returns {
+				allNamed[r.Name] = true
 			}
 		}
 	}
@@ -3730,6 +3739,9 @@ func assertParametersDeduped(rt *rapid.T, q query.Query, src string) {
 // bindingVariable reads the variable of any binding variant via its accessor.
 // Stage 8: PathBinding joins the sum with an always-non-empty variable.
 // Stage 9: UnwindBinding joins the sum with an always-non-empty variable.
+// Stage 14: CallBinding joins the sum with an always-non-empty variable. It was
+// missing here until FuzzCypherParse's seeds met a parsed CALL: the corpus
+// property parses with no registry, so every CALL was refused before it.
 func bindingVariable(b query.Binding) string {
 	switch v := b.(type) {
 	case query.NodeBinding:
@@ -3739,6 +3751,8 @@ func bindingVariable(b query.Binding) string {
 	case query.PathBinding:
 		return v.Variable()
 	case query.UnwindBinding:
+		return v.Variable()
+	case query.CallBinding:
 		return v.Variable()
 	default:
 		return ""

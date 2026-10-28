@@ -130,14 +130,17 @@ func partScope(rp *rawPart, imported map[string]bool) (map[string]bool, error) {
 	// (a preceding MATCH bound r as a node, and this MATCH used r = (...))
 	// is a kind conflict — three-way (node/edge/path), extending the
 	// Stage 0..7 two-way check (§1.6).
+	//
+	// A path variable bound twice in one part (MATCH p = (a) MATCH p = (b),
+	// or MATCH p = (a), p = (b)) is the same collision: openCypher reports it
+	// as VariableAlreadyBound, and the model holds one binding per name
+	// (bd gqlc-jjot2.15).
+	pathByVar := make(map[string]bool, len(rp.pathBindings))
 	for _, pb := range rp.pathBindings {
-		if _, ok := rp.byVar[pb.Variable()]; ok {
+		if _, ok := rp.byVar[pb.Variable()]; ok || pathByVar[pb.Variable()] {
 			return nil, fmt.Errorf("%w: %s", ErrVariableKindConflict, pb.Variable())
 		}
 		scope[pb.Variable()] = true
-	}
-	pathByVar := make(map[string]bool, len(rp.pathBindings))
-	for _, pb := range rp.pathBindings {
 		pathByVar[pb.Variable()] = true
 	}
 	unwindByVar, err := addUnwindScope(rp, scope, pathByVar)
