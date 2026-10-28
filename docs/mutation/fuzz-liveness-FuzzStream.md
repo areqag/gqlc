@@ -13,7 +13,9 @@ which executes `.github/scripts/fuzz-liveness/FuzzStream.rows` through
 
 ## The run
 
-Measured 2026-10-27 at `cc6680a7` (branch `feat/gqlc-jjot2.2-fuzzkit`),
+Measured 2026-10-27 at `cc6680a7` (branch `feat/gqlc-jjot2.2-fuzzkit`, before a
+rebase onto master that changed no file under `internal/fuzzkit` or
+`.github/scripts/fuzz-liveness`),
 go1.27.3, 24 CPUs, default `-parallel`, budget `LIVENESS_BUDGET=5m`. Every
 row and control started from an empty grown corpus (`GQLC_FUZZ_CACHEDIR` set
 per row), so the times are from the committed seeds alone. Wall time includes
