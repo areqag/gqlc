@@ -6,6 +6,7 @@ import (
 	"github.com/antlr4-go/antlr/v4"
 
 	"github.com/areqag/gqlc/internal/grammar/cypher/gen"
+	"github.com/areqag/gqlc/internal/grammar/lexfold"
 )
 
 // Call is one function invocation a query text spells, and where in that text
@@ -63,7 +64,7 @@ type Call struct {
 // TestUnqualifiedFunctionCallsIsTotal and
 // TestUnqualifiedFunctionCallsWritesNothingToStderr.
 func UnqualifiedFunctionCalls(src string) []Call {
-	lex := gen.NewCypherLexer(antlr.NewInputStream(src))
+	lex := gen.NewCypherLexer(lexfold.NewStream(strings.NewReader(src), &lexfold.Cypher))
 	cp := gen.NewCypherParser(antlr.NewCommonTokenStream(lex, antlr.TokenDefaultChannel))
 	lex.RemoveErrorListeners()
 	cp.RemoveErrorListeners()
@@ -123,7 +124,7 @@ type QualifiedCall struct {
 // TestQualifiedFunctionCallsIsTotal and
 // TestQualifiedFunctionCallsWritesNothingToStderr.
 func QualifiedFunctionCalls(src string) []QualifiedCall {
-	lex := gen.NewCypherLexer(antlr.NewInputStream(src))
+	lex := gen.NewCypherLexer(lexfold.NewStream(strings.NewReader(src), &lexfold.Cypher))
 	cp := gen.NewCypherParser(antlr.NewCommonTokenStream(lex, antlr.TokenDefaultChannel))
 	lex.RemoveErrorListeners()
 	cp.RemoveErrorListeners()

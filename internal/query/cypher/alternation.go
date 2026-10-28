@@ -1,9 +1,12 @@
 package cypher
 
 import (
+	"strings"
+
 	"github.com/antlr4-go/antlr/v4"
 
 	"github.com/areqag/gqlc/internal/grammar/cypher/gen"
+	"github.com/areqag/gqlc/internal/grammar/lexfold"
 )
 
 // Alternation is one relationship-type alternation a query text spells, and
@@ -78,7 +81,7 @@ type Alternation struct {
 // signature registry, unlike Parse: the walk is syntactic, so a CALL that only
 // resolves against a registry is read the same way with or without one.
 func RelationshipTypeAlternations(src string) []Alternation {
-	lex := gen.NewCypherLexer(antlr.NewInputStream(src))
+	lex := gen.NewCypherLexer(lexfold.NewStream(strings.NewReader(src), &lexfold.Cypher))
 	cp := gen.NewCypherParser(antlr.NewCommonTokenStream(lex, antlr.TokenDefaultChannel))
 	lex.RemoveErrorListeners()
 	cp.RemoveErrorListeners()
