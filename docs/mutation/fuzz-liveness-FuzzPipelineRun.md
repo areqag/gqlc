@@ -49,25 +49,33 @@ missing a backend).
 
 ## The run
 
-Measured 2026-10-28 at `e71bcf5f` (branch `feat/gqlc-jjot2.9-fuzz-pipeline`),
-go1.27.3, 24 CPUs shared with five other agents' fuzzing (load average 30–66),
-`-parallel 4`, budget `LIVENESS_BUDGET=5m`. Every row and control started
-from an empty grown corpus (`GQLC_FUZZ_CACHEDIR` set per row). Wall time
-includes `just fuzz`'s own `fuzz-list` discovery. The run was made twice; the
-table is the second, and the first's times are in the last column.
+Recorded 2026-10-28 at `9e41b230` (branch `feat/gqlc-jjot2.9-fuzz-pipeline`).
+That commit carries the batch branch's `fuzz-run` change for gqlc-jjot2.25
+(`6ffc5c61` and `aff40090`, cherry-picked from `4e7d9b9d` and `1956ea44`), so
+`just fuzz` passes `-fuzzminimizetime 10x`. Run with go1.27.3 on 24 CPUs
+shared with five other agents' fuzzing (load average 30–66), `-parallel 4`,
+budget `LIVENESS_BUDGET=5m`. Every row and control started from an empty
+grown corpus (`GQLC_FUZZ_CACHEDIR` set per row). Wall time includes
+`just fuzz`'s own `fuzz-list` discovery. The rows were run four times; the
+table is the fourth, and the last column gives the first two runs, made at
+`e71bcf5f` under go's default 60 s minimize budget.
 
 The md5 columns pin **movement, not identity** (see [README](README.md)).
 
-| row | kind | mutation | md5 before | md5 after | command | verdict | detector | wall (run 2) | wall (run 1) |
+| row | kind | mutation | md5 before | md5 after | command | verdict | detector | wall | wall at `e71bcf5f` (runs 1, 2) |
 |---|---|---|---|---|---|---|---|---|---|
-| C1 | control | none | - | - | `go test -count=1 -run '^FuzzPipelineRun$' ./internal/cli/pipeline` | GREEN | - | 9 s | 20 s |
-| C2 | control | none | - | - | `just fuzz FuzzPipelineRun 5m 4` | GREEN | - | 324 s | 359 s |
-| R1 | seed-reach | `runTarget` panics | 266f60f0 | 3a26d054 | C1's command | **KILLED** | panic, no crasher (seed pass) | 0 s | 1 s |
-| R2 | mutation-reach | panic when a target names a procsig file | 266f60f0 | 09b76737 | `just fuzz FuzzPipelineRun 5m 4` | **KILLED** | panic, 1 crasher written | 43 s | 18 s |
-| R3 | slow call | R2's condition sleeps 2.5 s | 266f60f0 | 6d92d4ae | `just fuzz FuzzPipelineRun 5m 4` | **SURVIVED** — bd `gqlc-jjot2.25` | none: green, no crasher | 304 s | 304 s |
-| R3b | hang | R2's condition never returns | 266f60f0 | 7156b022 | `just fuzz FuzzPipelineRun 5m 4` | **KILLED** | Guard's watchdog ends the worker; engine reports it as hung, 1 crasher written | 14 s | 15 s |
-| R4 | property | the accumulating branch keeps its batches | 266f60f0 | 6e4958e7 | `just fuzz FuzzPipelineRun 5m 4` | **KILLED** | property `targets-iff` (seed pass) | 3 s | 4 s |
-| R4b | property | OutDir is the configured out, unresolved | 266f60f0 | 3531652f | `just fuzz FuzzPipelineRun 5m 4` | **KILLED** | property `targets` (OutDir; seed pass) | 3 s | 3 s |
+| C1 | control | none | - | - | `go test -count=1 -run '^FuzzPipelineRun$' ./internal/cli/pipeline` | GREEN | - | 6 s | 20 s, 9 s |
+| C2 | control | none | - | - | `just fuzz FuzzPipelineRun 5m 4` | GREEN | - | 319 s | 359 s, 324 s |
+| R1 | seed-reach | `runTarget` panics | 266f60f0 | 3a26d054 | C1's command | **KILLED** | panic, no crasher (seed pass) | 0 s | 1 s, 0 s |
+| R2 | mutation-reach | panic when a target names a procsig file | 266f60f0 | 09b76737 | `just fuzz FuzzPipelineRun 5m 4` | **KILLED** | panic, 1 crasher written | 2 s | 18 s, 43 s |
+| R3 | slow call | R2's condition sleeps 2.5 s | 266f60f0 | 6d92d4ae | `just fuzz FuzzPipelineRun 5m 4` | **KILLED** — after gqlc-jjot2.25 | `fuzzkit.Guard` slow input, 1 crasher written | 6 s | SURVIVED both (304 s) |
+| R3b | hang | R2's condition never returns | 266f60f0 | 7156b022 | `just fuzz FuzzPipelineRun 5m 4` | **KILLED** | Guard's watchdog ends the worker; engine reports it as hung, 1 crasher written | 15 s | 15 s, 14 s |
+| R4 | property | the accumulating branch keeps its batches | 266f60f0 | 6e4958e7 | `just fuzz FuzzPipelineRun 5m 4` | **KILLED** | property `targets-iff` (seed pass) | 2 s | 4 s, 3 s |
+| R4b | property | OutDir is the configured out, unresolved | 266f60f0 | 3531652f | `just fuzz FuzzPipelineRun 5m 4` | **KILLED** | property `targets` (OutDir; seed pass) | 2 s | 3 s, 3 s |
+
+The third run, at `aff40090` (the minimize cap without this target's
+gqlc-jjot2.28 tolerance), had every row KILLED (R3 in 10 s) and **C2 red**.
+C2 is the unmutated control, and it went red on a real finding; see below.
 
 What each row means:
 
@@ -75,25 +83,22 @@ What each row means:
   fuzzing, the driver ran the mutant's committed seeds and they were green:
   none of the five seed byte strings draws a procsig file. genProject draws
   one at 1 in 16 per target, so the engine has to change a decision byte to
-  reach it, and it did, in 18 s and in 43 s.
-- **R3 SURVIVED, in both runs, and that is a finding about the harness.** It
-  is filed as **gqlc-jjot2.25**. The same mutant (md5 `6d92d4ae`, sometimes
-  with a hit counter added) was run eight more times: four under `driver.sh`
-  cut down to C1 and R3, and four by hand under `go test -fuzz` or
-  `just fuzz FuzzPipelineRun 5m 4`. Of the ten runs in all, four were KILLED
-  (62 s, 138 s, 139 s, 282 s) and six SURVIVED. Two surviving runs had the
-  slow arm instrumented: one executed the 2.5 s sleep 146 times, the other
-  200, and neither wrote a crasher. With `GODEBUG=fuzzdebug=1`, the 200 fall
-  inside the engine's minimization of *interesting* inputs, which started at
-  second 0, and every one of those minimizations came back `crasher: false`.
-  With `-fuzzminimizetime 10x`, the mutant was KILLED 3 of 3 times, in
-  17–33 s, by `fuzzkit.Guard: slow input`. So the detector works. What is
-  lost is the report of an input that first turns up slow while the engine
-  is minimizing something else, under go's default 60 s minimize budget,
-  which `just fuzz` does not override. The fix is in `fuzz-run`, the WP1
-  recipe, and this row is the regression check for it. The other targets'
-  R3 rows run under the same default, so a KILLED verdict there may have been
-  the lucky half.
+  reach it. It took 18 s and 43 s under the default minimize budget, and 11 s
+  and 2 s under the cap. The 2 s is not a seed tripping the mutant, because
+  the driver's seed check on that same mutant was green.
+- **R3 is KILLED because of gqlc-jjot2.25, and was SURVIVED before it.**
+  Under go's default 60 s minimize budget, which `just fuzz` used to keep, the
+  same mutant (md5 `6d92d4ae`) was run ten times. Four runs were KILLED (62 s,
+  138 s, 139 s, 282 s) and six SURVIVED, including both full runs at
+  `e71bcf5f`. Two surviving runs had the slow arm instrumented: one executed
+  the 2.5 s sleep 146 times, the other 200, and neither wrote a crasher. With
+  `GODEBUG=fuzzdebug=1`, the 200 fall inside the engine's minimization of
+  *interesting* inputs, which started at second 0, and every one of those
+  minimizations came back `crasher: false`. With the minimize budget capped
+  at 10 execs it was KILLED 5 of 5 times: 3 by hand (17–33 s) and 2 under the
+  driver (10 s, 6 s). The detector was never the problem. What was lost was
+  the report of an input that first turns up slow while the engine is
+  minimizing something else. This row is the regression check for the cap.
 - **R3b** is Guard's watchdog: the worker dies at 5 × 2 s and the
   coordinator reports `fuzzing process hung or terminated unexpectedly`. A
   hang kills the worker process, so it does not depend on minimization.
@@ -173,25 +178,41 @@ R4b:
 +	outDir := tgt.Go.Out
 ```
 
-## The 10-minute run
+## The 10-minute runs
 
 `GQLC_FUZZ_CACHEDIR=$(mktemp -d) just fuzz FuzzPipelineRun 10m 4` on the
-unmutated tree at `57dde5a3`, 2026-10-28, under the same shared load: green,
-35 758 execs, 70 new interesting inputs (75 in the corpus), no finding. That
-is about 60 execs/s. Most of the gap from the 1500 execs/s seen unloaded
-in the first seconds is the minimization stalls gqlc-jjot2.25 describes.
+unmutated tree, 2026-10-28, under the same shared load, both green:
+
+| commit | minimize budget | execs | corpus | finding |
+|---|---|---|---|---|
+| `57dde5a3` | go default (60 s) | 35 758 | 75 | none |
+| `9e41b230` | 10x (gqlc-jjot2.25) | 501 970 | 2 629 | none |
+
+The fourteen-fold difference is the minimization stalls gqlc-jjot2.25
+describes: under the default, the engine dispatched no fuzz work for tens
+of seconds at a time.
 
 ## Limits
 
 - Each time above is a single run on a heavily shared machine. R2's time
-  depends on the engine's random mutation order. A re-run in which R2 or R3b
-  reports SURVIVED at the 5 m budget would falsify the table. A re-run in
-  which R3 reports KILLED would not, because R3 was KILLED in 4 of 10 runs
-  under the default minimize budget.
+  depends on the engine's random mutation order. A re-run with the 10x cap in
+  which R2, R3 or R3b reports SURVIVED at the 5 m budget would falsify the
+  table.
 - The rows run against `HEAD`, not the working tree.
 - No row plants a determinism defect. `pipeline.go` has no state to carry
   across calls, so there is nothing a one-line `sed` could make
   nondeterministic without also planting a panic.
+- **C2's red at `aff40090` is gqlc-jjot2.28**, a resolver determinism
+  defect. The same generated project, laid down in two directories, had query
+  F0Q1 refused with `ambiguous label` (n5 satisfied by `Employee&Forum` and
+  `Forum`) in one `Run` and accepted in the other. The crasher was lost when
+  the next row's restore deleted the copy's `testdata/fuzz` (gqlc-jjot2.24).
+  Eight more minutes of fuzzing and a hand probe did not re-find it. The
+  target now tolerates exactly that shape, two runs whose Diagnostics differ
+  only by ambiguous-label or ambiguous-binding lines, keyed to the bead (the
+  `openFinding` arm in `fuzz_test.go`). A determinism failure now prints the
+  whole project, so the next one can be rebuilt from the log even if the
+  crasher is lost.
 - What the target cannot see: anything gen does not generate (gen's package doc
   lists CALL, MERGE, comprehensions and more), so with gen's queries the
   procsig file is loaded but never used; schemas reached through COPY OF
