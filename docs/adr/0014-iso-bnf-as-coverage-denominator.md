@@ -31,6 +31,7 @@ productions mean.
 - `gqlc-lir` declined to buy the standard itself, so the normative *prose* —
   the Syntax Rules, the General Rules, the conformance clauses — is unavailable.
   `gqlc-h9n.28` and `gqlc-h9n.29` are blocked on exactly that prose.
+  (2026-10-27: ADR 0049 settles both as gqlc decisions without it.)
 
 ## Considered options
 

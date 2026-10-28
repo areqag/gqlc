@@ -230,8 +230,8 @@ func TestPropertyBinaryWidthParenthesisedFolds(t *testing.T) {
 //     in shape to DECIMAL(p, s) at :1832, not to the binary integers, and
 //     nothing in the grammar establishes that FLOAT's precision counts bits.
 //     FLOAT(16) therefore resolves to TypeFloat — 64-bit, a safe superset —
-//     rather than the narrower TypeFloat16. gqlc-h9n.28 tracks the ISO
-//     citation that would decide the fold direction.
+//     rather than the narrower TypeFloat16. ADR 0049 makes not folding
+//     gqlc's settled decision.
 //   - Length-qualifier and DECIMAL forms (STRING(5), VARCHAR(255), CHAR(8),
 //     DEC(8), DECIMAL(10, 2)). ADR 0002 drops these; overlap with
 //     TestPropertyLengthQualifiersDropped is intentional — this table pins
@@ -587,8 +587,8 @@ func TestRecordDelimitedFieldNameQuoted(t *testing.T) {
 }
 
 // TestDuplicateFieldNameRejected mirrors ADR 0030's reading of a repeated
-// property name onto fields, for the same reason and with the same provisional
-// standing: the free ISO BNF states no uniqueness constraint, and of the two
+// property name onto fields, for the same reason and, since ADR 0049, with the
+// same permanent standing: the free ISO BNF states no uniqueness constraint, and of the two
 // readings only "keep one and drop the other" can be wrong silently.
 func TestDuplicateFieldNameRejected(t *testing.T) {
 	_, err := parseFirstProperty(t, "RECORD { a :: INT, a :: STRING }")

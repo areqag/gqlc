@@ -8,6 +8,10 @@ import (
 // Errors returned by Parse for GQL this parser rejects: constructs outside the
 // supported subset, and schemas that violate the node/edge identity rules. They
 // are sentinels so callers can branch with errors.Is.
+//
+// ErrEndpointFillerHasProperties is permanent gqlc behaviour, not a reading of
+// ISO: whether the filler's properties declare or constrain is not in the free
+// BNF, and discarding them is wrong under both readings. See ADR 0049.
 var (
 	ErrImpliedLabelIsKeyLabel      = errors.New("implied label is also a declared element type's key label: whether it inherits that type's properties is not settled by the standard")
 	ErrUndirectedEdge              = errors.New("undirected edges are a distinct element kind, which gqlc does not model")
@@ -36,28 +40,26 @@ var (
 var ErrEdgeKindArcMismatch = errors.New("edge kind contradicts arc direction")
 
 // ErrDuplicatePropertyName is returned when one propertyTypeList declares the
-// same property name twice. Like ErrEdgeKindArcMismatch this is a provisional
-// deviation rather than a settled reading: the free ISO BNF admits the syntax
-// (<property type list> ::= <property type> [{ <comma> <property type> }...]
-// states no uniqueness constraint), so whether a repeat is an error lives in
-// the Syntax Rules prose gqlc-lir declined to buy. Rejection is the interim
-// posture, chosen because the alternative — keeping one declaration and
-// discarding the other — is the only reading that can be wrong silently. See
-// ADR 0030. Revisit when the Syntax Rules are available.
+// same property name twice. The rejection is permanent gqlc behaviour, not a
+// reading of ISO: the free BNF admits the syntax (<property type list> ::=
+// <property type> [{ <comma> <property type> }...] states no uniqueness
+// constraint), and whether a repeat is an error is Syntax Rules prose gqlc does
+// not have. Rejection was chosen because the alternative — keeping one
+// declaration and discarding the other — is the only reading that can be wrong
+// silently. See ADR 0030 for the argument and ADR 0049 for why it is final.
 var ErrDuplicatePropertyName = errors.New("property name declared more than once in one property types specification")
 
 // ErrDuplicateFieldName is ErrDuplicatePropertyName's rule read onto record
-// fields, and it is provisional on the same grounds: <field type list> ::=
+// fields, and it is permanent on the same grounds: <field type list> ::=
 // <field type> [{ <comma> <field type> }...] states no uniqueness constraint
 // either, so the free BNF admits `RECORD { a :: INT, a :: STRING }` and the
-// reading lives in Syntax Rules prose gqlc has not bought.
+// reading lives in Syntax Rules prose gqlc does not have.
 //
 // It is a sentinel of its own rather than a reuse of the property one because
 // the two rejections are not interchangeable to a caller: a field name repeats
 // inside one property's value type, and reporting it as a repeated PROPERTY
 // name would send a reader to the property list, where the names are distinct.
-// See ADR 0030 for the argument and gqlc-lir for the arbiter that would settle
-// it.
+// See ADR 0030 for the argument and ADR 0049 for why it is final.
 var ErrDuplicateFieldName = errors.New("field name declared more than once in one record type")
 
 // The three ways a delimited identifier names nothing this parser can carry.

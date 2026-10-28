@@ -9,6 +9,12 @@ This is a **provisional** deviation, in the same class as
 paywalled, and rejection is the reading that cannot be wrong silently.
 `gqlc-tlbo` is the bead that revisits it.
 
+*Amended 2026-10-27:* no longer provisional. The owner ruled that the paid text
+will not be bought, and ADR 0049 settles the rejection as permanent gqlc
+behaviour, for properties and for record fields alike. It is gqlc's decision,
+not a reading of ISO. The "interim" wording below records the posture at the
+time; ADR 0049 says what would reopen it.
+
 ## What the free artefacts settle, and what they do not
 
 The question was put to the normative text rather than to taste, per
@@ -106,6 +112,10 @@ name is asserted separately in `TestRepeatedPropertyNameIsRejected`.
   compiled to had already discarded a declaration the author wrote.
 
 ## What would change this
+
+ADR 0049 now owns this list. What follows is kept as written, and it still
+describes what each possible reading of the Syntax Rules would do if anyone
+ever obtains them.
 
 `gqlc-tlbo`, if the Syntax Rules are ever bought:
 
