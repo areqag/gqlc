@@ -24,7 +24,7 @@ integer: `INT(p)`, `INTEGER(p)` and `SIGNED INTEGER(p)` on the signed lattice,
 `UINT(p)` and `UNSIGNED INTEGER(p)` on the unsigned one (`GQL.g4`
 `signedBinaryExactNumericType`, `unsignedBinaryExactNumericType`,
 `verboseBinaryExactNumericType`). `p` resolves to the first width constant
-whose bit count is at least `p`:
+whose bit count is at least `p`, and to the widest constant when none is:
 
 | `p` | signed | unsigned | Go type |
 |---|---|---|---|
@@ -34,7 +34,8 @@ whose bit count is at least `p`:
 | 33 – 64 | `Int64` | `Uint64` | `int64` / `uint64` |
 | 65 – 128 | `Int128` | `Uint128` | none, refused by both targets |
 | 129 – 256 | `Int256` | `Uint256` | none, refused by both targets |
-| 0, or above 256 | `Int` | `Uint` | `int` / `uint`, unchanged |
+| above 256 | `Int256` | `Uint256` | none, refused by both targets |
+| 0 | `Int` | `Uint` | `int` / `uint`, unchanged |
 
 The exact widths keep the fold `gqlc-h9n.16` gave them (`INT(8)` is still
 `Int8`). They are the boundary case of the same rule now, not a separate one.
@@ -77,13 +78,18 @@ What the grammar admits as `precision` is `UNSIGNED_DECIMAL_INTEGER`, which is
   a width, and nothing is rounded up to cover it. It is not rejected either.
   ADR 0017's argument against failing a whole schema over one qualifier applies
   here as well.
-- **Above 256.** `INT(257)` and wider keep resolving to `Int` and `UINT(257)` to
-  `Uint`, as before, because no constant holds them. This means `INT(200)` is
-  refused by both codegen targets (it is `Int256`), while `INT(300)` generates
-  `int`. That is inconsistent, and it is kept on purpose: this decision changes
-  only the widths it can round up to a constant, and has no opinion on what a
-  width beyond the lattice should be. A value that does not fit the parser's
-  16-bit read (above 65535) lands in the same place.
+- **Above 256.** `INT(257)` and wider resolve to `Int256`, and `UINT(257)` and
+  wider to `Uint256`. That is a gqlc decision taken under the owner ruling. No
+  Go type fits such a width, and `int` or `uint` would narrow it without saying
+  so, which a rule about the smallest type that *fits* cannot allow. The widest
+  constant is the one both codegen targets already refuse, so generation fails
+  loudly and names the width, exactly as it does for 65 to 256. The schema
+  itself still parses: rejecting valid ISO GQL at the parser is the dialect
+  ADR 0017 argued against.
+- **A number too large to read.** A `p` wider than an unsigned 64-bit integer,
+  such as `INT(18446744073709551616)`, cannot be read as a width at all and keeps
+  resolving to `Int` or `Uint`, as before. This is the only fallback left to the
+  machine word apart from zero.
 - **Leading zeros and digit separators.** `INT(08)` and `INT(1_6)` are read for
   the number they spell, giving `Int8` and `Int16`. Before this decision they
   missed the exact-width rows, which were matched as text, and resolved to `Int`.
@@ -102,9 +108,10 @@ Measured 2026-10-27 by running `gqlc generate` on a one-property schema, `p ::
 | `UINT(33)` | `uint64` | `uint64` |
 | `INT(65)` | refused: `unrepresentable property width … has INT128` | refused: query dropped, `projects property:INT128` |
 | `UINT(200)` | refused, `UINT256` | refused, `UINT256` |
-| `INT(300)`, `INT(0)` | `int` | `int` |
+| `INT(300)` | refused, `INT256` | refused, `INT256` |
+| `INT(0)`, `INT(18446744073709551616)` | `int` | `int` |
 
-**This is a breaking change for a schema that declares a width from 65 to 256.**
+**This is a breaking change for a schema that declares a width above 64.**
 Before, it generated `int` or `uint`, so it silently held less than declared.
 Now it resolves to the 128- or 256-bit constant and fails generation, the same
 way an explicit `INT128` already fails. The failure is loud and names the width.
@@ -124,7 +131,9 @@ To keep generating, declare a width of 64 or less.
 - The two semantic cases ADR 0017 added for `scalar_signed_integer.gql` and
   `scalar_unsigned_integer.gql` are deleted. `TestSemanticCaseCollisions` went
   red on both, as ADR 0017 predicted, and `wantSemanticCases` moves from 17 to
-  15. The `scalar_float.gql` case stays, because `FLOAT(p)` is not folded.
+  15. The `scalar_float.gql` case stays, because `FLOAT(p)` is not folded, and
+  its owning bead moves from `gqlc-h9n.31` to `gqlc-0ri`, the bead the corpus
+  names for a permanent decision: ADR 0049 made that precision loss final.
 - `unionProperty` and `unify` in the resolver are unaffected in kind. No field
   was added, so two properties still unify if and only if their constants match.
   The only difference is which constant `INT(p)` lands on.
@@ -137,9 +146,8 @@ To keep generating, declare a width of 64 or less.
 - A consumer that needs the exact declared width, such as a range-checking
   setter for `INT(7)`. That would mean adding a width field, which is the change
   `gqlc-h9n.31` originally proposed and this decision does not make.
-- A decision about widths beyond 256, in either direction: refusing them like
-  `INT128`, or keeping `int`. Today they keep the behaviour from before this
-  decision, which is the inconsistency recorded above.
+- A Go carrier for a 128- or 256-bit integer on either target. Widths from 65
+  up would then generate instead of failing, with no change to this rule.
 
 ## Provenance
 

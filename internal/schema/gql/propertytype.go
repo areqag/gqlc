@@ -364,7 +364,7 @@ var typeSpellings = map[string]graph.PropertyType{
 // lattice, UINT and UNSIGNED INTEGER the unsigned one, and no other
 // parenthetical (FLOAT(p), DECIMAL(p,s), STRING(n)) reaches it.
 var binaryWidths = map[graph.PropertyType][]struct {
-	bits int
+	bits uint64
 	pt   graph.PropertyType
 }{
 	graph.TypeInt: {
@@ -389,8 +389,10 @@ var binaryWidths = map[graph.PropertyType][]struct {
 // On the truncated lookup a binary-integer head rounds its parenthesised width
 // up to the narrowest width constant that holds it, reading p as a count of
 // bits: INT(8) is TypeInt8, INT(7) is TypeInt8 too, INT(10) is TypeInt16
-// (ADR 0050). A width the lattice cannot hold — zero, or wider than 256 —
-// keeps the unqualified machine word it resolved to before that rule.
+// (ADR 0050). A width wider than 256 takes the widest constant, which both
+// codegen targets refuse: nothing fits, and the machine word would narrow it
+// silently. Zero bits is not a width and keeps the unqualified machine word, as
+// does a number too large to read as an integer at all.
 //
 // Every other parenthetical is dropped by the truncated lookup, which is what
 // keeps length/character/decimal-digit qualifiers (STRING(10), DECIMAL(10,2))
@@ -406,10 +408,13 @@ func normaliseType(spelling string) (graph.PropertyType, bool) {
 		return "", false
 	}
 	if bits, ok := parenthesisedWidth(full[len(head):]); ok {
-		for _, w := range binaryWidths[pt] {
-			if bits <= w.bits {
-				return w.pt, true
+		if widths := binaryWidths[pt]; len(widths) > 0 {
+			for _, w := range widths {
+				if bits <= w.bits {
+					return w.pt, true
+				}
 			}
+			return widths[len(widths)-1].pt, true
 		}
 	}
 	return pt, true
@@ -419,7 +424,8 @@ func normaliseType(spelling string) (graph.PropertyType, bool) {
 // grammar's UNSIGNED_DECIMAL_INTEGER admits a leading zero and an underscore
 // between digits, so INT(08) and INT(1_6) are read as the numbers they spell.
 // Zero is reported as no width at all: no lattice step is a width of zero bits.
-func parenthesisedWidth(paren string) (int, bool) {
+// So is a number wider than uint64, which is not a width any reading can use.
+func parenthesisedWidth(paren string) (uint64, bool) {
 	inner, ok := strings.CutPrefix(paren, "(")
 	if !ok {
 		return 0, false
@@ -428,11 +434,11 @@ func parenthesisedWidth(paren string) (int, bool) {
 	if !ok {
 		return 0, false
 	}
-	bits, err := strconv.ParseUint(strings.ReplaceAll(inner, "_", ""), 10, 16)
+	bits, err := strconv.ParseUint(strings.ReplaceAll(inner, "_", ""), 10, 64)
 	if err != nil || bits == 0 {
 		return 0, false
 	}
-	return int(bits), true
+	return bits, true
 }
 
 // canonicalSpelling reduces a raw value-type spelling to its lookup key:

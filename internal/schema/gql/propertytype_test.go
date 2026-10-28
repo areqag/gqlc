@@ -337,20 +337,24 @@ func TestPropertyBinaryWidthRoundsUp(t *testing.T) {
 }
 
 // TestPropertyBinaryWidthOutsideTheLattice pins the parenthesised integer
-// widths the round-up rule does not reach, and what they do instead. A width
-// wider than INT256 has no constant to round up to, and zero bits is not a
-// width; both keep the behaviour they had before ADR 0050, the unqualified
-// machine word, rather than gaining a rejection. The digit separator and the
-// leading zero are the grammar's own spellings of a number
-// (UNSIGNED_DECIMAL_INTEGER, GQL.g4), so they are read for their value.
+// widths at and past the lattice's ends (ADR 0050). A width wider than 256 has
+// no constant that holds it and takes the widest, INT256 or UINT256, which both
+// codegen targets refuse; the schema still parses. Zero bits is not a width and
+// keeps the unqualified machine word, as does a number too large to read as an
+// integer at all. The digit separator and the leading zero are the grammar's
+// own spellings of a number (UNSIGNED_DECIMAL_INTEGER, GQL.g4), so they are
+// read for their value.
 func TestPropertyBinaryWidthOutsideTheLattice(t *testing.T) {
 	for _, tt := range []typePin{
 		{"INT(0)", graph.TypeInt},
 		{"UINT(0)", graph.TypeUint},
-		{"INT(257)", graph.TypeInt},
-		{"UINT(257)", graph.TypeUint},
-		{"INTEGER(1000)", graph.TypeInt},
-		{"INT(99999999999999999999999)", graph.TypeInt},
+		{"INT(257)", graph.TypeInt256},
+		{"UINT(257)", graph.TypeUint256},
+		{"SIGNED INTEGER(1000)", graph.TypeInt256},
+		{"UNSIGNED INTEGER(65536)", graph.TypeUint256},
+		{"INT(18446744073709551615)", graph.TypeInt256},
+		{"INT(18446744073709551616)", graph.TypeInt},
+		{"UINT(99999999999999999999999)", graph.TypeUint},
 		{"INT(08)", graph.TypeInt8},
 		{"INT(1_6)", graph.TypeInt16},
 		{"UNSIGNED INTEGER(0_10)", graph.TypeUint16},

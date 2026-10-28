@@ -219,7 +219,9 @@ type corpusEntry struct {
 	// magic string: that bead cannot close without accounting for every entry
 	// pointing at it, which is what stops a decline from becoming the
 	// undocumented rejection this epic exists to close. A resolving entry names a
-	// bead only when it resolves to a model that is known to be wrong.
+	// bead only when it resolves to a model that is known to be wrong, and names
+	// gqlc-0ri on the same terms when that loss is a permanent decision
+	// (scalar_float.gql, ADR 0049).
 	bead string
 	// reason is one line on why an unsupported entry is not supported, or on what
 	// a resolving entry gets wrong.
