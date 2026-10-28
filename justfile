@@ -241,9 +241,10 @@ init: check-push-keepalive
 # repaired. A marker-bearing copy that FAILS the behavioural check below is not:
 # that is tamper or corruption rather than absence, and it refuses.
 #
-# The hooksPath arms stay hard refusals: self-healing core.hooksPath would
-# rewrite the very drift this recipe exists to report, and the shared config is
-# where the damage lives.
+# The hooksPath arms stay hard refusals: this recipe reports the value, in any
+# spelling. Repair belongs to .githooks/hooks-drift-tripwire, which runs only
+# when git has actually fallen back to the default directory and rewrites only
+# the two drift shapes it recognises (bd gqlc-ofsup).
 [private]
 check-hooks:
     #!/usr/bin/env bash

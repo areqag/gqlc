@@ -68,7 +68,8 @@ directory is not caught, because git then runs that directory's hooks and never
 reaches the tripwire; `just check-hooks` compares the configured value and so
 catches any spelling, but only when someone runs it, and the two are layered
 deliberately. `git commit --no-verify` skips the tripwire exactly as it skips
-the real hooks, so it is a report and a repair, not a lock. The self-heal does not reach a fresh clone, for the reason given above.
+the real hooks, so it is a report and a repair, not a lock. The self-heal does
+not reach a fresh clone, for the reason given above.
 And `check-hooks` runs the five with no arguments and without `GIT_INDEX_FILE`,
 so an installed copy can tell the check apart from a real commit: one keying on
 that variable refuses when the check runs it, permits when git runs it as

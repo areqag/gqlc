@@ -37,7 +37,8 @@ fixture() {
     git init -q "${repo}"
     mkdir -p "${repo}/.githooks" "${repo}/.stage"
     printf '#!/bin/sh\necho ran >>"%s/real-hook-ran"\n' "${repo}" >"${repo}/.githooks/pre-commit"
-    chmod +x "${repo}/.githooks/pre-commit"
+    printf '#!/bin/sh\necho ran >>"%s/real-push-ran"\n' "${repo}" >"${repo}/.githooks/pre-push"
+    chmod +x "${repo}/.githooks/pre-commit" "${repo}/.githooks/pre-push"
     cp "${tripwire}" "${repo}/.stage/hooks-drift-tripwire"
     cp "${installer}" "${repo}/.stage/install-hooks-drift-tripwire"
     (cd "${repo}" && .stage/install-hooks-drift-tripwire >/dev/null 2>&1) || return 1
@@ -49,16 +50,22 @@ fixture() {
 
 hookspath() { git -C "$1" config --get core.hooksPath || true; }
 
-# R1/R2: unset. The first commit is refused and repairs; the retry lands and
-# runs the real hook.
+drift() {
+    if [ "$2" = unset ]; then
+        git -C "$1" config --unset core.hooksPath
+    else
+        git -C "$1" config core.hooksPath "$(cd "$1/.git/hooks" && pwd)"
+    fi
+}
+
+# Commit, under each drift shape: refused and repaired, then the retry lands
+# through the real hook. The refusal here is held up by commit-msg as much as by
+# pre-commit, because git keeps the drifted directory for the whole command; the
+# pre-commit and push rows below pin each blocking arm on its own.
 for shape in unset absolute; do
     repo="${scratch}/${shape}"
     fixture "${repo}" || { fail "${shape}" "fixture"; continue; }
-    if [ "${shape}" = unset ]; then
-        git -C "${repo}" config --unset core.hooksPath
-    else
-        git -C "${repo}" config core.hooksPath "$(cd "${repo}/.git/hooks" && pwd)"
-    fi
+    drift "${repo}" "${shape}"
 
     err="$(git -C "${repo}" commit -q -m one 2>&1 >/dev/null)"
     rc=$?
@@ -87,6 +94,78 @@ for shape in unset absolute; do
         fail "${shape}: retry" "did not land through .githooks/pre-commit"
     fi
 done
+
+# pre-commit run on its own under drift: it refuses as well as repairing, so a
+# commit's refusal does not rest on commit-msg alone.
+for shape in unset absolute; do
+    repo="${scratch}/pc-${shape}"
+    fixture "${repo}" || { fail "pre-commit ${shape}" "fixture"; continue; }
+    drift "${repo}" "${shape}"
+    if (cd "${repo}" && .git/hooks/pre-commit >/dev/null 2>&1); then
+        fail "pre-commit ${shape}" "exited 0 under drift"
+    else
+        pass "pre-commit ${shape}: refuses when run under drift"
+    fi
+    got="$(hookspath "${repo}")"
+    if [ "${got}" = .githooks ]; then
+        pass "pre-commit ${shape}: repaired"
+    else
+        fail "pre-commit ${shape}" "reads '${got}'"
+    fi
+done
+
+# Push, under each drift shape, to a bare remote: refused with nothing landed,
+# repaired, and the retry runs the real pre-push. A tripwire that let the
+# repaired command continue would publish a push no real pre-push graded.
+for shape in unset absolute; do
+    repo="${scratch}/push-${shape}"
+    remote="${scratch}/push-${shape}.git"
+    fixture "${repo}" || { fail "push ${shape}" "fixture"; continue; }
+    git -C "${repo}" commit -q -m base >/dev/null 2>&1
+    git init -q --bare "${remote}"
+    git -C "${repo}" remote add origin "${remote}"
+    drift "${repo}" "${shape}"
+    if git -C "${repo}" push -q origin HEAD:refs/heads/main >/dev/null 2>&1; then
+        fail "push ${shape}" "push exited 0 under drift"
+    else
+        pass "push ${shape}: refused under drift"
+    fi
+    if git -C "${remote}" rev-parse -q --verify refs/heads/main >/dev/null; then
+        fail "push ${shape}" "the ref landed on the remote"
+    else
+        pass "push ${shape}: nothing landed on the remote"
+    fi
+    got="$(hookspath "${repo}")"
+    if [ "${got}" = .githooks ]; then
+        pass "push ${shape}: repaired"
+    else
+        fail "push ${shape}" "reads '${got}'"
+    fi
+    if git -C "${repo}" push -q origin HEAD:refs/heads/main >/dev/null 2>&1 && [ -s "${repo}/real-push-ran" ]; then
+        pass "push ${shape}: retry lands through the real pre-push"
+    else
+        fail "push ${shape}" "retry did not land through .githooks/pre-push"
+    fi
+done
+
+# A write that fails must not be reported as a repair. config.lock held makes
+# `git config` refuse.
+repo="${scratch}/locked"
+fixture "${repo}"
+git -C "${repo}" config --unset core.hooksPath
+: >"${repo}/.git/config.lock"
+err="$(cd "${repo}" && .git/hooks/pre-commit 2>&1 >/dev/null)"
+rm -f "${repo}/.git/config.lock"
+if grep -q 'REPAIRED' <<<"${err}"; then
+    fail "locked config" "reported REPAIRED over a write that failed"
+else
+    pass "locked config: no repair claimed when the write fails"
+fi
+if grep -q 'just init' <<<"${err}"; then
+    pass "locked config: names just init instead"
+else
+    fail "locked config" "did not name the manual repair"
+fi
 
 # R3: post-checkout fires inside `git worktree add`, the spawn's own step, and
 # must neither block nor repair.

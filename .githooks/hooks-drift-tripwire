@@ -60,10 +60,11 @@ set -u
 
 hook="$(basename -- "$0")"
 
-# Read for the message, not for the decision. Being executed from the common
-# dir's hooks directory is already proof the repo's own hooks are unwired, and a
-# decision that re-derived it from `git config` would go quiet exactly when that
-# call fails. `git config --get` exits 1 when the key is unset, which is itself
+# Never read for whether to REFUSE. Being executed from the common dir's hooks
+# directory is already proof the repo's own hooks are unwired, and a refusal
+# that re-derived it from `git config` would go quiet exactly when that call
+# fails. It does decide whether to REPAIR, which may only rewrite a value it has
+# recognised as one of the two drift shapes. `git config --get` exits 1 when the key is unset, which is itself
 # a drifted state (git falls back to this directory), so the empty value is
 # reported as <unset> rather than treated as an error.
 configured="$(git config --get core.hooksPath 2>/dev/null || true)"
@@ -82,9 +83,9 @@ configured="$(git config --get core.hooksPath 2>/dev/null || true)"
 # read as noise is the block that gets ignored when it is the real one.
 #
 # The severity word now agrees with the exit status, and each arm states what
-# happened to the caller's command. The repair is the same either way, which is
-# the second thing a reader needs and the reason the block is kept whole rather
-# than suppressed on the warn arms.
+# happened to the caller's command. The rest of the block is shared by every
+# arm, which is the reason it is kept whole rather than suppressed on the warn
+# arms.
 #
 # The exit status is DERIVED from the same variable the message is, and not from
 # a second `case` over $hook. A second copy of the name list is how the block
@@ -108,7 +109,8 @@ configured="$(git config --get core.hooksPath 2>/dev/null || true)"
 # blocking arm here would not gate anything — it would make every branch
 # switch in every drifted worktree report a failure that already happened.
 #
-# What these two arms buy is a message on stderr and nothing else. Under
+# What these two arms buy is a message on stderr, plus the repair on
+# post-merge, and nothing else. Under
 # drift `git worktree add` still returns 0 and still creates and populates
 # the worktree, so the agent spawn that CAUSED the drift (bd gqlc-7ijy)
 # proceeds exactly as it would have. post-checkout fires at `git worktree
