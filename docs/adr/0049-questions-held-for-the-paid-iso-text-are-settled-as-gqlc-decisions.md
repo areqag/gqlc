@@ -159,6 +159,38 @@ settles, and its doc comment still says to revisit it when the Syntax Rules are
 available. The owner direction plausibly reaches it too. Settling it is left to
 a decision of its own, not folded in here.
 
+*Amended 2026-10-27:* settled, under `gqlc-1229o`. See Decision 4.
+
+## Decision 4: an edge kind that contradicts its arc stays rejected
+
+*Added 2026-10-27 under `gqlc-1229o`, on the same owner direction.*
+
+`UNDIRECTED EDGE Mentions (a) -[:MENTIONS]-> (b)` and `DIRECTED EDGE TYPE
+Mentions LABEL MENTIONS CONNECTING (a ~ b)` are rejected with
+`ErrEdgeKindArcMismatch`, permanently. This is gqlc's decision, not a claim
+about what ISO/IEC 39075 says.
+
+The free artefacts show the spelling parses and do not show what it means. In
+both `<edge type phrase>` and `<edge type pattern>`, `<edge kind>` and the
+connector each state a direction, and the vendored grammar accepts the two
+disagreeing (probe recorded on `gqlc-xtq`, 2026-07-25). `implementation-defined.xml` lists no item for the contradiction
+(127 items checked, recorded on `gqlc-xtq`). Whether the standard forbids it or
+lets the kind or the arc win is Syntax Rules prose, which is not coming.
+
+The reasoning is Decision 3's. Letting either side win can be wrong silently: the
+model would carry a direction the author contradicted on the same line. A
+rejection fails on that line and is fixed in one edit, by deleting the kind or
+changing the connector. The `TO` spelling stays where ADR 0018 left it:
+`kind_undirected_connector_to.gql` rejects through this sentinel only because
+ANTLR's ordered choice reads `TO` as directed, and its entry keeps naming
+`gqlc-h9n.10`.
+
+What reopens it is the first bullet under "What would reopen these": if the
+Syntax Rules forbid the contradiction, nothing changes; if they name a winner,
+the sentinel is reconsidered against that rule. The two corpus entries
+`gqlc-xtq` owned now name `gqlc-0ri`, as Decision 3's did. No sentinel, corpus
+outcome or count changes.
+
 ## Consequences
 
 - `gqlc-h9n.28`, `gqlc-h9n.29` and `gqlc-tlbo` (GH #420, #427, #1305) resolve to

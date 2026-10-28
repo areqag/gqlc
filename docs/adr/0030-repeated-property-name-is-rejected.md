@@ -130,6 +130,8 @@ ever obtains them.
 
 `ErrEdgeKindArcMismatch` (`gqlc-xtq`) is blocked on the same prose, so both are
 settled in one sitting.
+(ADR 0049 later settled both as gqlc decisions: this one as Decision 3,
+`ErrEdgeKindArcMismatch` as Decision 4.)
 
 ## Provenance
 

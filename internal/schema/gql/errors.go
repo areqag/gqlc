@@ -31,12 +31,12 @@ var (
 
 // ErrEdgeKindArcMismatch is returned when a declaration's edgeKind
 // (UNDIRECTED or DIRECTED) contradicts the arc connector direction
-// (->, <-, ~, or TO). This is a provisional deviation: ISO/IEC 39075
-// Syntax Rules may forbid the combination (outcome 1) or specify which
-// wins (outcome 2); the implementation-defined.xml has no item for it.
-// Rejection is the interim posture — it fails loudly rather than
-// silently picking a reading. Revisit when the Syntax Rules are available.
-// Tracked as gqlc-xtq.
+// (->, <-, ~, or TO). The rejection is permanent gqlc behaviour, not a
+// reading of ISO: the grammar accepts the contradictory spelling, and whether
+// the standard forbids it or names a winner is Syntax Rules prose gqlc does not
+// have (the free implementation-defined list has no item for it). Rejection was
+// chosen because letting either the kind or the arc win is a reading that can
+// be wrong silently. See ADR 0049 for why it is final.
 var ErrEdgeKindArcMismatch = errors.New("edge kind contradicts arc direction")
 
 // ErrDuplicatePropertyName is returned when one propertyTypeList declares the
