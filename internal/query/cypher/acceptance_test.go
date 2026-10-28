@@ -1072,25 +1072,25 @@ func goldenPath(st *scenarioState) string {
 // docstring of each "When executing query" step, deduplicated and sorted for a
 // stable order. It reuses the gherkin parser (godog's dependency) so the harvest
 // matches what the acceptance suite actually runs, rather than re-scanning text.
-func harvestExecutingQueries(t testing.TB, dirs []string) []string {
-	t.Helper()
+func harvestExecutingQueries(tb testing.TB, dirs []string) []string {
+	tb.Helper()
 	seen := make(map[string]bool)
 	for _, dir := range dirs {
 		files, err := filepath.Glob(filepath.Join(dir, "*.feature"))
 		if err != nil {
-			t.Fatalf("glob %s: %v", dir, err)
+			tb.Fatalf("glob %s: %v", dir, err)
 		}
 		for _, path := range files {
 			f, err := os.Open(path)
 			if err != nil {
-				t.Fatalf("open %s: %v", path, err)
+				tb.Fatalf("open %s: %v", path, err)
 			}
 			doc, err := gherkin.ParseGherkinDocument(f, func() string { return "" })
 			if cerr := f.Close(); cerr != nil {
-				t.Fatalf("close %s: %v", path, cerr)
+				tb.Fatalf("close %s: %v", path, cerr)
 			}
 			if err != nil {
-				t.Fatalf("parse %s: %v", path, err)
+				tb.Fatalf("parse %s: %v", path, err)
 			}
 			for _, p := range gherkin.Pickles(*doc, path, newIDGen()) {
 				for _, step := range p.Steps {
