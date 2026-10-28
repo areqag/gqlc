@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+# Liveness rows for FuzzPipelineRun (internal/cli/pipeline), run by `just
+# fuzz-liveness FuzzPipelineRun`: each row plants one defect with sed, in a
+# scratch copy of HEAD, and asks whether the harness reports it. The protocol
+# and the verdicts are driver.sh's; the recorded run, with every row's diff, is
+# docs/mutation/fuzz-liveness-FuzzPipelineRun.md.
+#
+# R2's condition — a target that names a procsig file — is one no committed
+# seed meets (the driver re-checks that on the mutant before it fuzzes) and one
+# genProject draws at a 1-in-16 rate per target, so a changed decision byte
+# reaches it.
+set -euo pipefail
+
+# SC1091: `just lint-hooks` runs shellcheck without -x, so it cannot follow the
+# source; driver.sh is linted in its own right by the same sweep.
+# shellcheck source=driver.sh disable=SC1091
+. "$(dirname "${BASH_SOURCE[0]}")/driver.sh"
+
+file=internal/cli/pipeline/pipeline.go
+procsig_fn='s/^\tvar reg procsig\.Registry$/\tif tgt.ProcsigPath != "" {\n\t\t'
+seeds="go test -count=1 -run '^FuzzPipelineRun\$' ./internal/cli/pipeline"
+# Expanded by driver.sh's `bash -c` in the copy, not here.
+# shellcheck disable=SC2016
+fuzz='just fuzz FuzzPipelineRun "$LIVENESS_BUDGET"'
+
+liveness_begin FuzzPipelineRun internal/cli/pipeline
+
+liveness_control C1 "$seeds"
+liveness_control C2 "$fuzz"
+
+# R1 seed-reach: every seed's config declares a target and loads.
+liveness_row R1 "$file" \
+    's/^func runTarget(baseDir string, tgt config\.Target, backends codegen\.Registry, genBatch bool) (TargetResult, \[\]string, \[\]string, error) {$/&\n\tpanic("planted: R1")/' \
+    'panic: planted: R1' seeds "$seeds"
+
+# R2 mutation-reach.
+liveness_row R2 "$file" \
+    "${procsig_fn}"'panic("planted: R2")\n\t}\n&/' \
+    'panic: planted: R2' fuzz "$fuzz"
+
+# R3 slow call: R2's condition, sleeping 2.5 s per target that names a procsig
+# file. Each Run is guarded alone, so one such target costs 2.5 s and three
+# 7.5 s: past the 2 s limit and short of the 10 s watchdog.
+liveness_row R3 "$file" \
+    's/^\t"strings"$/&\n\t"time"/
+'"${procsig_fn}"'time.Sleep(2500 * time.Millisecond)\n\t}\n&/' \
+    'fuzzkit\.Guard: slow input' fuzz "$fuzz"
+
+# R3b hang: R2's condition, never returning. Guard's watchdog ends the worker.
+liveness_row R3b "$file" \
+    "${procsig_fn}"'for {\n\t\t}\n\t}\n&/' \
+    'hung or terminated unexpectedly|fuzzkit\.Guard: watchdog' fuzz "$fuzz"
+
+# R4 property: the accumulating branch keeps its batches. No panic follows; a
+# seed whose queries draw a diagnostic is then a Result carrying both, which
+# the targets-iff property reports at the seed pass.
+liveness_row R4 "$file" \
+    's/^\t\treturn Result{Diagnostics: diags, Warnings: warns}, nil$/\t\treturn Result{Targets: targets, Diagnostics: diags, Warnings: warns}, nil/' \
+    'property targets-iff' property "$fuzz"
+
+# R4b property: OutDir is the configured out unresolved. Every seed that
+# generates reports it through the targets property.
+liveness_row R4b "$file" \
+    's/^\toutDir := resolvePath(baseDir, tgt\.Go\.Out)$/\toutDir := tgt.Go.Out/' \
+    'property targets: graph\[[0-9]+\]\.OutDir' property "$fuzz"
+
+liveness_end
