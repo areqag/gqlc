@@ -209,7 +209,9 @@ not, because it upper-cases the write and the parameter alike.
 
 - **The resolver still rules UUID not orderable** for `min`/`max`, on a ground
   this change does not touch. The ordering measurement above is evidence for
-  that ruling, not the ruling: bead `gqlc-fdfk`.
+  that ruling, not the ruling, which the owner made on 2026-10-27 (bead
+  `gqlc-fdfk`): only version 7 orders meaningfully, and the version is the
+  application's choice, invisible to the schema.
 
 - **No server upgrade is needed**, which is what unblocked `gqlc-ybk2`. Moving
   the pinned image to a Bolt 6.1 line remains an owner call with every live

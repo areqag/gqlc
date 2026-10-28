@@ -92,14 +92,12 @@ func TestOrderableSelectionNamesEveryPropertyType(t *testing.T) {
 		// row is where the decision gets recorded.
 		graph.TypeDecimal: false,
 
-		// UUID takes DECIMAL's answer for DECIMAL's reason: the ruling does not
-		// enumerate it, so refusing degrades min(p.u) to any and admitting it
-		// would be a decision nobody has made. A second reason held here
-		// once — no target carried a UUID property at all — and expired when
-		// neo4j gained a carrier (ADR 0047). The first one did not, so this
-		// row still needs a ruling rather than a re-read of the codegen
-		// table: bd gqlc-fdfk, which also holds the live measurement that
-		// version 7 UUIDs sort in creation order as stored.
+		// UUID is refused by owner ruling (bd gqlc-fdfk, 2026-10-27). Only a
+		// version 7 UUID orders meaningfully — oldest to newest, measured by
+		// TestNeo4jStoresAndRoundTripsAUUID — and the version is chosen by the
+		// application that mints the value, which the schema cannot see. Over a
+		// v4 UUID the order is total but carries no meaning, so a typed min/max
+		// would be a confident answer to a question the data cannot answer.
 		graph.TypeUUID: false,
 
 		// The open/composite families. Ordering an ANY is engine-dependent at
