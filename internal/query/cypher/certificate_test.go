@@ -4,8 +4,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/antlr4-go/antlr/v4"
 	"github.com/stretchr/testify/require"
 
+	"github.com/areqag/gqlc/internal/grammar/cypher/gen"
 	"github.com/areqag/gqlc/internal/query"
 	"github.com/areqag/gqlc/internal/query/cypher"
 )
@@ -164,18 +166,6 @@ func TestCertificateMintPredicate(t *testing.T) {
 			want: false,
 		},
 		{
-			// The arity half of the predicate, which nothing else in the
-			// pipeline defends: the grammar accepts a multi-argument
-			// aggregate and the resolver checks arity for procedures only,
-			// so this query reaches the mint site intact. Its refs are
-			// p.id and p.age at one depth — indistinguishable from
-			// collect([p.id, p.age]), which mints — and collect(x, y) has
-			// no defined leaf for a fill to land on.
-			name: "collect over two arguments does not mint",
-			src:  "MATCH (p:Person) RETURN collect(p.id, p.age) AS xs",
-			want: false,
-		},
-		{
 			// sum commits the result of a FOLD: the leaf holds a value no
 			// ref ever held, so clause 1 is false however ref-shaped the
 			// operand is. Pinned against the collect row above, which
@@ -243,14 +233,6 @@ func TestCertificateMintPredicate(t *testing.T) {
 			want: false,
 		},
 		{
-			// min's half of the arity clause. Its refs are p.id and p.age
-			// at one depth, and min(x, y) has no defined leaf for a fill to
-			// land on any more than collect(x, y) does.
-			name: "min over two arguments does not mint",
-			src:  "MATCH (p:Person) RETURN min(p.id, p.age) AS s",
-			want: false,
-		},
-		{
 			// avg is engine-dependent — its unknown may mean "the server
 			// decides", which no schema lookup is entitled to overwrite.
 			name: "avg over a ref does not mint",
@@ -298,4 +280,51 @@ func leavesAreRefs(t *testing.T, src string) bool {
 	}
 	t.Fatalf("no rich projection in %q; the row cannot answer the question it asks", src)
 	return false
+}
+
+// TestCertificateMintPredicateArityClause pins the predicate's len(args) == 1
+// clause for collect and min/max. Their refs at two arguments are p.id and
+// p.age at one depth — indistinguishable from collect([p.id, p.age]), which
+// mints — and a call over two arguments has no defined leaf for a fill to land
+// on. Parse refuses such a call with ErrAggregateArity before the mint site
+// (bd gqlc-jjot2.12), so the rows call the predicate directly on the
+// arguments of a raw ANTLR parse; the one-argument row beside each is the
+// control that the tree reaches the predicate at all.
+func TestCertificateMintPredicateArityClause(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		fn   query.AggregateFunc
+		src  string
+		want bool
+	}{
+		{"collect over one argument mints", query.AggCollect, "RETURN collect(p.id)", true},
+		{"collect over two arguments does not mint", query.AggCollect, "RETURN collect(p.id, p.age)", false},
+		{"min over one argument mints", query.AggMin, "RETURN min(p.id)", true},
+		{"min over two arguments does not mint", query.AggMin, "RETURN min(p.id, p.age)", false},
+		{"max over two arguments does not mint", query.AggMax, "RETURN max(p.id, p.age)", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, cypher.AggregateLeavesAreRefs(tc.fn, callArguments(t, tc.src)))
+		})
+	}
+}
+
+// callArguments parses src with the generated parser alone — no listener, so
+// no refusal — and returns the argument expressions of its one function call.
+func callArguments(t *testing.T, src string) []gen.IOC_ExpressionContext {
+	t.Helper()
+	cp := gen.NewCypherParser(antlr.NewCommonTokenStream(gen.NewCypherLexer(antlr.NewInputStream(src)), antlr.TokenDefaultChannel))
+	var calls []gen.IOC_FunctionInvocationContext
+	var find func(antlr.Tree)
+	find = func(n antlr.Tree) {
+		if fi, ok := n.(gen.IOC_FunctionInvocationContext); ok {
+			calls = append(calls, fi)
+		}
+		for i := 0; i < n.GetChildCount(); i++ {
+			find(n.GetChild(i))
+		}
+	}
+	find(cp.OC_Cypher())
+	require.Len(t, calls, 1, "%q must spell exactly one function call", src)
+	return calls[0].AllOC_Expression()
 }

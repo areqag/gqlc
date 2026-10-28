@@ -419,7 +419,7 @@ func (l *listener) walk(tree antlr.Tree) error {
 	if l.err != nil {
 		return l.err
 	}
-	l.refuseAggregateArity(tree)
+	l.refuseCallArity(tree)
 	if l.err != nil {
 		return l.err
 	}

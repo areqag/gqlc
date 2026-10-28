@@ -1,0 +1,2 @@
+go test fuzz v1
+string("{\"signatures\":[{\"name\":\"a.b\",\"params\":null,\"results\":null}]}")

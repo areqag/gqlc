@@ -248,6 +248,16 @@ registry would waste debugging time downstream (an empty registry
 generates `ErrUnknownProcedure` at parse time, which reads as a
 parser bug, not a config bug).
 
+`DisallowUnknownFields()` alone does not hold §3, because
+`encoding/json` matches a key to a field without regard to case: it
+accepts `"nAme"` for `name`, and lets a later `"Signatures": []`
+overwrite `"signatures"` into the empty registry. It also decodes an
+absent or `null` `params`/`results` as `[]` and an absent `nullable` as
+`false`. So after the typed decode the loader re-reads every object as
+raw keys and refuses any key not spelled exactly as §3 spells it, and
+any required key (every key but `version`) that is absent or `null`.
+Keys are case-sensitive (gqlc-jjot2.13, gqlc-jjot2.14).
+
 ### 4.3 Error messages
 
 Loader errors wrap the underlying error (JSON decode error,

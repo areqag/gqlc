@@ -223,10 +223,13 @@ var (
 	// Introduced at C2.
 	ErrUnnamedMultiLabelType = errors.New("unnamed multi-label type")
 
-	// ErrPropertyFieldCollision is returned when two properties on the
-	// same entity mangle to the same struct field name (spec §4.5 Rule
-	// 5). The fail-message names both properties and the entity.
-	// Introduced at C2.
+	// ErrPropertyFieldCollision is returned when an entity's properties
+	// have no legal Go spelling: two properties on the same entity that
+	// mangle to the same struct field name (spec §4.5 Rule 5), or one
+	// whose mangle is not a Go field name at all (a delimited name
+	// holding a hyphen, a space or a quote, or a leading digit;
+	// gqlc-jjot2.23). The fail-message names the entity and the
+	// properties. Introduced at C2.
 	ErrPropertyFieldCollision = errors.New("property field collision")
 
 	// ErrRecordFieldCollision is returned when a declared record's

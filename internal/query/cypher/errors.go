@@ -46,7 +46,8 @@ var (
 	// imported name) — the operative semantic is "binding collision in scope,"
 	// not strictly node/edge/path (Q4 ruling, matching the Stage-9 unwind-vs-
 	// unwind precedent: the `if unwindByVar[v]` arm of func addUnwindScope
-	// in build.go). The message text mirrors that
+	// in build.go). A path variable bound twice in one part is the same
+	// collision (bd gqlc-jjot2.15, partScope). The message text mirrors that
 	// broader semantic; the sentinel identity (not the text) is the stable
 	// contract.
 	ErrVariableKindConflict = errors.New("variable bound with conflicting kinds")
@@ -135,8 +136,8 @@ var (
 	// over the parse tree, so a read site added later cannot forget it.
 	ErrEmptyIdentifier = errors.New("empty delimited identifier")
 
-	// ErrAggregateArity rejects an aggregate function call with fewer
-	// arguments than the function's arity: count, sum, avg, min, max,
+	// ErrAggregateArity rejects an aggregate function call whose argument
+	// count differs from the function's arity: count, sum, avg, min, max,
 	// collect, stDev and stDevP take one argument, percentileCont and
 	// percentileDisc take two. Wrapped message: "aggregate arity mismatch:
 	// <name> expects <expected> argument(s), got <actual>". The grammar
@@ -145,16 +146,42 @@ var (
 	// class ErrProcedureArity already answers for CALL. count(*) is a
 	// separate grammar alternative and never reaches this check. bd
 	// gqlc-jjot2.1: before the refusal, `RETURN count()` panicked the
-	// aggregate classifier.
-	//
-	// Too many arguments is NOT refused: collect(x, y) parses, and the
-	// certificate predicate's own arity clause declines to mint for it.
+	// aggregate classifier. bd gqlc-jjot2.12 extended it from too few
+	// arguments to too many: min(a, b) was typed from its first argument.
 	//
 	// The sentinel is durable — the arity is a fact about the language — and
-	// its fail-site is the pre-walk sweep refuseAggregateArity, total over
-	// the parse tree, so an aggregate at any position (RETURN, WITH, ORDER BY,
-	// a rich expression, an EXISTS subquery) is refused by the same check.
+	// its fail-site is the pre-walk sweep refuseCallArity, total over the
+	// parse tree, so an aggregate at any position (RETURN, WITH, ORDER BY, a
+	// rich expression, an EXISTS subquery) is refused by the same check.
 	ErrAggregateArity = errors.New("aggregate arity mismatch")
+
+	// ErrIntegerOverflow rejects an integer literal the grammar admits but
+	// the model cannot hold: a variable-length relationship's hop bound past
+	// the platform int (`*9227000000000000000`). openCypher reports an
+	// out-of-range literal as SyntaxError: IntegerOverflow. The fail-site is
+	// edgeHopsFromRangeLiteral, the one place the parser reads an integer
+	// literal's value rather than only its type. bd gqlc-jjot2.16: before
+	// the sentinel, the refusal was a plain strconv error.
+	ErrIntegerOverflow = errors.New("integer literal out of range")
+
+	// ErrNestedAggregate rejects an aggregate call among another aggregate
+	// call's arguments: count(count(n)), sum(count(*)). openCypher reports it
+	// as SyntaxError: NestedAggregation. An aggregate inside an EXISTS
+	// subquery in the arguments belongs to the subquery and is not refused.
+	// Fail-site: refuseNestedAggregate, under the pre-walk sweep
+	// refuseCallArity. bd gqlc-jjot2.12.
+	ErrNestedAggregate = errors.New("nested aggregate function")
+
+	// ErrFunctionArity rejects a built-in scalar function call whose argument
+	// count is outside the function's arity range: size(), substring('a'),
+	// atan2(1). Wrapped message: "function arity mismatch: <name> expects
+	// <expected> argument(s), got <actual>". It covers only the unnamespaced
+	// names the parser's scalarArity table lists — a name absent there, or a
+	// namespaced one, is never refused at any count — so it is the scalar
+	// sibling of ErrAggregateArity, under the same openCypher class
+	// (SyntaxError: InvalidNumberOfArguments). Fail-site: refuseScalarArity,
+	// under the pre-walk sweep refuseCallArity. bd gqlc-jjot2.12.
+	ErrFunctionArity = errors.New("function arity mismatch")
 )
 
 // allSentinels is the canonical closed set of sentinels Parse may return
@@ -174,6 +201,9 @@ var allSentinels = []error{
 	ErrUnsatisfiableRelationshipType,
 	ErrEmptyIdentifier,
 	ErrAggregateArity,
+	ErrIntegerOverflow,
+	ErrNestedAggregate,
+	ErrFunctionArity,
 }
 
 // AllSentinels returns a copy of the cypher package's user-input-reachable

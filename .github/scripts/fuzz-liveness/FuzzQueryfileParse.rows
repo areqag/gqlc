@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+# Liveness rows for FuzzQueryfileParse (internal/queryfile), run by `just
+# fuzz-liveness FuzzQueryfileParse`: each row plants one defect with sed, in a
+# scratch copy of HEAD, and asks whether the harness reports it. The protocol
+# and the verdicts are driver.sh's; the recorded run, with every row's diff, is
+# docs/mutation/fuzz-liveness-FuzzQueryfileParse.md.
+#
+# R2's condition — a line starting "//<TAB>name:", an annotation with a tab
+# where every seed has a space or nothing — is one no committed seed meets (the
+# driver re-checks that on the mutant before it fuzzes) and one a single
+# replaced byte of any seed's annotation does.
+set -euo pipefail
+
+# SC1091: `just lint-hooks` runs shellcheck without -x, so it cannot follow the
+# source; driver.sh is linted in its own right by the same sweep.
+# shellcheck source=driver.sh disable=SC1091
+. "$(dirname "${BASH_SOURCE[0]}")/driver.sh"
+
+file=internal/queryfile/parse.go
+line_fn='s/^func (a \*queryAccumulator) line(lineno int, line string) error {$/&\n\tif strings.HasPrefix(line, "\/\/\\tname:") {\n\t\t'
+seeds="go test -count=1 -run '^FuzzQueryfileParse\$' ./internal/queryfile"
+# Expanded by driver.sh's `bash -c` in the copy, not here.
+# shellcheck disable=SC2016
+fuzz='just fuzz FuzzQueryfileParse "$LIVENESS_BUDGET"'
+
+liveness_begin FuzzQueryfileParse internal/queryfile
+
+liveness_control C1 "$seeds"
+liveness_control C2 "$fuzz"
+
+# R1 seed-reach: every query a seed declares is flushed.
+liveness_row R1 "$file" \
+    's/^func (a \*queryAccumulator) flush() {$/&\n\tpanic("planted: R1")/' \
+    'panic: planted: R1' seeds "$seeds"
+
+# R2 mutation-reach.
+liveness_row R2 "$file" \
+    "${line_fn}"'panic("planted: R2")\n\t}/' \
+    'panic: planted: R2' fuzz "$fuzz"
+
+# R3 slow call: R2's condition, sleeping 1.5 s. The target parses twice under
+# one Guard, so one such line costs 3 s: past the 2 s limit and, for up to
+# three such lines, short of the 10 s watchdog.
+liveness_row R3 "$file" \
+    's/^\t"strings"$/&\n\t"time"/
+'"${line_fn}"'time.Sleep(1500 * time.Millisecond)\n\t}/' \
+    'fuzzkit\.Guard: slow input' fuzz "$fuzz"
+
+# R3b hang: R2's condition, never returning. Guard's watchdog ends the worker.
+liveness_row R3b "$file" \
+    "${line_fn}"'for {\n\t\t}\n\t}/' \
+    'hung or terminated unexpectedly|fuzzkit\.Guard: watchdog' fuzz "$fuzz"
+
+# R4 property: Text loses its last byte. No panic follows; the decomposition
+# property sees Text stop inside a line of its body. Every valid seed has a
+# query, so the seed pass reports it.
+liveness_row R4 "$file" \
+    's/^\treturn strings\.TrimSpace(strings\.Join(lines, "\\n"))$/\tt := strings.TrimSpace(strings.Join(lines, "\\n"))\n\tif len(t) > 1 {\n\t\tt = t[:len(t)-1]\n\t}\n\treturn t/' \
+    'property decomposition' property "$fuzz"
+
+liveness_end

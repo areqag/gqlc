@@ -114,11 +114,33 @@ func (c ErrClass) String() string {
 //
 // isSyntax is the caller's because what a syntax error looks like is each
 // parser's own. A nil isSyntax matches nothing.
+//
+// A call that quotes its input in its messages can echo a "bug:" no fail site
+// wrote; ClassifyInputError is this function for such a call.
 func ClassifyError(err error, isSyntax func(error) bool, sentinels ...error) ErrClass {
+	return classify(err, true, isSyntax, sentinels)
+}
+
+// ClassifyInputError is ClassifyError for an error produced from input, by a
+// call that may quote input in its messages: a parser naming the offending
+// token, a resolver naming a variable or a property. When input itself
+// contains "bug:", an error carrying the marker may only be echoing it, so the
+// marker is not read and the error is classified by the remaining tests.
+//
+// What that misses: a fail site's own "bug:" on an input that spells the
+// marker. The cost is confined to such inputs; on every other input this is
+// ClassifyError exactly.
+func ClassifyInputError(input string, err error, isSyntax func(error) bool, sentinels ...error) ErrClass {
+	return classify(err, !strings.Contains(input, bugMarker), isSyntax, sentinels)
+}
+
+const bugMarker = "bug:"
+
+func classify(err error, readMarker bool, isSyntax func(error) bool, sentinels []error) ErrClass {
 	if err == nil {
 		return ClassNil
 	}
-	if strings.Contains(err.Error(), "bug:") {
+	if readMarker && strings.Contains(err.Error(), bugMarker) {
 		return ClassBug
 	}
 	for _, s := range sentinels {

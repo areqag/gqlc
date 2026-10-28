@@ -676,6 +676,14 @@ func prepareEntityFields(entityName string, props map[string]schema.Property, tm
 	for _, k := range keys {
 		p := props[k]
 		field := paramFieldName(p.Name)
+		// The spelling half of the record-field check, one container
+		// out: a delimited property name can hold what no Go field
+		// name can, and without this the struct it is emitted into
+		// reached go/format as ErrFormatFailure (gqlc-jjot2.23, found
+		// by FuzzGenerate).
+		if !goFieldName(field) {
+			return nil, fmt.Errorf("%w: entity %q property %q mangles to %q, which is not a Go field name", ErrPropertyFieldCollision, entityName, p.Name, field)
+		}
 		if first, dup := seen[field]; dup {
 			return nil, fmt.Errorf("%w: entity %q properties %q and %q both mangle to %q", ErrPropertyFieldCollision, entityName, first, p.Name, field)
 		}
@@ -1144,7 +1152,8 @@ func deriveParamFields(q NamedQuery, tm TypeMap) ([]Param, error) {
 	for pi, param := range q.Validated.Parameters {
 		field := paramFieldName(param.Name)
 		// A name of nothing but underscores mangles to the empty
-		// string, which is not a Go field name. Refused only where
+		// string, and a numbered parameter ($0, $1) to a digit-leading
+		// one; neither is a Go field name. Refused only where
 		// the emission spells one: the one-parameter and no-parameter
 		// forms take the bare typed argument and derive no identifier
 		// from the parameter name at all, so $_ is served there and
@@ -1152,16 +1161,17 @@ func deriveParamFields(q NamedQuery, tm TypeMap) ([]Param, error) {
 		// SingleParameterForm pins both halves).
 		//
 		// Before this, the two-or-more form emitted a struct field
-		// with no name and a bind expression reading `arg.,`, which
+		// with no name (gqlc-2m2v) or named 0 (gqlc-jjot2.21, found by
+		// FuzzGenerate) and a bind expression to match, which
 		// left go/format to refuse the emission as ErrFormatFailure —
 		// a sentinel naming a template bug, handed to an author whose
 		// query is the thing at fault. Deferred rather than
 		// permanent: a future stage that spells Params fields
 		// positionally admits this, which is what puts it under
 		// ErrOutOfC6Scope rather than an unrepresentability.
-		if field == "" && len(q.Validated.Parameters) > 1 {
-			return nil, fmt.Errorf("%w: query %q parameter %d $%s mangles to no Go field name, and a query binding %d parameters spells one per parameter; rename it",
-				ErrOutOfC6Scope, q.Name, pi, param.Name, len(q.Validated.Parameters))
+		if !goFieldName(field) && len(q.Validated.Parameters) > 1 {
+			return nil, fmt.Errorf("%w: query %q parameter %d $%s mangles to %q, which is not a Go field name, and a query binding %d parameters spells one per parameter; rename it",
+				ErrOutOfC6Scope, q.Name, pi, param.Name, field, len(q.Validated.Parameters))
 		}
 		if first, dup := seenParam[field]; dup {
 			return nil, fmt.Errorf("%w: query %q parameters $%s (position %d) and $%s (position %d) both mangle to %q", ErrParamNameCollision, q.Name, q.Validated.Parameters[first].Name, first, param.Name, pi, field)

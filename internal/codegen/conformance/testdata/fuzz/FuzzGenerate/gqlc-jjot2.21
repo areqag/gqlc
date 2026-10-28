@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("\x01CREATE PROPERTY GRAPH TYPE ManyColMany AS {\n    (:Person {\n        name   :: STRING NOT NULL,\n        age    :: INT64 NOT NULL,\n        locale :: STRING NOT NULL\n    })\n}\n\x00// name: A :many\nMATCH (p:Person) WHERE p.age > $0 AND p.locale = $1 RETURN p.name\n")
