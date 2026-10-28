@@ -1259,6 +1259,14 @@ test-bd-prime-guard:
 test-setup-go-assertion:
     @.github/scripts/assert-go-toolchain.rows .github/scripts/assert-go-toolchain.sh
 
+# The rows for .githooks/hooks-drift-tripwire (bd gqlc-ofsup): both observed
+# drift shapes are refused once and repaired, post-checkout neither blocks nor
+# repairs, and the blocking copies still refuse when check-hooks runs them under
+# a healthy value. Throwaway repositories only; <1s. Enrolled under `tidy`
+# beside the two above.
+test-hooks-drift-tripwire:
+    @.githooks/hooks-drift-tripwire.rows .githooks/hooks-drift-tripwire
+
 # The rows for the `gates` recipe's justfile-format arm, for the comparison it
 # shares with check-just-version, and for that recipe's own answers (bd
 # gqlc-i2lw). ~1s: the real `gates` body runs under the real just with every
@@ -2822,6 +2830,9 @@ gates:
     # The rows for setup-go's provisioned-toolchain assertion (bd gqlc-ma1l).
     # ci.yml's tidy job runs the same command.
     run tidy           just test-setup-go-assertion
+    # The rows for the hooksPath drift tripwire (bd gqlc-ofsup). ci.yml's tidy
+    # job runs the same command.
+    run tidy           just test-hooks-drift-tripwire
     # The rows for the justfile-format arm above (bd gqlc-i2lw). ci.yml's tidy
     # job runs the same command.
     run tidy           just test-gates-justfile-format

@@ -2,7 +2,8 @@
 # gqlc-hooks-drift-tripwire
 #
 # Refuses commits and pushes while core.hooksPath has drifted off `.githooks`,
-# from a location the drift itself cannot disarm.
+# from a location the drift itself cannot disarm, and repairs the drift so the
+# retry goes through the real hooks.
 #
 # THE INVERSION. Every other drift check in this repo lives somewhere the drift
 # kills. `.githooks/pre-commit` cannot report that `.githooks/` is unwired — a
@@ -35,6 +36,25 @@
 #
 # Installed by: just init. Not activated by core.hooksPath — being reached at
 # all is the finding.
+#
+# WHY IT REPAIRS (bd gqlc-ofsup). The known writer, a worktree-isolated agent
+# spawn, puts the value back itself unless its process is killed inside the
+# window, and kills are routine here; four drifts on record never cleared. A
+# refusal that only names `just init` left those standing until a person read
+# it. So every arm but post-checkout writes `.githooks` back before reporting.
+#
+# It still REFUSES the operation it interrupted. The git process that ran this
+# already resolved its hooks directory and keeps it for the rest of the command,
+# so commit-msg would land here too, now under a healthy value. Handing off to
+# the real hook from here would need this copy to tell that apart from
+# check-hooks running it directly, and the inputs that could tell them apart
+# are the ones check-hooks warns any copy can key a disarm on. One refused
+# command and a retry is the cost instead.
+#
+# post-checkout does not repair because it fires inside `git worktree add`, the
+# spawn's own step, and the spawn's restore is what normally clears the drift.
+# Only the two observed shapes are repaired: unset, and a path that resolves to
+# this directory. Anything else is reported as before.
 
 set -u
 
@@ -99,10 +119,32 @@ post-checkout | post-merge) blocking=no ;;
 *) blocking=yes ;;
 esac
 
+# Physical path of a directory, or nothing when it cannot be entered.
+physical() {
+    cd -- "$1" 2>/dev/null || return 0
+    pwd -P
+}
+
+repaired=no
+if [ "$hook" != post-checkout ]; then
+    here="$(physical "$(dirname -- "$0")")"
+    if [ -z "$configured" ] ||
+        { [ -n "$here" ] && [ "$(physical "$configured")" = "$here" ]; }; then
+        if git config core.hooksPath .githooks 2>/dev/null &&
+            [ "$(git config --get core.hooksPath 2>/dev/null || true)" = .githooks ]; then
+            repaired=yes
+        fi
+    fi
+fi
+
 {
     if [ "$blocking" = yes ]; then
         echo "ERROR: local git hooks are inactive — core.hooksPath is '${configured:-<unset>}', expected '.githooks'."
         echo "       This operation was REFUSED. Nothing was written."
+        if [ "$repaired" = yes ]; then
+            echo "       core.hooksPath has now been REPAIRED to '.githooks'. Run the same"
+            echo "       command again and it goes through this repository's real hooks."
+        fi
     else
         # "cannot block it, and did not try", not "is ignored". post-merge's
         # status genuinely IS ignored by git; post-checkout's BECOMES the exit
@@ -112,6 +154,9 @@ esac
         echo "WARNING: local git hooks are inactive — core.hooksPath is '${configured:-<unset>}', expected '.githooks'."
         echo "       This operation was ALLOWED — the '$hook' hook cannot block it, and did not try."
         echo "       Nothing was undone."
+        if [ "$repaired" = yes ]; then
+            echo "       core.hooksPath has now been REPAIRED to '.githooks'."
+        fi
     fi
     echo "       This ran from the default hooks directory, which only happens when"
     echo "       .githooks/ is unwired. While it stands, ALL of these are dead:"
@@ -121,14 +166,16 @@ esac
     echo "         post-merge  — the bd/GitHub issue mirror"
     echo "       Linked worktrees share one .git/config, so every worktree is affected."
     echo ""
-    echo "       MOST FIRINGS ARE TRANSIENT, so try your command again before you go"
-    echo "       hunting. The known writer is a worktree-isolated agent spawn, which"
-    echo "       rewrites the shared value while it builds its worktree and puts it"
-    echo "       back afterwards — measured 2026-09-02 at 13s and 14s for one spawn"
-    echo "       and 54s for two overlapping, and any worktree's spawn unhooks yours."
-    echo "       Four occurrences on record never cleared, so if it stands, repair."
-    echo ""
-    echo "       Repair (idempotent, arms every worktree at once): just init"
+    echo "       The known writer is a worktree-isolated agent spawn, which rewrites"
+    echo "       the shared value while it builds its worktree and puts it back"
+    echo "       afterwards — measured 2026-09-02 at 13s and 14s for one spawn and 54s"
+    echo "       for two overlapping, and any worktree's spawn unhooks yours."
+    if [ "$repaired" = yes ]; then
+        echo "       If this fires again straight away, a spawn is still in its window."
+    else
+        echo ""
+        echo "       Repair (idempotent, arms every worktree at once): just init"
+    fi
 } >&2
 
 if [ "$blocking" = yes ]; then
