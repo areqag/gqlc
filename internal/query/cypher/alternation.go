@@ -81,7 +81,7 @@ type Alternation struct {
 // signature registry, unlike Parse: the walk is syntactic, so a CALL that only
 // resolves against a registry is read the same way with or without one.
 func RelationshipTypeAlternations(src string) []Alternation {
-	lex := gen.NewCypherLexer(lexfold.NewStream(strings.NewReader(src), &lexfold.Cypher))
+	lex := gen.NewCypherLexer(lexfold.NewStream(strings.NewReader(src), lexfold.Cypher))
 	cp := gen.NewCypherParser(antlr.NewCommonTokenStream(lex, antlr.TokenDefaultChannel))
 	lex.RemoveErrorListeners()
 	cp.RemoveErrorListeners()

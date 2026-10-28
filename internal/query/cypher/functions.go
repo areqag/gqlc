@@ -64,7 +64,7 @@ type Call struct {
 // TestUnqualifiedFunctionCallsIsTotal and
 // TestUnqualifiedFunctionCallsWritesNothingToStderr.
 func UnqualifiedFunctionCalls(src string) []Call {
-	lex := gen.NewCypherLexer(lexfold.NewStream(strings.NewReader(src), &lexfold.Cypher))
+	lex := gen.NewCypherLexer(lexfold.NewStream(strings.NewReader(src), lexfold.Cypher))
 	cp := gen.NewCypherParser(antlr.NewCommonTokenStream(lex, antlr.TokenDefaultChannel))
 	lex.RemoveErrorListeners()
 	cp.RemoveErrorListeners()
@@ -124,7 +124,7 @@ type QualifiedCall struct {
 // TestQualifiedFunctionCallsIsTotal and
 // TestQualifiedFunctionCallsWritesNothingToStderr.
 func QualifiedFunctionCalls(src string) []QualifiedCall {
-	lex := gen.NewCypherLexer(lexfold.NewStream(strings.NewReader(src), &lexfold.Cypher))
+	lex := gen.NewCypherLexer(lexfold.NewStream(strings.NewReader(src), lexfold.Cypher))
 	cp := gen.NewCypherParser(antlr.NewCommonTokenStream(lex, antlr.TokenDefaultChannel))
 	lex.RemoveErrorListeners()
 	cp.RemoveErrorListeners()

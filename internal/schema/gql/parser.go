@@ -36,7 +36,7 @@ func (parser) Parse(r io.Reader) (schema.Schema, error) {
 // Loader share one reading of a file and differ only in what they do with a
 // reference.
 func parse(r io.Reader) (rawSchema, error) {
-	lex := gen.NewGQLLexer(lexfold.NewStream(r, &lexfold.GQL))
+	lex := gen.NewGQLLexer(lexfold.NewStream(r, lexfold.GQL))
 	ts := antlr.NewCommonTokenStream(lex, antlr.TokenDefaultChannel)
 	gp := gen.NewGQLParser(ts)
 

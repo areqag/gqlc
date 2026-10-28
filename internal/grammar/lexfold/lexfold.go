@@ -36,53 +36,56 @@ import (
 // all at or below it.
 const MaxDFAEdge = 255
 
-// The runtime reads this variable on every lexer step, so it is set once here,
-// before any lexer exists, rather than per Stream.
+// antlr4-go v4.13.1 declares LexerATNSimulatorMaxDFAEdge as a package var in
+// lexer_atn_simulator.go, and getExistingTargetState and addDFAEdge there skip
+// the edge cache for any symbol above it. The runtime reads it on every lexer
+// step, so it is set once here, before any lexer exists, rather than per Stream.
 func init() {
 	antlr.LexerATNSimulatorMaxDFAEdge = MaxDFAEdge
 }
 
-// Keep marks a range whose runes have no stand-in and reach the lexer as
+// Keep marks a class whose runes have no stand-in and reach the lexer as
 // themselves.
 const Keep rune = -1
 
-// Range maps the runes Lo..Hi, inclusive, to the stand-in To.
+// Range assigns the runes Lo..Hi, inclusive, to a class, an index into a
+// Table. The ranges are shared by both grammars, since their lexer classes
+// come from the same Unicode properties; only the stand-ins differ.
 type Range struct {
-	Lo, Hi, To rune
+	Lo, Hi rune
+	Class  uint8
 }
 
-// Table is one grammar's fold: its ranges sorted by Lo and disjoint, plus the
-// stand-in for every rune above MaxDFAEdge that no range covers.
-type Table struct {
-	Ranges []Range
-	Other  rune
-}
+// Table is one grammar's stand-in for each class. Class 0 is every rune above
+// MaxDFAEdge that no range covers.
+type Table []rune
 
-func (t *Table) fold(r rune) rune {
+func (t Table) fold(r rune) rune {
 	if r <= MaxDFAEdge {
 		return r
 	}
-	i := sort.Search(len(t.Ranges), func(i int) bool { return t.Ranges[i].Hi >= r })
-	if i < len(t.Ranges) && t.Ranges[i].Lo <= r {
-		if to := t.Ranges[i].To; to != Keep {
-			return to
-		}
-		return r
+	class := uint8(0)
+	i := sort.Search(len(ranges), func(i int) bool { return ranges[i].Hi >= r })
+	if i < len(ranges) && ranges[i].Lo <= r {
+		class = ranges[i].Class
 	}
-	return t.Other
+	if to := t[class]; to != Keep {
+		return to
+	}
+	return r
 }
 
 // Stream is an antlr.CharStream that shows the lexer each rune folded through
 // a Table and answers every text request from the original runes.
 type Stream struct {
 	*antlr.InputStream
-	table *Table
+	table Table
 }
 
 // NewStream reads r to the end through antlr.NewIoStream, so the input decodes
 // exactly as it did before folding: an invalid byte is U+FFFD and a read error
 // ends the input.
-func NewStream(r io.Reader, t *Table) *Stream {
+func NewStream(r io.Reader, t Table) *Stream {
 	return &Stream{InputStream: antlr.NewIoStream(r), table: t}
 }
 

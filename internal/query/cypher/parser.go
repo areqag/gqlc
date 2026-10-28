@@ -64,7 +64,7 @@ func New(opts ...Option) query.Parser {
 // Query. The executed query stays the original text (ADR 0005); this model is the
 // type interface only.
 func (p parser) Parse(r io.Reader) (query.Query, error) {
-	lex := gen.NewCypherLexer(lexfold.NewStream(r, &lexfold.Cypher))
+	lex := gen.NewCypherLexer(lexfold.NewStream(r, lexfold.Cypher))
 	ts := antlr.NewCommonTokenStream(lex, antlr.TokenDefaultChannel)
 	cp := gen.NewCypherParser(ts)
 

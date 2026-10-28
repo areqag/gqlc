@@ -65,11 +65,11 @@ func run(newLexer func(antlr.CharStream) antlr.Lexer, in antlr.CharStream) ([]le
 func TestFoldPreservesTokens(t *testing.T) {
 	lexers := []struct {
 		name  string
-		table *Table
+		table Table
 		new   func(antlr.CharStream) antlr.Lexer
 	}{
-		{"gql", &GQL, func(s antlr.CharStream) antlr.Lexer { return gqlgen.NewGQLLexer(s) }},
-		{"cypher", &Cypher, func(s antlr.CharStream) antlr.Lexer { return cyphergen.NewCypherLexer(s) }},
+		{"gql", GQL, func(s antlr.CharStream) antlr.Lexer { return gqlgen.NewGQLLexer(s) }},
+		{"cypher", Cypher, func(s antlr.CharStream) antlr.Lexer { return cyphergen.NewCypherLexer(s) }},
 	}
 	rng := rand.New(rand.NewPCG(1, 2))
 	for _, l := range lexers {
