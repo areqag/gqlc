@@ -130,7 +130,13 @@ const (
 	// to make an author account for: the property_name_repeated case is closed
 	// by ErrDuplicatePropertyName, so it is an unsupported entry now rather than
 	// a model known to be wrong.
-	wantSemanticCases = 17
+	//
+	// 17 → 15 under gqlc-h9n.31: INT(10) and UINT(10) round up to TypeInt16 and
+	// TypeUint16 (ADR 0050), so they no longer collide with bare INT and UINT and
+	// TestSemanticCaseCollisions went red on both rows, which were deleted with
+	// this number. The scalar_float.gql case stays: FLOAT(p) is not folded
+	// (ADR 0049).
+	wantSemanticCases = 15
 )
 
 // isValidFeature reports whether v is an accepted value of corpusEntry.feature:
@@ -213,7 +219,9 @@ type corpusEntry struct {
 	// magic string: that bead cannot close without accounting for every entry
 	// pointing at it, which is what stops a decline from becoming the
 	// undocumented rejection this epic exists to close. A resolving entry names a
-	// bead only when it resolves to a model that is known to be wrong.
+	// bead only when it resolves to a model that is known to be wrong, and names
+	// gqlc-0ri on the same terms when that loss is a permanent decision
+	// (scalar_float.gql, ADR 0049).
 	bead string
 	// reason is one line on why an unsupported entry is not supported, or on what
 	// a resolving entry gets wrong.
