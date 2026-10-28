@@ -266,8 +266,8 @@ var skiplist = map[string]skipCategory{
 	"[14] Floating point parameter for LIMIT should fail":               catValueBelowBoundary,
 	"[15] Floating point parameter for LIMIT with ORDER BY should fail": catValueBelowBoundary,
 
-	// --- catGroupingKeySemantic (16): aggregate-position rules and
-	//     grouping-key correctness. Aggregates in WHERE, nested aggregates,
+	// --- catGroupingKeySemantic (15): aggregate-position rules and
+	//     grouping-key correctness. Aggregates in WHERE,
 	//     AmbiguousAggregationExpression at RETURN/WITH/ORDER BY/procedure-call
 	//     argument, aggregates in ORDER BY of non-projected columns, rand()
 	//     inside count(...). All ride the same semantic rule the type interface
@@ -284,9 +284,6 @@ var skiplist = map[string]skipCategory{
 	"[9] Fail if more complex expression, even if projected, are used inside expression which contains an aggregation expression":  catGroupingKeySemantic,
 	"[20] Fail if not returned variables are used inside an expression which contains an aggregation expression":                   catGroupingKeySemantic,
 	"[21] Fail if more complex expressions, even if returned, are used inside expression which contains an aggregation expression": catGroupingKeySemantic,
-	// count(count(*)) — nested aggregation is a NestedAggregation semantic rule
-	// below the type-interface boundary.
-	"[14] Aggregates in aggregates": catGroupingKeySemantic,
 	// count(rand()) — the impurity of rand() prevents grouping-key aggregation
 	// semantics; a value-level engine rule below the boundary.
 	"[15] Using `rand()` in aggregations": catGroupingKeySemantic,

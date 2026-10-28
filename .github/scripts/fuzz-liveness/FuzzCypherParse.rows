@@ -7,9 +7,12 @@
 #
 # R2's condition is §3's class, an argument count: an aggregate call given
 # exactly one argument more than its arity (count(a, b), percentileCont(a, b,
-# c)). The grammar admits it and the parser accepts it, and no committed seed
-# carries one (the driver re-checks that on the mutant before it fuzzes); one
-# inserted ", x" inside any seed's aggregate call does.
+# c)). The grammar admits it, and the plant sits ahead of the refusal the
+# parser gives it since bd gqlc-jjot2.12, so the refusal does not hide it. No
+# committed seed carries one (the driver re-checks that on the mutant before it
+# fuzzes), so the gqlc-jjot2.12 seeds are a zero-argument call and a nested
+# aggregate rather than the bead's too-many rows; one inserted ", x" inside any
+# seed's aggregate call does.
 set -euo pipefail
 
 # SC1091: `just lint-hooks` runs shellcheck without -x, so it cannot follow the
