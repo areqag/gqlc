@@ -1,0 +1,68 @@
+#!/usr/bin/env bash
+# Liveness rows for FuzzGeneratedBuilds (internal/codegen/conformance), run by
+# `just fuzz-liveness FuzzGeneratedBuilds`: each row plants one defect with
+# sed, in a scratch copy of HEAD, and asks whether the harness reports it. The
+# protocol and the verdicts are driver.sh's; the recorded run, with every
+# row's diff, is docs/mutation/fuzz-liveness-FuzzGeneratedBuilds.md.
+#
+# R2's condition is FuzzGenerate's: a query named with an X, which none of the
+# three seed fixtures carries and one replaced byte in a `// name:` annotation
+# does.
+set -euo pipefail
+
+# SC1091: `just lint-hooks` runs shellcheck without -x, so it cannot follow the
+# source; driver.sh is linted in its own right by the same sweep.
+# shellcheck source=driver.sh disable=SC1091
+. "$(dirname "${BASH_SOURCE[0]}")/driver.sh"
+
+pkg=internal/codegen/conformance
+prepare=internal/codegen/prepare.go
+# R2's condition with PLANT standing for its body; see FuzzGenerate.rows for
+# why each body is a variable of its own.
+named='s/^func Prepare(in Input, tm TypeMap, packageName string) (Prepared, error) {$/&\n\tfor _, q := range in.Queries {\n\t\tif strings.Contains(q.Name, "X") {\n\t\t\tPLANT\n\t\t}\n\t}/'
+plant_panic='panic("planted: R2")'
+plant_sleep='time.Sleep(6 * time.Second)'
+plant_hang='for {\n\t\t\t}'
+seeds="go test -count=1 -run '^FuzzGeneratedBuilds\$' ./$pkg"
+# -parallel 2: every exec that reaches the build is a `go build`, and the host
+# is shared. Expanded by driver.sh's `bash -c` in the copy, not here.
+# shellcheck disable=SC2016
+fuzz='just fuzz FuzzGeneratedBuilds "$LIVENESS_BUDGET" 2'
+
+liveness_begin FuzzGeneratedBuilds "$pkg"
+
+liveness_control C1 "$seeds"
+liveness_control C2 "$fuzz"
+
+# R1 seed-reach: every seed reaches Prepare.
+liveness_row R1 "$prepare" \
+    's/^func Prepare(in Input, tm TypeMap, packageName string) (Prepared, error) {$/&\n\tpanic("planted: R1")/' \
+    'panic: planted: R1' seeds "$seeds"
+
+# R2 mutation-reach.
+liveness_row R2 "$prepare" \
+    "${named/PLANT/$plant_panic}" \
+    'panic: planted: R2' fuzz "$fuzz"
+
+# R3 slow call: R2's condition, sleeping 6 s per Prepare. The guarded exec runs
+# every backend and two or three reach Prepare, so it takes 12 to 18 s: past
+# the 10 s buildLimit and short of its 50 s watchdog.
+liveness_row R3 "$prepare" \
+    's/^\t"strings"$/&\n\t"time"/
+'"${named/PLANT/$plant_sleep}" \
+    'fuzzkit\.Guard: slow input' fuzz "$fuzz"
+
+# R3b hang: R2's condition, never returning. Guard's watchdog ends the worker
+# at 50 s and the engine reports a worker that terminated unexpectedly.
+liveness_row R3b "$prepare" \
+    "${named/PLANT/$plant_hang}" \
+    'hung or terminated unexpectedly|fuzzkit\.Guard: watchdog' fuzz "$fuzz"
+
+# R4 property: neo4j's WithTx constructs its txDB with a field the type does
+# not declare. The file still parses and is gofmt-clean, so FuzzGenerate
+# passes it; only the compiler refuses it. Every seed emits WithTx.
+liveness_row R4 internal/codegen/neo4j/render_db.go \
+    's/^\treturn &Queries{queries: queries{db: txDB{tx: tx}}}$/\treturn \&Queries{queries: queries{db: txDB{tx: tx, planted: 1}}}/' \
+    'property builds' property "$fuzz"
+
+liveness_end
