@@ -187,6 +187,7 @@ unmutated tree, 2026-10-28, under the same shared load, both green:
 |---|---|---|---|---|
 | `57dde5a3` | go default (60 s) | 35 758 | 75 | none |
 | `9e41b230` | 10x (gqlc-jjot2.25) | 501 970 | 2 629 | none |
+| `0334abca`, tolerance disabled | 10x | 446 590 | 2 624 | none: gqlc-jjot2.28 did not recur with gqlc-jjot2.20's fix |
 
 The fourteen-fold difference is the minimization stalls gqlc-jjot2.25
 describes: under the default, the engine dispatched no fuzz work for tens
