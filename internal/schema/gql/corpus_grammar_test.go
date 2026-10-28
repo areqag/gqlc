@@ -27,7 +27,7 @@ const grammarPath = "../../grammar/gql/GQL.g4"
 // internal/grammar/gql/SOURCE.md outside its "Local modifications" section is a
 // statement about the upstream file, and a drift re-fetch is compared against
 // upstreamSHA256.
-const grammarSHA256 = "1f19435071f86fd3be5fcaccbd3957fbb29327a66d5a3a573ea0ab06315d1b78"
+const grammarSHA256 = "a825abd89f1b4cd1215497996bd09fd120249dca6f28616f08ecf8f133594379"
 
 // upstreamSHA256 is the hash of the file as vendored, before gqlc's own
 // additions: the value SOURCE.md's two re-fetch commands are checked against.
@@ -70,7 +70,7 @@ var localInsertions = []string{
 // dimension is parsed and dropped, like every other magnitude qualifier
 // (ADR 0002).
 //
-// VECTOR is NON-reserved, unlike UUID: it is a member of nonReservedWords,
+// VECTOR is NON-reserved, as UUID is: it is a member of nonReservedWords,
 // so a property, label or variable spelled vector still lexes as a name,
 // pinned by TestPropertyVectorIsNotReserved.
 vectorType
@@ -93,17 +93,17 @@ vectorType
 // element type — so it needs no parenthetical and the rule is the keyword and
 // the qualifier alone.
 //
-// UUID is RESERVED, like every other type keyword this grammar declares
-// (DATE, DURATION, DECIMAL and the rest) and unlike the ISO
-// <non-reserved word> list, which UUID is not a member of because ISO does
-// not know the word. A property, label or variable spelled uuid therefore
-// stops lexing as an identifier — the escape hatch is the delimited spelling,
-// accent-quoted or double-quoted, pinned by
-// TestPropertyUUIDReservedWordEscapeHatch.
+// UUID is NON-reserved: it is a member of nonReservedWords, so a property,
+// label or variable spelled uuid still lexes as a name, as it does in ISO
+// GQL, which has no such keyword. Pinned by TestPropertyUUIDIsNotReserved
+// (bd gqlc-dftpc).
 uuidType
     : UUID notNull?
 `,
 	"UUID: 'UUID';\n",
+	// gqlc-dftpc: UUID as a non-reserved word, so a name spelled uuid still
+	// lexes as an identifier (TestPropertyUUIDIsNotReserved).
+	"    | UUID\n",
 }
 
 // TestVendoredGrammarIsUnmodified fails on any edit to GQL.g4. Editing it is not

@@ -1768,7 +1768,7 @@ predefinedType
 // dimension is parsed and dropped, like every other magnitude qualifier
 // (ADR 0002).
 //
-// VECTOR is NON-reserved, unlike UUID: it is a member of nonReservedWords,
+// VECTOR is NON-reserved, as UUID is: it is a member of nonReservedWords,
 // so a property, label or variable spelled vector still lexes as a name,
 // pinned by TestPropertyVectorIsNotReserved.
 vectorType
@@ -1779,13 +1779,10 @@ vectorType
 // element type — so it needs no parenthetical and the rule is the keyword and
 // the qualifier alone.
 //
-// UUID is RESERVED, like every other type keyword this grammar declares
-// (DATE, DURATION, DECIMAL and the rest) and unlike the ISO
-// <non-reserved word> list, which UUID is not a member of because ISO does
-// not know the word. A property, label or variable spelled uuid therefore
-// stops lexing as an identifier — the escape hatch is the delimited spelling,
-// accent-quoted or double-quoted, pinned by
-// TestPropertyUUIDReservedWordEscapeHatch.
+// UUID is NON-reserved: it is a member of nonReservedWords, so a property,
+// label or variable spelled uuid still lexes as a name, as it does in ISO
+// GQL, which has no such keyword. Pinned by TestPropertyUUIDIsNotReserved
+// (bd gqlc-dftpc).
 uuidType
     : UUID notNull?
     ;
@@ -3144,6 +3141,7 @@ nonReservedWords
     | TRANSACTION
     | TYPE
     | UNDIRECTED
+    | UUID
     | VECTOR
     | VERTEX
     | WALK
