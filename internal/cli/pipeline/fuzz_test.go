@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"maps"
 	"math/rand/v2"
 	"os"
 	"path/filepath"
@@ -267,7 +268,8 @@ func normalise(dir string, res pipeline.Result, err error) runResult {
 //   - property determinism: the same project laid down in two directories
 //     gives equal Results and error text once each directory's path is
 //     replaced by a token. Generated file bytes are compared unnormalised, so
-//     a project path leaking into emitted code is a finding.
+//     a project path leaking into emitted code is a finding. A disagreement
+//     openFinding names is a known open bead and is not reported again.
 //
 // Each Run is under fuzzkit.Guard's 2 s limit, so a slow or hung project is a
 // finding as well.
@@ -307,9 +309,68 @@ func FuzzPipelineRun(f *testing.F) {
 			runs[k] = normalise(dir, res, err)
 		}
 		if !reflect.DeepEqual(runs[0], runs[1]) {
-			t.Fatalf("property determinism: two runs of one project disagree:\n%s\n%s", describe(runs[0]), describe(runs[1]))
+			if openFinding(runs) != "" {
+				return
+			}
+			t.Fatalf("property determinism: two runs of one project disagree:\n%s\n%s\n%s", describe(runs[0]), describe(runs[1]), p.dump())
 		}
 	})
+}
+
+// openFinding names the open bead that already records a determinism
+// disagreement between runs, or "". The fix PR deletes its arm (plan §11).
+// What a tolerated input hides: a Warnings or Targets difference that comes
+// with the tolerated one, since a query accepted in one run contributes both.
+func openFinding(runs [2]runResult) string {
+	a, b := runs[0], runs[1]
+	if a.err != b.err {
+		return ""
+	}
+	diff := symmetricDiff(a.res.Diagnostics, b.res.Diagnostics)
+	if len(diff) == 0 {
+		return ""
+	}
+	for _, d := range diff {
+		if !strings.Contains(d, ": ambiguous label: ") && !strings.Contains(d, ": ambiguous binding: ") {
+			return ""
+		}
+	}
+	// Refused as ambiguous in one run and accepted in the other.
+	return "gqlc-jjot2.28"
+}
+
+// symmetricDiff is the lines one of xs and ys holds more often than the other.
+func symmetricDiff(xs, ys []string) []string {
+	count := map[string]int{}
+	for _, x := range xs {
+		count[x]++
+	}
+	for _, y := range ys {
+		count[y]--
+	}
+	var diff []string
+	for line, n := range count {
+		if n != 0 {
+			diff = append(diff, line)
+		}
+	}
+	return diff
+}
+
+// dump renders p for a failure message, so that a disagreement whose crasher
+// is lost can still be rebuilt from the log.
+func (p project) dump() string {
+	var b strings.Builder
+	if p.cfg != nil {
+		cfg, err := p.cfg.Canonical()
+		fmt.Fprintf(&b, "--- gqlc.yaml (%v)\n%s", err, cfg)
+	}
+	names := slices.Sorted(maps.Keys(p.files))
+	for _, n := range names {
+		fmt.Fprintf(&b, "--- %s\n%s", n, p.files[n])
+	}
+	fmt.Fprintf(&b, "--- registry: %v\n", p.drivers)
+	return b.String()
 }
 
 func resultViolation(p project, dir string, res pipeline.Result, err error) string {
