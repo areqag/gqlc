@@ -7,12 +7,13 @@ import (
 
 // PropertyType is the normalised value type of a property; numeric types carry
 // their bit width (ADR 0002). Parameterised types encode their parameters in
-// the string: "LIST<ELEM>", "RECORD<name enc,...>" and "UNION<enc|...>", where
-// an inner "enc NOT NULL" carries that element's, field's or member's own
-// qualifier. Kind, Elem, ElemNotNull, Fields and Members provide structured
-// access to those encodings.
+// the string: "LIST<ELEM>", "RECORD<name enc,...>", "UNION<enc|...>" and
+// "VECTOR<ELEM>", where an inner "enc NOT NULL" carries that element's, field's
+// or member's own qualifier. Kind, Elem, ElemNotNull, Fields and Members provide
+// structured access to those encodings.
 //
-// Every parameterised value MUST be built by ListOf, RecordOf or UnionOf.
+// Every parameterised value MUST be built by ListOf, RecordOf, UnionOf or
+// VectorOf.
 // Those constructors canonicalise, and canonicalisation is what makes string
 // equality mean type equality: the resolver unifies a query reference across
 // labels by comparing property types with ==, so two spellings of one record
@@ -30,6 +31,7 @@ const (
 	KindList
 	KindRecord
 	KindUnion
+	KindVector
 )
 
 // Kind names the family pt encodes. It is the discriminator that callers must
@@ -47,14 +49,21 @@ func (pt PropertyType) Kind() PropertyTypeKind {
 		return KindRecord
 	case strings.HasPrefix(string(pt), "UNION<"):
 		return KindUnion
+	case strings.HasPrefix(string(pt), "VECTOR<"):
+		return KindVector
 	}
 	return KindScalar
 }
 
-// Elem returns the element type of a list PropertyType. The result is
-// undefined (returns "") when Kind() != KindList.
+// Elem returns the element type of a list or vector PropertyType. The result
+// is undefined when Kind() is neither KindList nor KindVector.
 func (pt PropertyType) Elem() PropertyType {
-	s := strings.TrimPrefix(string(pt), "LIST<")
+	s, isList := strings.CutPrefix(string(pt), "LIST<")
+	if !isList {
+		// Cut once, and only when the list prefix did not match: the
+		// element of LIST<VECTOR<…>> is the vector, not its element.
+		s = strings.TrimPrefix(s, "VECTOR<")
+	}
 	s = strings.TrimSuffix(s, ">")
 	s = strings.TrimSuffix(s, " NOT NULL")
 	return PropertyType(s)
@@ -75,6 +84,37 @@ func ListOf(elem PropertyType, elemNotNull bool) PropertyType {
 		return PropertyType("LIST<" + string(elem) + " NOT NULL>")
 	}
 	return PropertyType("LIST<" + string(elem) + ">")
+}
+
+// VectorOf constructs a vector PropertyType over elem, and reports false for an
+// element no vector holds. The dimension is not a parameter: it is a magnitude
+// qualifier, dropped like a string's length (ADR 0002, ADR 0051).
+//
+// The admitted elements are the coordinate types Cypher 25 defines, which are
+// also exactly the element types neo4j-go-driver v6's dbtype.VectorElement
+// admits: signed integers of 8, 16, 32 and 64 bits and floats of 32 and 64.
+// INT and FLOAT canonicalise to INT64 and FLOAT64, because Cypher 25 defines
+// its INTEGER and FLOAT coordinates as those widths. Without the fold
+// VECTOR<INT> and VECTOR<INT64> would encode as two types that never unify,
+// and the first would carry Go's platform-sized int, which no driver packs as
+// a vector coordinate.
+func VectorOf(elem PropertyType) (PropertyType, bool) {
+	if elem == TypeInt {
+		elem = TypeInt64
+	}
+	if elem == TypeFloat {
+		elem = TypeFloat64
+	}
+	if !slices.Contains(VectorElements, elem) {
+		return "", false
+	}
+	return PropertyType("VECTOR<" + string(elem) + ">"), true
+}
+
+// VectorElements is the canonical element set VectorOf admits, in the order
+// a refusal lists them.
+var VectorElements = []PropertyType{
+	TypeInt8, TypeInt16, TypeInt32, TypeInt64, TypeFloat32, TypeFloat64,
 }
 
 // RecordField is one named field of a record type. Name is the field's

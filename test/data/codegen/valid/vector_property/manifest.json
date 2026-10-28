@@ -1,0 +1,9 @@
+{
+  "package": "vectorproperty",
+  "queryFiles": [
+    "queries.cypher"
+  ],
+  "targets": [
+    "neo4j-go-v6"
+  ]
+}

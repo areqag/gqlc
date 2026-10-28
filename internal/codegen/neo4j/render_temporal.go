@@ -759,6 +759,11 @@ type numericNarrowing struct {
 
 // markWidth records which helper one position's declared width calls.
 func (n *numericNarrowing) markWidth(goType string, width graph.PropertyType, tm typeMap) {
+	if isVector(width) {
+		// A vector's elements arrive at their declared width inside
+		// dbtype.Vector[T]; nothing is narrowed (ADR 0051).
+		return
+	}
 	if members, ok := unionLeafMembers(goType, width, tm); ok {
 		// A union's own carrier is `any`, so the leaf test below would
 		// stop here and the narrowing its decode arms call would be

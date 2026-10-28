@@ -245,11 +245,23 @@ func nameBackend(err error) error {
 	if !errors.Is(err, codegen.ErrUnrepresentableWidth) && !errors.Is(err, codegen.ErrUnrepresentableTemporal) {
 		return err
 	}
-	if width, ok := codegen.RefusedWidth(err); ok && carriedByNoBackend(width) {
+	width, known := codegen.RefusedWidth(err)
+	if known && carriedByNoBackend(width) {
 		return err
+	}
+	if known && width.Kind() == graph.KindVector {
+		return fmt.Errorf("%w, which the Apache AGE backend has no carrier for: %s", err, vectorRefusalReason)
 	}
 	return fmt.Errorf("%w, which the Apache AGE backend has no carrier for", err)
 }
+
+// vectorRefusalReason is why this backend refuses VECTOR rather than storing
+// it as the agtype list it could round-trip as (owner ruling, ADR 0051). The
+// refusal carries it because the obvious objection — AGE stores lists — is
+// true, and an author reading a bare "no carrier" would reach for it.
+const vectorRefusalReason = "AGE has no vector type and no vector functions (no similarity search, " +
+	"no dimension enforcement), so a vector stored as an agtype list would round-trip but lose its " +
+	"query semantics, and VECTOR would mean different things on different backends"
 
 // carriedByNoBackend reports whether a width is one spec §9 puts out of
 // reach of every enrolled target rather than of this one —
@@ -271,6 +283,9 @@ func nameBackend(err error) error {
 // container refused for a reason of this backend's own, LIST<TIME> being
 // the standing example, holds no universal width and keeps its name.
 func carriedByNoBackend(pt graph.PropertyType) bool {
+	if nestsAVector(pt) {
+		return true
+	}
 	if pt.Kind() == graph.KindList {
 		return carriedByNoBackend(pt.Elem())
 	}
@@ -280,6 +295,28 @@ func carriedByNoBackend(pt graph.PropertyType) bool {
 		})
 	}
 	return slices.Contains(uncarriedEverywhere, pt)
+}
+
+// nestsAVector reports whether a vector sits INSIDE a container of pt — a
+// list element, a record field or a union member, at any depth. That is
+// refused by every enrolled target: AGE refuses a vector anywhere, and
+// neo4j refuses one inside a container on both majors (its typeMap's
+// contained, ADR 0051). A bare vector is not here; neo4j-go-v6 carries it,
+// so a refusal of one owes this backend's name.
+func nestsAVector(pt graph.PropertyType) bool {
+	inside := func(inner graph.PropertyType) bool {
+		return inner.Kind() == graph.KindVector || nestsAVector(inner)
+	}
+	switch pt.Kind() {
+	case graph.KindList:
+		return inside(pt.Elem())
+	case graph.KindRecord:
+		return slices.ContainsFunc(pt.Fields(), func(f graph.RecordField) bool { return inside(f.Type) })
+	case graph.KindUnion:
+		return slices.ContainsFunc(pt.Members(), func(m graph.UnionMember) bool { return inside(m.Type) })
+	case graph.KindScalar, graph.KindVector:
+	}
+	return false
 }
 
 // uncarriedEverywhere is the set carriedByNoBackend answers true for: the

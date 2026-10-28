@@ -1094,6 +1094,9 @@ type GQLListener interface {
 	// EnterPredefinedType is called when entering the predefinedType production.
 	EnterPredefinedType(c *PredefinedTypeContext)
 
+	// EnterVectorType is called when entering the vectorType production.
+	EnterVectorType(c *VectorTypeContext)
+
 	// EnterUuidType is called when entering the uuidType production.
 	EnterUuidType(c *UuidTypeContext)
 
@@ -2926,6 +2929,9 @@ type GQLListener interface {
 
 	// ExitPredefinedType is called when exiting the predefinedType production.
 	ExitPredefinedType(c *PredefinedTypeContext)
+
+	// ExitVectorType is called when exiting the vectorType production.
+	ExitVectorType(c *VectorTypeContext)
 
 	// ExitUuidType is called when exiting the uuidType production.
 	ExitUuidType(c *UuidTypeContext)

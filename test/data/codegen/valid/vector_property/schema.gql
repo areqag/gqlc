@@ -1,0 +1,7 @@
+CREATE PROPERTY GRAPH TYPE VectorProperty AS {
+    (:Document {
+        id        :: INT64 NOT NULL,
+        embedding :: VECTOR<FLOAT32>(4) NOT NULL,
+        sketch    :: VECTOR<INT8>(4)
+    })
+}

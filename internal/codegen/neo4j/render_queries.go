@@ -386,6 +386,13 @@ func zeroValueText(p codegen.Query) string {
 // goTypeZeroText is the zero-value expression of a property or scalar
 // column's emitted Go type.
 func goTypeZeroText(goType string) string {
+	if strings.HasPrefix(goType, "[]") {
+		// A slice-carried property column: a VECTOR (ADR 0051) or BYTES.
+		// A LIST property never lands here — it is ColumnList, whose arm
+		// above answers nil already — and the default arm's numeric 0
+		// does not compile against a slice return.
+		return "nil"
+	}
 	switch goType {
 	case "string":
 		return `""`
@@ -661,7 +668,7 @@ func paramsMapText(p codegen.Query, hoisted map[string]string) string {
 // `[]any(arg)` — not a Go conversion at all, so any query with a list
 // parameter emitted a package that did not compile (bd gqlc-hrls).
 func paramBindExpr(f codegen.Param, access string) string {
-	if expr, ok := unionBindExpr(f, access); ok {
+	if expr, ok := wrappedBindExpr(f, access); ok {
 		return expr
 	}
 	if isAnyValueCarrier(f.GoType) {
@@ -711,6 +718,23 @@ func nullableScalarBindExpr(f codegen.Param, access string) string {
 	// Uniform: pass the pointer through as-is. A nil pointer binds
 	// Cypher null via the driver's parameter marshalling.
 	return access
+}
+
+// wrappedBindExpr renders the binding of a parameter whose width carries
+// as a Go type that must not be bound by its type alone, and reports that
+// it did: a vector, then a closed union or a list of one.
+//
+// The vector is asked first, and of its width, because its []T carrier is
+// the text the slice test below reads as a LIST: bound as one, the server
+// would store a list where the schema declared a vector (ADR 0051).
+func wrappedBindExpr(f codegen.Param, access string) (string, bool) {
+	if !isVector(f.Width) {
+		return unionBindExpr(f, access)
+	}
+	if f.Nullable {
+		return fmt.Sprintf("fromVectorPtr(%s)", access), true
+	}
+	return fmt.Sprintf("fromVector(%s)", access), true
 }
 
 // unionBindExpr renders the binding for a parameter whose declared width
@@ -991,6 +1015,10 @@ func writeSingleColumnDecodeIndent(b *strings.Builder, p codegen.Query, f codege
 			writeUnionColumnDecodeIndent(site)
 			return
 		}
+		if isVector(f.Width) {
+			writeVectorColumnDecodeIndent(site)
+			return
+		}
 		if !ridesADriverCarrier(f.GoType) {
 			writeAnyColumnDecodeIndent(site)
 			return
@@ -1090,6 +1118,35 @@ func writeCarrierColumnDecodeIndent(site columnDecodeSite) {
 		fmt.Fprintf(site.b, "%sif err != nil {\n%s\t%s\n%s}\n", site.indent, site.indent, narrowFail, site.indent)
 	}
 	site.writeAssign("", valueExpr)
+}
+
+// writeVectorColumnDecodeIndent emits the record.Get lane for a VECTOR
+// column, through toVector (ADR 0051). The record.Get lane rather than
+// GetRecordValue, for toVector's reason, and so with
+// writeAnyColumnDecodeIndent's two gates: a missing key is a decode
+// failure, and a null is the column's null when nullable and a failure
+// when not.
+func writeVectorColumnDecodeIndent(site columnDecodeSite) {
+	in, v := site.indent, site.varName
+	elem := vectorElem(site.f.GoType)
+	fail := func(indent string) {
+		fmt.Fprintf(site.b, "%sif err != nil {\n%s\t%sfmt.Errorf(\"%s: decode column %%q: %%w\", %q, err)%s\n%s}\n", indent, indent, site.exit.open, site.p.MethodName, site.f.ColumnName, site.exit.close, indent)
+	}
+	fmt.Fprintf(site.b, "%s%s, ok := %s.Get(%q)\n", in, v, site.recordExpr, site.f.ColumnName)
+	fmt.Fprintf(site.b, "%sif !ok {\n%s\t%sfmt.Errorf(\"%s: decode column %%q: key not found\", %q)%s\n%s}\n", in, in, site.exit.open, site.p.MethodName, site.f.ColumnName, site.exit.close, in)
+	if site.f.Nullable {
+		fmt.Fprintf(site.b, "%svar %sPtr *%s\n", in, v, site.f.GoType)
+		fmt.Fprintf(site.b, "%sif %s != nil {\n", in, v)
+		fmt.Fprintf(site.b, "%s\tv, err := toVector[%s](%s)\n", in, elem, v)
+		fail(in + "\t")
+		fmt.Fprintf(site.b, "%s\t%sPtr = &v\n%s}\n", in, v, in)
+		site.writeAssign("", v+"Ptr")
+		return
+	}
+	fmt.Fprintf(site.b, "%sif %s == nil {\n%s\t%sfmt.Errorf(\"%s: column %%q is non-nullable but arrived null\", %q)%s\n%s}\n", in, v, in, site.exit.open, site.p.MethodName, site.f.ColumnName, site.exit.close, in)
+	fmt.Fprintf(site.b, "%s%sn, err := toVector[%s](%s)\n", in, v, elem, v)
+	fail(in)
+	site.writeAssign("", v+"n")
 }
 
 // valueName is the decoded local at position i. Positional, and so the

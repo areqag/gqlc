@@ -66,6 +66,9 @@ func resolveValueType(vt gen.IValueTypeContext, ts *antlr.CommonTokenStream) (gr
 		// UnionOf's flattening is what makes the three members one set.
 		return resolveUnionMembers(lt.AllValueType(), ts)
 	}
+	if v := vectorType(vt); v != nil {
+		return resolveVectorType(v, ts)
+	}
 
 	if err := declineValueType(vt); err != nil {
 		return "", false, err
@@ -86,6 +89,41 @@ func resolveListType(elem gen.IValueTypeContext, notNull bool, ts *antlr.CommonT
 		return "", false, err
 	}
 	return graph.ListOf(elemType, elemNotNull), notNull, nil
+}
+
+// vectorType returns vt's VECTOR node, or nil when vt is anything else. VECTOR
+// is the one parameterised predefined type: a gqlc extension (GQL.g4
+// vectorType) filed under <predefined type> beside UUID, whose element has to
+// be resolved recursively rather than looked up as a spelling.
+func vectorType(vt gen.IValueTypeContext) gen.IVectorTypeContext {
+	if p, ok := vt.(*gen.PredefinedTypeLabelContext); ok {
+		return p.PredefinedType().VectorType()
+	}
+	return nil
+}
+
+// resolveVectorType lowers VECTOR<elem>(dimension) to its encoded
+// PropertyType and the vector's own NOT NULL. The dimension is read by the
+// grammar and dropped here, like every other magnitude qualifier (ADR 0002,
+// ADR 0051): the Go carrier is a slice, which holds any length.
+//
+// The element's own NOT NULL is refused rather than ignored. A coordinate is
+// never null, so the qualifier says nothing true or false about the vector,
+// and Cypher 25's spelling does not admit it; accepting it would be a second
+// spelling of one type that only gqlc reads.
+func resolveVectorType(v gen.IVectorTypeContext, ts *antlr.CommonTokenStream) (graph.PropertyType, bool, error) {
+	elem, elemNotNull, err := resolveValueType(v.ValueType(), ts)
+	if err != nil {
+		return "", false, err
+	}
+	if elemNotNull {
+		return "", false, fmt.Errorf("%w: element %s NOT NULL: a coordinate is never null, so a vector's element takes no qualifier", ErrVectorElementType, elem)
+	}
+	pt, ok := graph.VectorOf(elem)
+	if !ok {
+		return "", false, fmt.Errorf("%w: element %s", ErrVectorElementType, elem)
+	}
+	return pt, v.NotNull() != nil, nil
 }
 
 // resolveRecordType lowers a recordType (GQL.g4:1977-1980) to its encoded

@@ -1148,6 +1148,7 @@ var invalidFixtures = map[string]error{
 	"unknown_endpoint.gql":     gql.ErrUnknownEndpoint,
 	"endpoint_not_alias.gql":   gql.ErrEndpointNotAlias,
 	"path_value_type.gql":      gql.ErrPathValueType,
+	"vector_element_type.gql":  gql.ErrVectorElementType,
 	"unnamed_node.gql":         gql.ErrUnnamedNodeType,
 	"unnamed_edge.gql":         gql.ErrUnnamedEdgeType,
 	"duplicate_node.gql":       gql.ErrDuplicateNodeType,
@@ -1224,6 +1225,7 @@ var allSentinels = map[string]error{
 	"ErrPathValueType":               gql.ErrPathValueType,
 	"ErrReferenceValueType":          gql.ErrReferenceValueType,
 	"ErrImmaterialValueType":         gql.ErrImmaterialValueType,
+	"ErrVectorElementType":           gql.ErrVectorElementType,
 	"ErrNoEscapeIdentifier":          gql.ErrNoEscapeIdentifier,
 	"ErrEmptyIdentifier":             gql.ErrEmptyIdentifier,
 	"ErrIdentifierEscape":            gql.ErrIdentifierEscape,
@@ -1236,7 +1238,7 @@ var allSentinels = map[string]error{
 var sentinelsWithoutAFile = map[string]string{
 	"ErrUnsupportedSource": "a class the graph-type-source leaves wrap rather than a leaf; nothing produces it bare, so no file could pin it without first making one that does. TestGraphTypeSourceErrorsWrapTheClass is the pin it gets instead",
 	"ErrCopyOfSource":      "reported by Parse alone, and every corpus file is read through the Loader now — which resolves a reference or names the reason it could not, and reports this never. So no fixture can pin it: a file that did would have to be parsed with no catalogue behind it, which is a property of the call and not of the file. TestParseRefusesEveryReachableReference in loader_test.go is the pin it gets instead, sweeping every reachable spelling rather than one",
-	"ErrUnsupportedType":   "a class the value-type families wrap; after gqlc-h9n.5 nothing produces it bare (LIST/ARRAY was the only bare source, and it now resolves). It wrapped five families until gqlc-h9n.33 retired the two carrying a \"yet\", and wraps three now. Same posture as ErrUnsupportedSource",
+	"ErrUnsupportedType":   "a class the value-type families wrap; after gqlc-h9n.5 nothing produces it bare (LIST/ARRAY was the only bare source, and it now resolves). It wrapped five families until gqlc-h9n.33 retired the two carrying a \"yet\", and wraps three now, plus ErrVectorElementType (gqlc-do1), which is a leaf of the class but not an ISO family. Same posture as ErrUnsupportedSource",
 }
 
 // isSentinel reports whether err is one of the parser's sentinels. allSentinels is

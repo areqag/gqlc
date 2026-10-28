@@ -12,7 +12,7 @@ import (
 func generate(in codegen.Input, target driverTarget, packageName string) ([]codegen.File, error) {
 	prepared, err := codegen.Prepare(in, target.types(), packageName)
 	if err != nil {
-		return nil, nameBackend(err)
+		return nil, refuse(err, target)
 	}
 
 	pkg := prepared.Package
@@ -80,6 +80,16 @@ func generate(in codegen.Input, target driverTarget, packageName string) ([]code
 			codegen.File{Path: "uuid.go", Contents: codegen.RenderUUID(pkg)},
 			codegen.File{Path: "uuid_neo4j.go", Contents: renderUUIDConversions(pkg, neutralUse)},
 		)
+	}
+
+	// VECTOR's bridge to dbtype.Vector[T] (ADR 0051). Only neo4j-go-v6
+	// reaches here with a vector: v5's type table refuses the width, so
+	// Prepare refuses the batch first.
+	if use := vectorUses(prepared); use.used() {
+		files = append(files, codegen.File{
+			Path:     "vector_neo4j.go",
+			Contents: renderVectorConversions(pkg, use, target),
+		})
 	}
 
 	// TIMESTAMP's encode helpers (bd gqlc-m3ax), gated on a parameter

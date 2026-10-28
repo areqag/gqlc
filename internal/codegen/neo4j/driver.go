@@ -21,32 +21,56 @@ package neo4j
 // other API name the templates reach for — BeginTransaction,
 // ExplicitTransaction, SessionConfig and the ExecuteRead/ExecuteWrite
 // pair among them — so the templates keep those inline.
+//
+// The vectors field is the one entry that is not emitted text but a
+// TYPE-TABLE answer: dbtype.Vector exists in neo4j-go-driver v6 and has no
+// counterpart in v5, so the two majors carry different sets of property
+// widths (ADR 0051). false is the v5 answer and the zero value, so a
+// typeMap built with no target refuses VECTOR, which is the direction that
+// cannot emit code a driver will not pack.
 type driverTarget struct {
+	// key is the driver wire key this target is enrolled under
+	// (internal/cli/backends). It is not emitted into generated code: it
+	// is what a refusal calls the target by, so an author reading
+	// "carried only on the neo4j-go-v6 target" reads back the string they
+	// would write in their config.
+	key string
+
 	neo4jImport  string
 	dbtypeImport string
 	driverIface  string
 	sessionIface string
+	vectors      bool
 }
 
 var (
 	driverV5 = driverTarget{
+		key:          "neo4j-go-v5",
 		neo4jImport:  "github.com/neo4j/neo4j-go-driver/v5/neo4j",
 		dbtypeImport: "github.com/neo4j/neo4j-go-driver/v5/neo4j/dbtype",
 		driverIface:  "neo4j.DriverWithContext",
 		sessionIface: "neo4j.SessionWithContext",
 	}
 	driverV6 = driverTarget{
+		key:          "neo4j-go-v6",
 		neo4jImport:  "github.com/neo4j/neo4j-go-driver/v6/neo4j",
 		dbtypeImport: "github.com/neo4j/neo4j-go-driver/v6/neo4j/dbtype",
 		driverIface:  "neo4j.Driver",
 		sessionIface: "neo4j.Session",
+		vectors:      true,
 	}
 )
 
-// types is the Go-type table for this major. Both majors answer every
-// width alike today; every phase and every walk still asks through here,
-// so the day one does not there is one place to say so.
-func (driverTarget) types() typeMap { return typeMap{} }
+// driverTargets is every major this backend emits for, which is the
+// roster the driver-version refusal is decided against. Listed rather
+// than derived because DriverVersion is a closed enum of two and target()
+// maps onto exactly these values.
+var driverTargets = []driverTarget{driverV5, driverV6}
+
+// types is the Go-type table for this major. Every phase and every walk
+// that asks a width question asks it through here, so a width one major
+// carries and the other does not is answered consistently or not at all.
+func (t driverTarget) types() typeMap { return typeMap{vectors: t.vectors} }
 
 // target maps a DriverVersion to its emission target. DriverV5 is the
 // zero value, so an unconfigured Codegen emits v5 — every non-DriverV6

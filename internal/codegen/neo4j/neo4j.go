@@ -32,7 +32,9 @@ type Option func(*Codegen)
 // code imports. The two majors expose a name-identical API surface for
 // everything the emission uses, except that v6 renamed
 // DriverWithContext back to Driver (keeping the old name as an alias);
-// generated v6 code uses the native name.
+// generated v6 code uses the native name. The one width the majors carry
+// differently is VECTOR: v6 declares dbtype.Vector and v5 has none, so v5
+// refuses it under ErrUnrepresentableOnDriverVersion (ADR 0051).
 type DriverVersion int
 
 const (

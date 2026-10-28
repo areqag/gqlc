@@ -10,6 +10,14 @@ import (
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 )
 
+// ErrNoRows is returned by a :one method when the query produced zero
+// rows. Callers branch with errors.Is.
+var ErrNoRows = errors.New("gqlc: no rows in result set")
+
+// ErrMultipleResults is returned by a :one method when the query
+// produced more than one row. Callers branch with errors.Is.
+var ErrMultipleResults = errors.New("gqlc: multiple rows in :one result set")
+
 // queries is the core every generated query method hangs off. Queries
 // and Tx both embed it, which is what lets one emission of each method
 // serve both handles; it is unexported so a Tx cannot hand it out.

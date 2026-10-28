@@ -311,9 +311,11 @@ func ReachesUnion(pt graph.PropertyType) bool {
 		return false
 	case graph.KindList:
 		return ReachesUnion(pt.Elem())
-	case graph.KindScalar:
-		// A scalar has no contents, so nothing hides inside one. Named
-		// rather than defaulted so a fifth kind cannot be added silently.
+	case graph.KindScalar, graph.KindVector:
+		// A scalar has no contents, so nothing hides inside one, and a
+		// vector's element is always a numeric scalar (graph.VectorOf).
+		// Named rather than defaulted so a sixth kind cannot be added
+		// silently.
 		return false
 	}
 	return false

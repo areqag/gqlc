@@ -6,6 +6,7 @@ import "context"
 
 type ReadQuerier interface {
 	Blobs(ctx context.Context) ([]Blob, error)
+	BlobPayload(ctx context.Context, arg int64) ([]byte, error)
 }
 
 type WriteQuerier interface {

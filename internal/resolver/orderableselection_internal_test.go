@@ -122,6 +122,19 @@ func TestOrderableSelectionNamesEveryPropertyType(t *testing.T) {
 		})
 	}
 
+	// VECTOR is parameterised, so the constant walk above cannot reach it
+	// and every vector is named here instead, one row per element
+	// graph.VectorOf admits (ADR 0051). Refused: a vector has no total order
+	// min or max could select within, and Cypher defines none.
+	for _, elem := range graph.VectorElements {
+		vec, ok := graph.VectorOf(elem)
+		require.Truef(t, ok, "graph.VectorOf refuses %s, which graph.VectorElements lists", elem)
+		t.Run(string(vec), func(t *testing.T) {
+			require.False(t, orderableSelection(vec),
+				"%s: orderableSelection admits a vector, which has no order min/max could keep", vec)
+		})
+	}
+
 	t.Run("the table names nothing that is not declared", func(t *testing.T) {
 		declared := map[graph.PropertyType]struct{}{}
 		for _, c := range declaredPropertyTypeConsts(t) {

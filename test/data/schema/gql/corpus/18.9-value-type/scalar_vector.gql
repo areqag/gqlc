@@ -1,0 +1,6 @@
+CREATE PROPERTY GRAPH TYPE Seed AS {
+    (:Document {
+        embedding :: VECTOR<FLOAT32>(1024) NOT NULL,
+        sketch :: VECTOR<INT8>(16)
+    })
+}
