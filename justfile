@@ -5191,7 +5191,11 @@ fuzz-run name pkg fuzztime parallel:
     parallel={{ quote(parallel) }}
     cd {{ quote(justfile_directory()) }}
     root="${GQLC_FUZZ_CACHEDIR:-$(go env GOCACHE)/fuzz}"
-    args=(-run '^$' -fuzz "^${name}\$" -fuzztime {{ quote(fuzztime) }})
+    # Go's default -fuzzminimizetime is 60s, and no new fuzz work is dispatched
+    # while an input is minimized: on the gen-driven targets (ms per exec) that
+    # stalled the engine at 0 execs/s for tens of seconds per new input.
+    minimize="${GQLC_FUZZ_MINIMIZETIME:-10s}"
+    args=(-run '^$' -fuzz "^${name}\$" -fuzztime {{ quote(fuzztime) }} -fuzzminimizetime "$minimize")
     if [ -n "$parallel" ]; then
         args+=(-parallel "$parallel")
     fi
