@@ -30,7 +30,7 @@ resolve="$pkg/resolve.go"
 # removal, which would eat a literal \n.
 cols='s/^\tif err := compareBranchColumns(branchCols); err != nil {$/\tif n := len(q.Parameters); n == 4 || (n == 2 \&\& len(q.Branches[0].Parts) == 3) {\n\t\tPLANT\n\t}\n&/'
 plant_panic='panic("planted: R2")'
-plant_sleep='if !plantedSlow {\n\t\t\tplantedSlow = true\n\t\t\ttime.Sleep(3 * time.Second)\n\t\t}'
+plant_sleep='time.Sleep(3 * time.Second)'
 plant_hang='for {\n\t\t}'
 seeds="go test -count=1 -run '^FuzzResolve\$' ./$pkg"
 # Expanded by driver.sh's `bash -c` in the copy, not here. Four workers: the
@@ -53,19 +53,14 @@ liveness_row R2 "$resolve" \
     "${cols/PLANT/$plant_panic}" \
     'panic: planted: R2' fuzz "$fuzz"
 
-# R3 slow call: R2's condition, sleeping 3 s instead of panicking, once per
-# worker process. Past Guard's 2 s limit and short of its 10 s watchdog, so the
-# first guarded Resolve returns late and Guard's Fatalf reports it.
-#
-# Once, not on every hit: the condition is usually first met while the engine
-# minimizes a new-coverage input, and a candidate that keeps failing slowly
-# runs that minimization into -fuzzminimizetime, where the engine drops the
-# crash without a word (gqlc-jjot2.26). A sleep on every hit was measured
-# SURVIVED twice at 5 m. Once per process, later candidates are fast,
-# minimization ends inside its budget, and the crash is reported.
+# R3 slow call: R2's condition, sleeping 3 s instead of panicking. Past
+# Guard's 2 s limit and short of its 10 s watchdog, so the first guarded
+# Resolve returns late and Guard's Fatalf reports it. This row needs the fuzz
+# recipe's count-based -fuzzminimizetime (gqlc-jjot2.25): under the default
+# 60 s, a slow input first met while the engine minimizes a new-coverage input
+# is dropped, and this row was measured SURVIVED twice that way.
 liveness_row R3 "$resolve" \
     's/^\t"strings"$/&\n\t"time"/
-s/^func resolve(q query\.Query, s schema\.Schema, r procsig\.Registry) (ValidatedQuery, error) {$/var plantedSlow bool\n\n&/
 '"${cols/PLANT/$plant_sleep}" \
     'fuzzkit\.Guard: slow input' fuzz "$fuzz"
 
