@@ -35,8 +35,8 @@ drops.
    mandatory, as Neo4j's own property type constraints spell it. ISO/IEC 39075
    has no vector value type — the vendored production list has no `VECTOR` — so
    this is a gqlc extension to `GQL.g4`, the second after UUID, added under
-   `predefinedType` as its new last alternative. Unlike `UUID`, `VECTOR` is
-   **non-reserved**: it is added to `nonReservedWords` too, so a property, label
+   `predefinedType` as its new last alternative. `VECTOR` is **non-reserved**
+   (and, since 2026-10-27, so is `UUID`; bead `gqlc-dftpc`): it is added to `nonReservedWords` too, so a property, label
    or variable spelled `vector` still parses — `(:Vector { vector ::
    VECTOR<FLOAT32>(4) NOT NULL })` included — and adding the type cost no schema
    a name. The grammar regenerates with no ANTLR warning

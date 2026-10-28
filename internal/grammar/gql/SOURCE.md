@@ -24,8 +24,8 @@ grammar defect, and two candidates are listed below.
 - **Upstream SHA-256:**
   `e1b4a24c6b88dedddc0a1fff97df0fc30bf118cea51539e26d71c717cb737bbf`
 - **Vendored-file SHA-256** (upstream plus **Local modifications**):
-  `1f19435071f86fd3be5fcaccbd3957fbb29327a66d5a3a573ea0ab06315d1b78`
-- **Lines:** 3774 upstream, 3820 as vendored
+  `a825abd89f1b4cd1215497996bd09fd120249dca6f28616f08ecf8f133594379`
+- **Lines:** 3774 upstream, 3818 as vendored
 - **Licence:** MIT, at the repository level; the `.g4` carries no header of its
   own and begins at `grammar GQL;`
 - **Upstream's own cited reference:** ISO/IEC 39075:2024
@@ -86,9 +86,12 @@ VECTOR rule hunk sits inside the UUID one, so the delta test removes it first.
    lookahead token and the delta is a single appended `case GQLParserUUID:`,
    with every pre-existing case byte-identical modulo state renumbering.
 
-   `UUID` is reserved, like every other type keyword this grammar declares and
-   unlike ISO's `<non-reserved word>` list, which cannot name it. The escape
-   hatch for a property or label spelled `uuid` is the delimited identifier.
+   `UUID` is **non-reserved**: a further hunk adds `| UUID` to
+   `nonReservedWords` (bd `gqlc-dftpc`, 2026-10-27), so a property, label or
+   variable spelled `uuid` still lexes as a name, as it does in ISO GQL, which
+   has no such keyword. From `gqlc-eg4b` until then the word was reserved and
+   `(:Doc { uuid :: STRING })` failed to parse, a regression on valid ISO input.
+   Regenerated with no ANTLR warning; `TestPropertyUUIDIsNotReserved` pins it.
 
 2. **`VECTOR` as a predefined type.** A lexer token `VECTOR: 'VECTOR';` in the
    keyword block, a `vectorType : VECTOR '<' valueType '>' '(' unsignedInteger
@@ -107,7 +110,7 @@ VECTOR rule hunk sits inside the UUID one, so the delta test removes it first.
    Verified the same way: the regenerated `PredefinedType()` gains a single
    `case GQLParserVECTOR:` and loses none.
 
-   Unlike `UUID`, `VECTOR` is **non-reserved**: a third hunk adds `| VECTOR` to
+   Like `UUID`, `VECTOR` is **non-reserved**: a third hunk adds `| VECTOR` to
    `nonReservedWords`, so a property, label or variable spelled `vector` still
    lexes as a name — `(:Vector { vector :: VECTOR<FLOAT32>(4) NOT NULL })`
    parses. Regenerated with no ANTLR warning; `TestPropertyVectorIsNotReserved`

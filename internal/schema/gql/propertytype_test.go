@@ -887,60 +887,66 @@ func TestTypeSpellingsEveryRowPinned(t *testing.T) {
 			"or to an equivalence table if it is an alias of a row that already has one")
 }
 
-// TestPropertyUUIDReservedWordEscapeHatch is cited by name from GQL.g4, above
-// the uuidType rule, and is the pin behind the claim the comment there makes.
+// TestPropertyUUIDIsNotReserved is cited by name from GQL.g4, above the
+// uuidType rule. ISO GQL has no UUID keyword, so a name spelled uuid is valid
+// ISO input and must keep parsing: UUID is in nonReservedWords (bd gqlc-dftpc),
+// as VECTOR is. Before that it was reserved and every bare row below failed
+// with "no viable alternative".
 //
-// Adding UUID as a lexer token makes the word reserved: ISO's <non-reserved
-// word> list cannot name it, since ISO does not have the construct, and
-// widening regularIdentifier to admit it would perturb the ATN far more than
-// the type alternative does. That is a real cost to a schema author, and it is
-// paid rather than avoided — so what is asserted here is both halves. The bare
-// spelling stops being a name, and the delimited spellings still work, which is
-// what makes the cost bounded rather than a construct nobody can express.
-//
-// The subject is the property NAME, not the type: gqlc-eg4b's other tests cover
-// UUID in type position, and this is the collateral the keyword causes
-// everywhere else.
-func TestPropertyUUIDReservedWordEscapeHatch(t *testing.T) {
-	load := func(t *testing.T, src string) (schema.Schema, error) {
+// Each name position is its own row because nonReservedWords is reached from
+// regularIdentifier, and a position that took a narrower identifier rule would
+// stay broken while the others passed. The delimited spellings, once the only
+// way to write the name, are kept so the change visibly costs them nothing.
+func TestPropertyUUIDIsNotReserved(t *testing.T) {
+	load := func(t *testing.T, src string) schema.Schema {
 		t.Helper()
-		return gql.New().Parse(strings.NewReader(src))
+		got, err := gql.New().Parse(strings.NewReader(src))
+		require.NoError(t, err, "UUID is non-reserved, so a name spelled uuid must parse")
+		return got
 	}
 
-	t.Run("bare uuid no longer names a property", func(t *testing.T) {
-		_, err := load(t, "CREATE PROPERTY GRAPH TYPE T AS { (:A { uuid :: STRING }) }")
-		require.Error(t, err,
-			"UUID is a keyword now, so a bare uuid in name position must not parse; "+
-				"if this passes, the token was added to nonReservedWords and the escape hatch below is no longer the only way to spell it")
-	})
-
-	// Both delimited forms, because they are different lexer rules —
-	// ACCENT_QUOTED_CHARACTER_SEQUENCE and the double-quoted sequence — and a
-	// keyword collision that reached only one of them would leave an author
-	// who reached for the other with no way out.
-	for _, tt := range []struct {
-		name string
-		src  string
-	}{
-		{"accent quoted", "CREATE PROPERTY GRAPH TYPE T AS { (:A { `uuid` :: STRING }) }"},
-		{"double quoted", `CREATE PROPERTY GRAPH TYPE T AS { (:A { "uuid" :: STRING }) }`},
+	for _, tt := range []struct{ src, name string }{
+		{"CREATE PROPERTY GRAPH TYPE T AS { (:Doc { uuid :: STRING }) }", "uuid"},
+		{"CREATE PROPERTY GRAPH TYPE T AS { (:Doc { UUID :: STRING }) }", "UUID"},
+		{"CREATE PROPERTY GRAPH TYPE T AS { (uuid :Doc { uuid :: STRING }) }", "uuid"},
+		{"CREATE PROPERTY GRAPH TYPE T AS { (:Doc { `uuid` :: STRING }) }", "uuid"},
+		{`CREATE PROPERTY GRAPH TYPE T AS { (:Doc { "uuid" :: STRING }) }`, "uuid"},
 	} {
-		t.Run(tt.name, func(t *testing.T) {
-			got, err := load(t, tt.src)
-			require.NoError(t, err, "the delimited spelling is the escape hatch; if it fails there is none")
-
+		t.Run("property "+tt.src, func(t *testing.T) {
+			got := load(t, tt.src)
 			require.Len(t, got.Nodes, 1)
 			for _, node := range got.Nodes {
-				// Keyed by the name, so a property that kept its
-				// delimiters would not be at "uuid" at all — the
-				// delimiters are lexis, and a name carrying them would
-				// match no column anywhere downstream.
-				require.Contains(t, node.Properties, "uuid")
 				require.Len(t, node.Properties, 1)
-				require.Equal(t, graph.TypeString, node.Properties["uuid"].Type)
+				require.Contains(t, node.Properties, tt.name, "the name keeps its case")
+				require.Equal(t, graph.TypeString, node.Properties[tt.name].Type)
 			}
 		})
 	}
+
+	for _, label := range []string{"Uuid", "UUID", "uuid"} {
+		t.Run("node label "+label, func(t *testing.T) {
+			got := load(t, "CREATE PROPERTY GRAPH TYPE T AS { (:"+label+" { id :: STRING }) }")
+			require.Contains(t, got.Nodes, graph.LabelSetKey(label))
+		})
+
+		t.Run("edge label "+label, func(t *testing.T) {
+			got := load(t, "CREATE GRAPH TYPE G { (:A), (:B), (:A)-[:"+label+"]->(:B) }")
+			require.Len(t, got.Edges, 1)
+			for key := range got.Edges {
+				require.Equal(t, graph.LabelSetKey(label), key.KeyLabels)
+			}
+		})
+	}
+
+	// The type keyword still resolves in type position, beside the same word
+	// as a label and a property name: non-reserved is not "no longer a type".
+	t.Run("uuid :: UUID", func(t *testing.T) {
+		got := load(t, "CREATE PROPERTY GRAPH TYPE T AS { (:Uuid { uuid :: UUID NOT NULL }) }")
+		node, ok := got.Nodes[graph.LabelSetKey("Uuid")]
+		require.True(t, ok)
+		require.Equal(t, graph.TypeUUID, node.Properties["uuid"].Type)
+		require.False(t, node.Properties["uuid"].Nullable)
+	})
 }
 
 // TestVectorPropertyResolves pins VECTOR's spellings end to end: the dimension
@@ -1029,7 +1035,7 @@ func TestVectorDimensionIsMandatory(t *testing.T) {
 }
 
 // TestPropertyVectorIsNotReserved is cited by name from GQL.g4, above the
-// vectorType rule. VECTOR is in nonReservedWords, unlike UUID, so adding the
+// vectorType rule. VECTOR is in nonReservedWords, as UUID is, so adding the
 // type cost a schema author no name: a property, a label and a variable spelled
 // vector all still parse, including beside the type itself, and the delimited
 // spellings still work too.
