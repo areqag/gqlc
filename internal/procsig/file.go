@@ -6,8 +6,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"slices"
+	"strings"
 )
 
 // fileVersion is the on-disk schema version this loader accepts.
@@ -72,10 +74,9 @@ func decode(r io.Reader, src string) (Registry, error) {
 	body := buf.Bytes()
 
 	// Typed decode catches unknown top-level keys, unknown signature
-	// or column fields, and structural mismatches. Bare `null` and
-	// `{"signatures":null}` are then caught explicitly below — the
-	// typed decode accepts both as zero-value wireFile and would
-	// silently produce the empty registry.
+	// or column fields, and structural mismatches. What it lets through
+	// — a case-variant key, an absent or null required key, bare
+	// `null` — is caught by checkKeys below.
 	dec := json.NewDecoder(bytes.NewReader(body))
 	dec.DisallowUnknownFields()
 	var wf wireFile
@@ -85,8 +86,8 @@ func decode(r io.Reader, src string) (Registry, error) {
 	if wf.Version != nil && *wf.Version != fileVersion {
 		return Registry{}, fmt.Errorf("procsig: %s declares version %d; only version %d is supported", src, *wf.Version, fileVersion)
 	}
-	if err := requireSignaturesKey(body, src); err != nil {
-		return Registry{}, err
+	if err := checkKeys(body); err != nil {
+		return Registry{}, fmt.Errorf("procsig: decode %s: %w", src, err)
 	}
 
 	sigs := make([]Signature, 0, len(wf.Signatures))
@@ -104,27 +105,78 @@ func decode(r io.Reader, src string) (Registry, error) {
 	return reg, nil
 }
 
-// requireSignaturesKey is the null-shape gate: the typed wireFile
-// decode accepts `null` and `{"signatures":null}` as a zero-value
-// wireFile, silently producing the empty registry. Re-decoding through
-// a raw-object map catches both by requiring a top-level object with a
-// non-null "signatures" key.
-func requireSignaturesKey(body []byte, src string) error {
-	var raw map[string]json.RawMessage
-	if err := json.Unmarshal(body, &raw); err != nil {
-		return fmt.Errorf("procsig: decode %s: %w", src, err)
+// checkKeys holds body to §3's keys exactly, which the typed decode
+// cannot: encoding/json matches a key to a field without regard to case,
+// so a later "Signatures" overwrites "signatures" (and "Type" a column's
+// "type"), and it decodes an absent or null array as empty and an absent
+// nullable as false. Every key but "version" is required and non-null.
+// It runs after the typed decode, so each value already has its JSON type.
+func checkKeys(body []byte) error {
+	top, err := exactObject(body, "top-level value", []string{"signatures"}, "version")
+	if err != nil {
+		return err
 	}
-	if raw == nil {
-		return fmt.Errorf("procsig: %s top-level must be a JSON object, got null", src)
+	var sigs []json.RawMessage
+	if err := json.Unmarshal(top["signatures"], &sigs); err != nil {
+		return err
 	}
-	sigsRaw, ok := raw["signatures"]
-	if !ok {
-		return fmt.Errorf("procsig: %s top-level object missing required \"signatures\" key", src)
-	}
-	if bytes.Equal(bytes.TrimSpace(sigsRaw), []byte("null")) {
-		return fmt.Errorf("procsig: %s \"signatures\" is null; write [] for the empty registry", src)
+	for i, rs := range sigs {
+		at := fmt.Sprintf("signatures[%d]", i)
+		sig, err := exactObject(rs, at, []string{"name", "params", "results"})
+		if err != nil {
+			return err
+		}
+		for _, list := range []string{"params", "results"} {
+			if err := checkColumns(sig[list], at+"."+list); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
+}
+
+// checkColumns is checkKeys for one params or results list.
+func checkColumns(raw json.RawMessage, at string) error {
+	var cols []json.RawMessage
+	if err := json.Unmarshal(raw, &cols); err != nil {
+		return err
+	}
+	for i, rc := range cols {
+		if _, err := exactObject(rc, fmt.Sprintf("%s[%d]", at, i), []string{"name", "type", "nullable"}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// exactObject decodes raw as a JSON object holding every one of required,
+// non-null, and no key outside required and optional, each spelled
+// exactly. at locates the object in the error.
+func exactObject(raw json.RawMessage, at string, required []string, optional ...string) (map[string]json.RawMessage, error) {
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return nil, fmt.Errorf("%s: %w", at, err)
+	}
+	if m == nil {
+		return nil, fmt.Errorf("%s must be a JSON object, got null", at)
+	}
+	allowed := append(slices.Clip(required), optional...)
+	// Sorted so that, of several bad keys, the same one is always named.
+	for _, k := range slices.Sorted(maps.Keys(m)) {
+		if !slices.Contains(allowed, k) {
+			return nil, fmt.Errorf("%s: unknown key %q (keys are case-sensitive: %s)", at, k, strings.Join(allowed, ", "))
+		}
+	}
+	for _, k := range required {
+		v, ok := m[k]
+		if !ok {
+			return nil, fmt.Errorf("%s: missing required key %q", at, k)
+		}
+		if bytes.Equal(bytes.TrimSpace(v), []byte("null")) {
+			return nil, fmt.Errorf("%s: required key %q is null", at, k)
+		}
+	}
+	return m, nil
 }
 
 // toSignature lifts a wire signature into a procsig.Signature.

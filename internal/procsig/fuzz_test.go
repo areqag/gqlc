@@ -58,9 +58,6 @@ func FuzzProcsigDecode(f *testing.F) {
 
 		sigs, msg := declared(src)
 		if msg != "" {
-			if openFinding(msg) != "" {
-				return
-			}
 			t.Fatalf("property agreement: Decode accepted an input the format does not: %s", msg)
 		}
 		want, err := procsig.NewRegistry(sigs)
@@ -85,23 +82,6 @@ func FuzzProcsigDecode(f *testing.F) {
 			t.Fatalf("property round-trip: Decode(MarshalJSON(r)) is not r (%v):\n%s", err, canon)
 		}
 	})
-}
-
-// openFinding names the open bead that already records a disagreement, or "".
-// Each arm is a known loader defect this target found and is not to report
-// again every night until it is fixed; the fix PR deletes its arm (plan §11).
-// What a tolerated input hides: every later check on that input, since the
-// declared signatures cannot be read from it.
-func openFinding(reason string) string {
-	switch {
-	case strings.Contains(reason, "differs only in case from"):
-		// encoding/json matches keys without regard to case.
-		return "gqlc-jjot2.13"
-	case strings.Contains(reason, "required key") || strings.Contains(reason, "is null"):
-		// params, results and nullable are required by §3 and not enforced.
-		return "gqlc-jjot2.14"
-	}
-	return ""
 }
 
 func canonical(r procsig.Registry) string {
