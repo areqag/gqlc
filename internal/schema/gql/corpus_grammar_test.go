@@ -27,7 +27,7 @@ const grammarPath = "../../grammar/gql/GQL.g4"
 // internal/grammar/gql/SOURCE.md outside its "Local modifications" section is a
 // statement about the upstream file, and a drift re-fetch is compared against
 // upstreamSHA256.
-const grammarSHA256 = "283e1301f5b0dea55165755fbb91e625a357aa59a066ad302a2485db498a8c14"
+const grammarSHA256 = "b94f1c2a47f0c4268eb1d7a0287f13c32d60c1c03ec9989ddc102a843eed9574"
 
 // upstreamSHA256 is the hash of the file as vendored, before gqlc's own
 // additions: the value SOURCE.md's two re-fetch commands are checked against.
@@ -57,7 +57,7 @@ var localInsertions = []string{
 	`    // gqlc extension, appended after uuidType for the reason uuidType is
     // appended last: an alternative at the end cannot shadow one that
     // already decided. VECTOR is Cypher 25's spelling (Neo4j 2025.10+);
-    // ISO/IEC 39075 has no vector value type (bd gqlc-do1, ADR 0049).
+    // ISO/IEC 39075 has no vector value type (bd gqlc-do1, ADR 0050).
     | vectorType
     ;
 

@@ -351,7 +351,7 @@ func mustVector(t *testing.T, elem graph.PropertyType) graph.PropertyType {
 // TestVectorOfAdmitsTheCoordinateTypes pins the admitted set and the two folds.
 // The folds are the canonicalisation clause applied to vectors: VECTOR<INT> and
 // VECTOR<INT64> are one Cypher 25 type, so they have to be one string or a
-// query reading both spellings refuses to unify (ADR 0049).
+// query reading both spellings refuses to unify (ADR 0050).
 func TestVectorOfAdmitsTheCoordinateTypes(t *testing.T) {
 	for _, row := range []struct {
 		elem graph.PropertyType
@@ -371,6 +371,17 @@ func TestVectorOfAdmitsTheCoordinateTypes(t *testing.T) {
 		require.Equal(t, graph.KindVector, got.Kind())
 		require.Contains(t, graph.VectorElements, got.Elem(), "Elem of %s is not a canonical element", got)
 	}
+}
+
+// TestElemOfAListOfVectorsIsTheVector pins the one place the two prefixes
+// meet. Elem strips one level, so a list of vectors answers the vector and not
+// the vector's element; a stripper that took both prefixes in sequence would
+// answer "FLOAT32> NOT NULL>", which is no type at all.
+func TestElemOfAListOfVectorsIsTheVector(t *testing.T) {
+	vec := mustVector(t, graph.TypeFloat32)
+	require.Equal(t, vec, graph.ListOf(vec, true).Elem())
+	require.Equal(t, vec, graph.ListOf(vec, false).Elem())
+	require.True(t, graph.ListOf(vec, true).ElemNotNull())
 }
 
 // TestVectorOfRefusesEveryOtherElement is the other half: every element the

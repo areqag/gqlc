@@ -808,7 +808,7 @@ func TestPropertyUUIDReservedWordEscapeHatch(t *testing.T) {
 }
 
 // TestVectorPropertyResolves pins VECTOR's spellings end to end: the dimension
-// dropped (ADR 0002, ADR 0049), the element resolved through the ordinary
+// dropped (ADR 0002, ADR 0050), the element resolved through the ordinary
 // spelling table and then folded by graph.VectorOf, and the outer NOT NULL read
 // from the vector's own node rather than from the element.
 func TestVectorPropertyResolves(t *testing.T) {

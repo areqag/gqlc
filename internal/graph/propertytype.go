@@ -58,8 +58,12 @@ func (pt PropertyType) Kind() PropertyTypeKind {
 // Elem returns the element type of a list or vector PropertyType. The result
 // is undefined when Kind() is neither KindList nor KindVector.
 func (pt PropertyType) Elem() PropertyType {
-	s := strings.TrimPrefix(string(pt), "LIST<")
-	s = strings.TrimPrefix(s, "VECTOR<")
+	s, isList := strings.CutPrefix(string(pt), "LIST<")
+	if !isList {
+		// Cut once, and only when the list prefix did not match: the
+		// element of LIST<VECTOR<…>> is the vector, not its element.
+		s = strings.TrimPrefix(s, "VECTOR<")
+	}
 	s = strings.TrimSuffix(s, ">")
 	s = strings.TrimSuffix(s, " NOT NULL")
 	return PropertyType(s)
@@ -84,7 +88,7 @@ func ListOf(elem PropertyType, elemNotNull bool) PropertyType {
 
 // VectorOf constructs a vector PropertyType over elem, and reports false for an
 // element no vector holds. The dimension is not a parameter: it is a magnitude
-// qualifier, dropped like a string's length (ADR 0002, ADR 0049).
+// qualifier, dropped like a string's length (ADR 0002, ADR 0050).
 //
 // The admitted elements are the coordinate types Cypher 25 defines, which are
 // also exactly the element types neo4j-go-driver v6's dbtype.VectorElement

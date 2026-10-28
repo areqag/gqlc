@@ -24,7 +24,7 @@ grammar defect, and two candidates are listed below.
 - **Upstream SHA-256:**
   `e1b4a24c6b88dedddc0a1fff97df0fc30bf118cea51539e26d71c717cb737bbf`
 - **Vendored-file SHA-256** (upstream plus **Local modifications**):
-  `283e1301f5b0dea55165755fbb91e625a357aa59a066ad302a2485db498a8c14`
+  `b94f1c2a47f0c4268eb1d7a0287f13c32d60c1c03ec9989ddc102a843eed9574`
 - **Lines:** 3774 upstream, 3819 as vendored
 - **Licence:** MIT, at the repository level; the `.g4` carries no header of its
   own and begins at `grammar GQL;`
@@ -102,7 +102,7 @@ VECTOR rule hunk sits inside the UUID one, so the delta test removes it first.
    constraints. The element is a full `valueType`, so that an element no target
    can carry is refused by schema admission under a sentinel that can list the
    admitted ones, rather than by the parser. The dimension is parsed and
-   dropped (ADR 0049).
+   dropped (ADR 0050).
 
    Verified the same way: the regenerated `PredefinedType()` gains a single
    `case GQLParserVECTOR:` and loses none. `VECTOR` is reserved like `UUID`, and

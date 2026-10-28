@@ -129,7 +129,7 @@ const (
 	// parameterless width the flat enum already had room for.
 	//
 	// 87 → 88 under gqlc-do1: scalar_vector.gql resolves, to a VectorOf
-	// encoding (ADR 0049).
+	// encoding (ADR 0050).
 	wantCorpusResolving = 88
 	// 18 → 17 under gqlc-4np, the legitimate once-per-case drop this pin exists
 	// to make an author account for: the property_name_repeated case is closed

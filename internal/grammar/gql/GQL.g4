@@ -1755,7 +1755,7 @@ predefinedType
     // gqlc extension, appended after uuidType for the reason uuidType is
     // appended last: an alternative at the end cannot shadow one that
     // already decided. VECTOR is Cypher 25's spelling (Neo4j 2025.10+);
-    // ISO/IEC 39075 has no vector value type (bd gqlc-do1, ADR 0049).
+    // ISO/IEC 39075 has no vector value type (bd gqlc-do1, ADR 0050).
     | vectorType
     ;
 
