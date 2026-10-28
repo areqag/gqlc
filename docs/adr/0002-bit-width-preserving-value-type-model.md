@@ -24,11 +24,13 @@ parenthetical admits no scale — that is, `INT(p)` under
 parenthetical is a spelling of a type this enum already carries, and the fold
 matches the sibling width token (`INT(8)`≈`INT8`).
 
-That criterion is written in terms of what this enum can express, so a declared
-width it cannot express — `INT(7)`, `INT(10)` — falls through to the unqualified
-type and is lost. ADR 0017 decides that this is accepted rather than rejected or
-rounded up, and states the fidelity limit; `gqlc-h9n.31` is the bead that would
-close it.
+A declared width this enum has no constant for — `INT(7)`, `INT(10)` — rounds up
+to the smallest width constant that holds it: `INT(7)` is `Int8`, `INT(10)` is
+`Int16`, reading `p` as a count of bits. That is an owner ruling recorded in
+ADR 0050, and a gqlc decision rather than a reading of ISO. It replaces
+ADR 0017, under which such a width fell through to the unqualified type and was
+lost. The declared `p` itself is still not recorded: `INT(10)` and `INT(16)`
+resolve to the same constant.
 
 `FLOAT(p)` is not folded. Its parenthetical is `(LEFT_PAREN precision (COMMA
 scale)? RIGHT_PAREN)` at `:1849` — the same scale-bearing shape as
@@ -40,8 +42,10 @@ gqlc does not decide whether it counts bits or decimal digits.
 
 The length/character/decimal-digit parenthetical on other branches
 (`VARCHAR(255)`, `STRING(10)`, `DECIMAL(p,s)`, `CHAR(4)`) is a qualifier on the
-type rather than a spelling of one and is still dropped; whether the model
-should grow a length field to carry it is tracked as `gqlc-5md`. Value types
+type rather than a spelling of one and is still dropped. That is settled: the
+model does not grow a length field, because the qualifier does not change the
+generated Go type (owner ruling 2026-10-27, `gqlc-5md` closed as won't-do; it
+reopens only if generated code is asked to validate lengths). Value types
 outside the supported families are rejected with `ErrUnsupportedType`; the
 exhaustive set of rejected constructs is enumerated by the corpus fixtures
 under `internal/schema/gql/corpus_area_d2_test.go`, which is the source of
@@ -73,10 +77,11 @@ grounds are:
   carrier a value may populate) is not preserved. A schema declaring
   `DURATION(YEAR TO MONTH)` and one declaring `DURATION(DAY TO SECOND)` are
   indistinguishable at every stage after this ADR's normalisation, exactly as
-  `CHAR(4)` and `CHAR(8)` are today. If we later need to preserve this
-  constraint (validation at write time, for example), the model must grow a
-  duration-qualifier field the same way `gqlc-5md` proposes growing a length
-  field.
+  `CHAR(4)` and `CHAR(8)` are today. That is settled: both
+  qualifiers generate the same Go type, so the model does not grow a
+  duration-qualifier field (owner ruling 2026-10-27, `gqlc-8pe` closed as
+  won't-do; it reopens only if generated code is asked to validate which
+  duration fields a value populates).
 
 Byte-string types (`BYTES(n)`, `BINARY(n)`, `VARBINARY(n)`) reach a single
 `TypeBytes` under the pre-existing magnitude-qualifier arm — no widening

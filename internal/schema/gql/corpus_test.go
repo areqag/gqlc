@@ -130,7 +130,13 @@ const (
 	// to make an author account for: the property_name_repeated case is closed
 	// by ErrDuplicatePropertyName, so it is an unsupported entry now rather than
 	// a model known to be wrong.
-	wantSemanticCases = 17
+	//
+	// 17 → 15 under gqlc-h9n.31: INT(10) and UINT(10) round up to TypeInt16 and
+	// TypeUint16 (ADR 0050), so they no longer collide with bare INT and UINT and
+	// TestSemanticCaseCollisions went red on both rows, which were deleted with
+	// this number. The scalar_float.gql case stays: FLOAT(p) is not folded
+	// (ADR 0049).
+	wantSemanticCases = 15
 )
 
 // isValidFeature reports whether v is an accepted value of corpusEntry.feature:

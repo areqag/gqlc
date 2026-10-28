@@ -172,8 +172,10 @@ func TestPropertyLengthQualifiersDropped(t *testing.T) {
 }
 
 // widthFoldPins is the second base of the grounding relation: parenthesised
-// widths whose folded constant is written out by hand, so a typeSpellings row
-// reached only through truncateParenthetical still counts as pinned.
+// widths on the lattice, whose folded constant is written out by hand. They
+// reach the bare INT, INTEGER and UINT rows through truncateParenthetical,
+// which is where normaliseType rounds them (ADR 0050); the off-lattice widths
+// are TestPropertyBinaryWidthRoundsUp's.
 var widthFoldPins = []typePin{
 	{"INT(8)", graph.TypeInt8},
 	{"INT(16)", graph.TypeInt16},
@@ -203,7 +205,9 @@ var widthFoldPins = []typePin{
 // grammar makes the parenthesised form a sibling of an explicit width token
 // AND the parenthetical admits no scale: signedBinaryExactNumericType
 // (GQL.g4:1801), unsignedBinaryExactNumericType (:1814), and
-// verboseBinaryExactNumericType (:1827). It does NOT apply to FLOAT(p), whose
+// verboseBinaryExactNumericType (:1827). A width between two constants rounds
+// up to the wider one, TestPropertyBinaryWidthRoundsUp's subject; these are the
+// widths the lattice holds exactly. It does NOT apply to FLOAT(p), whose
 // parenthetical carries a scale slot (:1849) — that case is pinned in
 // TestPropertyBinaryWidthNonFolds. Distinct from TestPropertyLengthQualifiersDropped,
 // which pins the decimal/character-length parenthetical as still being dropped.
@@ -218,14 +222,11 @@ func TestPropertyBinaryWidthParenthesisedFolds(t *testing.T) {
 }
 
 // TestPropertyBinaryWidthNonFolds pins the parenthesised spellings that fall
-// through to the truncated-spelling lookup and land on the machine-word or
-// bare type. Three flavours here, kept in one table because they share the
-// fallback path:
+// through to the truncated-spelling lookup and land on the bare type. Two
+// flavours here, kept in one table because they share the fallback path (the
+// binary-integer widths that also reach it are in
+// TestPropertyBinaryWidthOutsideTheLattice):
 //
-//   - Bit-width binary integers with no exact model counterpart (INT(7),
-//     INT(10)). Lossy — the author said 7 bits, the model says machine int.
-//     ADR 0017 decides that this is accepted rather than rejected or rounded
-//     up, so these rows pin a decision; gqlc-h9n.31 is what would change them.
 //   - FLOAT(p) and FLOAT(p, s) (:1849). The parenthetical is byte-identical
 //     in shape to DECIMAL(p, s) at :1832, not to the binary integers, and
 //     nothing in the grammar establishes that FLOAT's precision counts bits.
@@ -241,8 +242,6 @@ func TestPropertyBinaryWidthNonFolds(t *testing.T) {
 		spelling string
 		want     graph.PropertyType
 	}{
-		{"INT(7)", graph.TypeInt},
-		{"INT(10)", graph.TypeInt},
 		{"FLOAT(16)", graph.TypeFloat},
 		{"FLOAT(24)", graph.TypeFloat},
 		{"FLOAT(32)", graph.TypeFloat},
@@ -256,6 +255,108 @@ func TestPropertyBinaryWidthNonFolds(t *testing.T) {
 	}
 
 	for _, tt := range cases {
+		t.Run(tt.spelling, func(t *testing.T) {
+			got, err := parseFirstProperty(t, tt.spelling)
+			require.NoError(t, err)
+			require.Equal(t, tt.want, got.Type)
+		})
+	}
+}
+
+// TestPropertyBinaryWidthRoundsUp pins ADR 0050: a parenthesised binary width
+// resolves to the narrowest width constant that holds it, read as a count of
+// bits. Every spelling of the parenthesised form is driven, because the five
+// heads reach the rule independently and SIGNED INTEGER(8) is the precedent for
+// one of them being missed while its siblings pass. The widths straddle each
+// lattice step — one below, on, one above — so an off-by-one at any boundary,
+// or a rule that rounds down, fails a named subtest.
+func TestPropertyBinaryWidthRoundsUp(t *testing.T) {
+	signed := []typePin{
+		{"1", graph.TypeInt8},
+		{"7", graph.TypeInt8},
+		{"8", graph.TypeInt8},
+		{"9", graph.TypeInt16},
+		{"10", graph.TypeInt16},
+		{"15", graph.TypeInt16},
+		{"16", graph.TypeInt16},
+		{"17", graph.TypeInt32},
+		{"20", graph.TypeInt32},
+		{"31", graph.TypeInt32},
+		{"32", graph.TypeInt32},
+		{"33", graph.TypeInt64},
+		{"63", graph.TypeInt64},
+		{"64", graph.TypeInt64},
+		{"65", graph.TypeInt128},
+		{"127", graph.TypeInt128},
+		{"128", graph.TypeInt128},
+		{"129", graph.TypeInt256},
+		{"255", graph.TypeInt256},
+		{"256", graph.TypeInt256},
+	}
+	unsigned := []typePin{
+		{"1", graph.TypeUint8},
+		{"7", graph.TypeUint8},
+		{"8", graph.TypeUint8},
+		{"9", graph.TypeUint16},
+		{"10", graph.TypeUint16},
+		{"15", graph.TypeUint16},
+		{"16", graph.TypeUint16},
+		{"17", graph.TypeUint32},
+		{"20", graph.TypeUint32},
+		{"31", graph.TypeUint32},
+		{"32", graph.TypeUint32},
+		{"33", graph.TypeUint64},
+		{"63", graph.TypeUint64},
+		{"64", graph.TypeUint64},
+		{"65", graph.TypeUint128},
+		{"127", graph.TypeUint128},
+		{"128", graph.TypeUint128},
+		{"129", graph.TypeUint256},
+		{"255", graph.TypeUint256},
+		{"256", graph.TypeUint256},
+	}
+
+	for _, family := range []struct {
+		heads []string
+		pins  []typePin
+	}{
+		{[]string{"INT", "INTEGER", "SIGNED INTEGER"}, signed},
+		{[]string{"UINT", "UNSIGNED INTEGER"}, unsigned},
+	} {
+		for _, head := range family.heads {
+			for _, pin := range family.pins {
+				spelling := head + "(" + pin.spelling + ")"
+				t.Run(spelling, func(t *testing.T) {
+					got, err := parseFirstProperty(t, spelling)
+					require.NoError(t, err)
+					require.Equal(t, pin.want, got.Type)
+				})
+			}
+		}
+	}
+}
+
+// TestPropertyBinaryWidthOutsideTheLattice pins the parenthesised integer
+// widths the round-up rule does not reach, and what they do instead. A width
+// wider than INT256 has no constant to round up to, and zero bits is not a
+// width; both keep the behaviour they had before ADR 0050, the unqualified
+// machine word, rather than gaining a rejection. The digit separator and the
+// leading zero are the grammar's own spellings of a number
+// (UNSIGNED_DECIMAL_INTEGER, GQL.g4), so they are read for their value.
+func TestPropertyBinaryWidthOutsideTheLattice(t *testing.T) {
+	for _, tt := range []typePin{
+		{"INT(0)", graph.TypeInt},
+		{"UINT(0)", graph.TypeUint},
+		{"INT(257)", graph.TypeInt},
+		{"UINT(257)", graph.TypeUint},
+		{"INTEGER(1000)", graph.TypeInt},
+		{"INT(99999999999999999999999)", graph.TypeInt},
+		{"INT(08)", graph.TypeInt8},
+		{"INT(1_6)", graph.TypeInt16},
+		{"UNSIGNED INTEGER(0_10)", graph.TypeUint16},
+		{"INT(10) NOT NULL", graph.TypeInt16},
+		{"uint ( 10 )", graph.TypeUint16},
+	} {
 		t.Run(tt.spelling, func(t *testing.T) {
 			got, err := parseFirstProperty(t, tt.spelling)
 			require.NoError(t, err)

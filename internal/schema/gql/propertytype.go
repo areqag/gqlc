@@ -3,6 +3,7 @@ package gql
 import (
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/antlr4-go/antlr/v4"
@@ -214,27 +215,22 @@ func hasNotNull(t antlr.Tree) bool {
 // and bare DATETIME/LOCALDATETIME are listed in some references but the GQL
 // grammar does not accept them.
 //
-// The parenthesised binary-width spellings for INT / INTEGER / UINT (INT(8),
-// UINT(64) …) appear as explicit rows because their bit-width identifies a
-// model constant: the grammar makes each of them a sibling of an explicit
-// width token (INT(8) alongside INT8 under signedBinaryExactNumericType,
-// GQL.g4:1801; UINT(8) alongside UINT8 under unsignedBinaryExactNumericType,
-// :1814; INTEGER(8) alongside INTEGER8 under verboseBinaryExactNumericType,
-// :1827) and the parenthetical admits no scale.
+// The parenthesised binary-width spellings (INT(p), INTEGER(p), SIGNED
+// INTEGER(p), UINT(p), UNSIGNED INTEGER(p)) have no rows. normaliseType rounds
+// them onto binaryWidths from the type their unqualified head resolves to, so
+// the five heads reach the rule through their bare rows here and none of them
+// can be left out of it. That is the failure an explicit row per width once
+// had: every SIGNED prefix row carried a suffix width and every parenthesised
+// row carried no prefix, so SIGNED INTEGER(8) matched no row and resolved to
+// TypeInt with its eight declared bits gone.
 //
-// SIGNED and UNSIGNED prefixes on verboseBinaryExactNumericType (GQL.g4:1803
-// for SIGNED?, :1816 for UNSIGNED) are represented as one alias row per verbose
-// spelling — INCLUDING the parenthesised widths, since the prefix rule and the
-// parenthetical rule above compose and `SIGNED INTEGER(8)` is admitted by both.
-// It is spelled out because leaving it implicit is what went wrong: every prefix
-// row carried a suffix width and every parenthesised row carried no prefix, so
-// the combination matched no row, fell down truncateParenthetical to
-// `SIGNED INTEGER`, and resolved to TypeInt with its eight declared bits gone.
-// Alias rows over a pre-lookup normalisation because alternative-additions to
-// the grammar are grep-visible here — the fact that SIGNED SMALL INTEGER maps to
-// TypeInt16 lands in the same table an author or reviewer reads to find any
-// other spelling. The corresponding TestPropertyVerboseIntegerSignedness rows go
-// red if any alias row is deleted.
+// SIGNED and UNSIGNED prefixes on verboseBinaryExactNumericType (GQL.g4:1825
+// for SIGNED?, :1838 for UNSIGNED) are represented as one alias row per verbose
+// spelling. Alias rows over a pre-lookup normalisation because
+// alternative-additions to the grammar are grep-visible here — the fact that
+// SIGNED SMALL INTEGER maps to TypeInt16 lands in the same table an author or
+// reviewer reads to find any other spelling. The corresponding
+// TestPropertyVerboseIntegerSignedness rows go red if any alias row is deleted.
 //
 // FLOAT(p) is not folded even though its bare form is here. Its parenthetical
 // is (LEFT_PAREN precision (COMMA scale)? RIGHT_PAREN) at GQL.g4:1849 — a
@@ -313,25 +309,6 @@ var typeSpellings = map[string]graph.PropertyType{
 	"INT256":               graph.TypeInt256,
 	"INTEGER256":           graph.TypeInt256,
 	"SIGNED INTEGER256":    graph.TypeInt256,
-	"INT(8)":               graph.TypeInt8,
-	"INTEGER(8)":           graph.TypeInt8,
-	"INT(16)":              graph.TypeInt16,
-	"INTEGER(16)":          graph.TypeInt16,
-	"INT(32)":              graph.TypeInt32,
-	"INTEGER(32)":          graph.TypeInt32,
-	"INT(64)":              graph.TypeInt64,
-	"INTEGER(64)":          graph.TypeInt64,
-	"INT(128)":             graph.TypeInt128,
-	"INTEGER(128)":         graph.TypeInt128,
-	"INT(256)":             graph.TypeInt256,
-	"INTEGER(256)":         graph.TypeInt256,
-
-	"SIGNED INTEGER(8)":   graph.TypeInt8,
-	"SIGNED INTEGER(16)":  graph.TypeInt16,
-	"SIGNED INTEGER(32)":  graph.TypeInt32,
-	"SIGNED INTEGER(64)":  graph.TypeInt64,
-	"SIGNED INTEGER(128)": graph.TypeInt128,
-	"SIGNED INTEGER(256)": graph.TypeInt256,
 
 	"UINT":                   graph.TypeUint,
 	"UNSIGNED INTEGER":       graph.TypeUint,
@@ -351,19 +328,6 @@ var typeSpellings = map[string]graph.PropertyType{
 	"UNSIGNED INTEGER128":    graph.TypeUint128,
 	"UINT256":                graph.TypeUint256,
 	"UNSIGNED INTEGER256":    graph.TypeUint256,
-	"UINT(8)":                graph.TypeUint8,
-	"UINT(16)":               graph.TypeUint16,
-	"UINT(32)":               graph.TypeUint32,
-	"UINT(64)":               graph.TypeUint64,
-	"UINT(128)":              graph.TypeUint128,
-	"UINT(256)":              graph.TypeUint256,
-
-	"UNSIGNED INTEGER(8)":   graph.TypeUint8,
-	"UNSIGNED INTEGER(16)":  graph.TypeUint16,
-	"UNSIGNED INTEGER(32)":  graph.TypeUint32,
-	"UNSIGNED INTEGER(64)":  graph.TypeUint64,
-	"UNSIGNED INTEGER(128)": graph.TypeUint128,
-	"UNSIGNED INTEGER(256)": graph.TypeUint256,
 
 	"FLOAT":            graph.TypeFloat,
 	"REAL":             graph.TypeFloat32,
@@ -394,23 +358,81 @@ var typeSpellings = map[string]graph.PropertyType{
 	"ANY PROPERTY VALUE": graph.TypeAnyPropertyValue,
 }
 
-// normaliseType looks up the full canonical spelling first so that a
-// parenthesised binary-width form (INT(8)) resolves to the width constant;
-// on a miss it falls back to the truncated spelling, which is what keeps
-// length/character/decimal-digit qualifiers (STRING(10), DECIMAL(10,2))
-// resolving to the bare type per ADR 0002. The fallback is lossy for widths
-// with no exact model counterpart — INT(7) lands on TypeInt, a 64-bit machine
-// int, and the declared seven bits are gone. That is decided, not pending:
-// ADR 0017 accepts the loss rather than rejecting a valid ISO GQL schema over
-// one qualifier, and gqlc-h9n.31 is the bead that would give the model
-// somewhere to keep it.
+// binaryWidths is the lattice a parenthesised binary width rounds up onto,
+// keyed by the type the spelling's unqualified head resolves to. Only the two
+// machine words key it, so INT, INTEGER and SIGNED INTEGER share the signed
+// lattice, UINT and UNSIGNED INTEGER the unsigned one, and no other
+// parenthetical (FLOAT(p), DECIMAL(p,s), STRING(n)) reaches it.
+var binaryWidths = map[graph.PropertyType][]struct {
+	bits int
+	pt   graph.PropertyType
+}{
+	graph.TypeInt: {
+		{8, graph.TypeInt8},
+		{16, graph.TypeInt16},
+		{32, graph.TypeInt32},
+		{64, graph.TypeInt64},
+		{128, graph.TypeInt128},
+		{256, graph.TypeInt256},
+	},
+	graph.TypeUint: {
+		{8, graph.TypeUint8},
+		{16, graph.TypeUint16},
+		{32, graph.TypeUint32},
+		{64, graph.TypeUint64},
+		{128, graph.TypeUint128},
+		{256, graph.TypeUint256},
+	},
+}
+
+// normaliseType looks up the full canonical spelling, then the truncated one.
+// On the truncated lookup a binary-integer head rounds its parenthesised width
+// up to the narrowest width constant that holds it, reading p as a count of
+// bits: INT(8) is TypeInt8, INT(7) is TypeInt8 too, INT(10) is TypeInt16
+// (ADR 0050). A width the lattice cannot hold — zero, or wider than 256 —
+// keeps the unqualified machine word it resolved to before that rule.
+//
+// Every other parenthetical is dropped by the truncated lookup, which is what
+// keeps length/character/decimal-digit qualifiers (STRING(10), DECIMAL(10,2))
+// and FLOAT(p) resolving to the bare type per ADR 0002 and ADR 0049.
 func normaliseType(spelling string) (graph.PropertyType, bool) {
 	full := canonicalSpelling(spelling)
 	if pt, ok := typeSpellings[full]; ok {
 		return pt, true
 	}
-	pt, ok := typeSpellings[truncateParenthetical(full)]
-	return pt, ok
+	head := truncateParenthetical(full)
+	pt, ok := typeSpellings[head]
+	if !ok {
+		return "", false
+	}
+	if bits, ok := parenthesisedWidth(full[len(head):]); ok {
+		for _, w := range binaryWidths[pt] {
+			if bits <= w.bits {
+				return w.pt, true
+			}
+		}
+	}
+	return pt, true
+}
+
+// parenthesisedWidth reads the precision out of a canonical "(p)" suffix. The
+// grammar's UNSIGNED_DECIMAL_INTEGER admits a leading zero and an underscore
+// between digits, so INT(08) and INT(1_6) are read as the numbers they spell.
+// Zero is reported as no width at all: no lattice step is a width of zero bits.
+func parenthesisedWidth(paren string) (int, bool) {
+	inner, ok := strings.CutPrefix(paren, "(")
+	if !ok {
+		return 0, false
+	}
+	inner, ok = strings.CutSuffix(inner, ")")
+	if !ok {
+		return 0, false
+	}
+	bits, err := strconv.ParseUint(strings.ReplaceAll(inner, "_", ""), 10, 16)
+	if err != nil || bits == 0 {
+		return 0, false
+	}
+	return int(bits), true
 }
 
 // canonicalSpelling reduces a raw value-type spelling to its lookup key:
@@ -429,9 +451,10 @@ func canonicalSpelling(s string) string {
 // collapseParenthetical removes the space before `(` and the spaces adjacent
 // to `(`, `)` and `,` inside the first parenthetical, so `INT ( 8 )`,
 // `INT (8)` and `FLOAT(10, 2)` share a lookup key with their unspaced
-// spellings. Only the width forms cash that in: no typeSpellings row holds a
-// comma, so a comma-bearing key misses the full lookup either way and resolves
-// down truncateParenthetical, which discards the parenthetical this rewrote.
+// spellings. Only the width forms cash that in, through parenthesisedWidth: no
+// typeSpellings row holds a comma, so a comma-bearing key misses the full
+// lookup either way and resolves down truncateParenthetical, which discards the
+// parenthetical this rewrote.
 // The comma clause is kept for the row gqlc-5md would add, and
 // TestCanonicalSpellingCommaSpacingIrrelevant is the only thing that can see it
 // until then — gqlc-825 has the proof.
