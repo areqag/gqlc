@@ -7,12 +7,15 @@
 #
 # The planted sites are in internal/codegen, which every backend calls:
 # Prepare (each backend's shared front half) and Finalise (the shared tail).
-# R2's condition is a query whose name holds one of J X Y j q z. No committed
-# seed's query name carries any of them (the generated arm names its query Q;
-# the driver re-checks that on the mutant before it fuzzes), and one replaced
-# byte inside any fixture's `// name:` annotation does. Six letters rather than
-# one because the first run's R3b, on X alone, went 5 minutes without the
-# engine writing one.
+# R2's condition is a schema declaring six node types, gen.Schema's maximum.
+# No committed seed reaches Prepare with one (the fixtures declare at most five,
+# and the driver re-checks the seeds on the mutant before it fuzzes); over 5000
+# random generated-arm streams, 90 of the 4048 the front end admitted did, and
+# the node count is one early byte of the stream. The first version of this
+# condition, a query name holding a letter no fixture's does, was reached by
+# byte mutation of the text arm in 49 s and 110 s on two runs and not at all
+# within 5 minutes on two others, which is too unreliable to tell a dead
+# detector from an unlucky run.
 set -euo pipefail
 
 # SC1091: `just lint-hooks` runs shellcheck without -x, so it cannot follow the
@@ -26,10 +29,10 @@ emit=internal/codegen/emit.go
 # R2's condition with PLANT standing for its body. Each body is a variable of
 # its own because the replacement half of ${named/PLANT/...} undergoes quote
 # removal, which would eat a literal \n.
-named='s/^func Prepare(in Input, tm TypeMap, packageName string) (Prepared, error) {$/&\n\tfor _, q := range in.Queries {\n\t\tif strings.ContainsAny(q.Name, "JXYjqz") {\n\t\t\tPLANT\n\t\t}\n\t}/'
+named='s/^func Prepare(in Input, tm TypeMap, packageName string) (Prepared, error) {$/&\n\tif len(in.Schema.Nodes) == 6 {\n\t\tPLANT\n\t}/'
 plant_panic='panic("planted: R2")'
 plant_sleep='time.Sleep(1500 * time.Millisecond)'
-plant_hang='for {\n\t\t\t}'
+plant_hang='for {\n\t\t}'
 seeds="go test -count=1 -run '^FuzzGenerate\$' ./$pkg"
 # -parallel 4: the host is shared. Expanded by driver.sh's `bash -c` in the
 # copy, not here.

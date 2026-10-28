@@ -5,9 +5,9 @@
 # protocol and the verdicts are driver.sh's; the recorded run, with every
 # row's diff, is docs/mutation/fuzz-liveness-FuzzGeneratedBuilds.md.
 #
-# R2's condition is FuzzGenerate's: a query whose name holds one of J X Y j q
-# z, which none of the three seed fixtures carries and one replaced byte in a
-# `// name:` annotation does.
+# R2's condition is FuzzGenerate's: a schema declaring six node types, which
+# none of the three seed fixtures does. The seeds are all text-arm inputs, so
+# the engine reaches it by flipping the first byte to the generated arm.
 set -euo pipefail
 
 # SC1091: `just lint-hooks` runs shellcheck without -x, so it cannot follow the
@@ -19,10 +19,10 @@ pkg=internal/codegen/conformance
 prepare=internal/codegen/prepare.go
 # R2's condition with PLANT standing for its body; see FuzzGenerate.rows for
 # why each body is a variable of its own.
-named='s/^func Prepare(in Input, tm TypeMap, packageName string) (Prepared, error) {$/&\n\tfor _, q := range in.Queries {\n\t\tif strings.ContainsAny(q.Name, "JXYjqz") {\n\t\t\tPLANT\n\t\t}\n\t}/'
+named='s/^func Prepare(in Input, tm TypeMap, packageName string) (Prepared, error) {$/&\n\tif len(in.Schema.Nodes) == 6 {\n\t\tPLANT\n\t}/'
 plant_panic='panic("planted: R2")'
 plant_sleep='time.Sleep(6 * time.Second)'
-plant_hang='for {\n\t\t\t}'
+plant_hang='for {\n\t\t}'
 seeds="go test -count=1 -run '^FuzzGeneratedBuilds\$' ./$pkg"
 # -parallel 2: every exec that reaches the build is a `go build`, and the host
 # is shared. Expanded by driver.sh's `bash -c` in the copy, not here.
