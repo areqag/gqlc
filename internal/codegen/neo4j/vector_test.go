@@ -1,7 +1,6 @@
 package neo4j_test
 
 import (
-	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -108,7 +107,7 @@ func TestV5RefusesAVectorUnderItsOwnSentinel(t *testing.T) {
 
 	_, err := neo4j.New(neo4j.WithDriverVersion(neo4j.DriverV5)).Generate(in)
 	require.ErrorIs(t, err, neo4j.ErrUnrepresentableOnDriverVersion)
-	require.False(t, errors.Is(err, codegen.ErrUnrepresentableWidth),
+	require.NotErrorIs(t, err, codegen.ErrUnrepresentableWidth,
 		"the v5 refusal also cites the width sentinel, which says no carrier exists anywhere in this backend")
 	require.ErrorContains(t, err, "neo4j-go-v6")
 

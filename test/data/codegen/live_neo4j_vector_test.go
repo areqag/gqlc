@@ -118,7 +118,9 @@ func TestNeo4jStoresAndRoundTripsAVector(t *testing.T) {
 		"CALL dbms.components() YIELD edition RETURN edition", nil, neo4jv6.EagerResultTransformer)
 	require.NoError(t, err, "read the server's edition")
 	require.NotEmpty(t, editions.Records, "dbms.components() returned no rows")
-	if edition, _ := editions.Records[0].AsMap()["edition"].(string); edition == "community" {
+	edition, ok := editions.Records[0].AsMap()["edition"].(string)
+	require.True(t, ok, "dbms.components() edition is not a string: %v", editions.Records[0].AsMap())
+	if edition == "community" {
 		t.Skipf("%s is a community edition, which stores no vector property: only the block store format holds "+
 			"one, and community has the aligned format alone (measured on 2025.10.1, 2026-10-27)", info.Agent())
 	}

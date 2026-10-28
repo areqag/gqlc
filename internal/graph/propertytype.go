@@ -99,10 +99,10 @@ func ListOf(elem PropertyType, elemNotNull bool) PropertyType {
 // and the first would carry Go's platform-sized int, which no driver packs as
 // a vector coordinate.
 func VectorOf(elem PropertyType) (PropertyType, bool) {
-	switch elem {
-	case TypeInt:
+	if elem == TypeInt {
 		elem = TypeInt64
-	case TypeFloat:
+	}
+	if elem == TypeFloat {
 		elem = TypeFloat64
 	}
 	if !slices.Contains(VectorElements, elem) {
