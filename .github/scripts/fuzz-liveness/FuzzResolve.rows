@@ -1,0 +1,97 @@
+#!/usr/bin/env bash
+# Liveness rows for FuzzResolve (internal/resolver), run by `just
+# fuzz-liveness FuzzResolve`: each row plants one defect with sed, in a
+# scratch copy of HEAD, and asks whether the harness reports it. The protocol
+# and the verdicts are driver.sh's; the recorded run, with every row's diff, is
+# docs/mutation/fuzz-liveness-FuzzResolve.md.
+#
+# R2's condition is a query whose first branch resolves to exactly seven
+# columns. The committed seeds reach at most six (measured 2026-10-28: four
+# corpus queries project six) and the generated arm at most four (gen's items
+# draws 1 + Int(4)); the driver re-checks that on the mutant before it fuzzes.
+# One more projection inserted into a six-column seed's RETURN meets it.
+set -euo pipefail
+
+# SC1091: `just lint-hooks` runs shellcheck without -x, so it cannot follow the
+# source; driver.sh is linted in its own right by the same sweep.
+# shellcheck source=driver.sh disable=SC1091
+. "$(dirname "${BASH_SOURCE[0]}")/driver.sh"
+
+pkg=internal/resolver
+resolve="$pkg/resolve.go"
+# R2's condition with PLANT standing for its body. Each body is a variable of
+# its own because the replacement half of ${cols/PLANT/...} undergoes quote
+# removal, which would eat a literal \n.
+cols='s/^\tif err := compareBranchColumns(branchCols); err != nil {$/\tif len(branchCols[0]) == 7 {\n\t\tPLANT\n\t}\n&/'
+plant_panic='panic("planted: R2")'
+plant_sleep='time.Sleep(3 * time.Second)'
+plant_hang='for {\n\t\t}'
+seeds="go test -count=1 -run '^FuzzResolve\$' ./$pkg"
+# Expanded by driver.sh's `bash -c` in the copy, not here. Four workers: the
+# host these rows were written on is shared.
+# shellcheck disable=SC2016
+fuzz='just fuzz FuzzResolve "$LIVENESS_BUDGET" 4'
+
+liveness_begin FuzzResolve "$pkg"
+
+liveness_control C1 "$seeds"
+liveness_control C2 "$fuzz"
+
+# R1 seed-reach: every query that parses is resolved through resolve().
+liveness_row R1 "$resolve" \
+    's/^\tbranchCols := make(\[\]\[\]Column, len(q\.Branches))$/\tpanic("planted: R1")\n&/' \
+    'panic: planted: R1' seeds "$seeds"
+
+# R2 mutation-reach.
+liveness_row R2 "$resolve" \
+    "${cols/PLANT/$plant_panic}" \
+    'panic: planted: R2' fuzz "$fuzz"
+
+# R3 slow call: R2's condition, sleeping 3 s instead of panicking. Past
+# Guard's 2 s limit and short of its 10 s watchdog, so the first guarded
+# Resolve returns late and Guard's Fatalf reports it.
+liveness_row R3 "$resolve" \
+    's/^\t"strings"$/&\n\t"time"/
+'"${cols/PLANT/$plant_sleep}" \
+    'fuzzkit\.Guard: slow input' fuzz "$fuzz"
+
+# R3b hang: R2's condition, never returning. Guard's watchdog ends the worker
+# and the engine reports a worker that terminated unexpectedly.
+liveness_row R3b "$resolve" \
+    "${cols/PLANT/$plant_hang}" \
+    'hung or terminated unexpectedly|fuzzkit\.Guard: watchdog' fuzz "$fuzz"
+
+# The property rows. Each breaks one property without a panic, on a shape the
+# committed seeds already carry, so the seed pass reports it: they show the
+# property is checked, and name the property that fired.
+
+# R4a zero on error: a branch refusal comes back with a non-zero model.
+liveness_row R4a "$resolve" \
+    's/^\t\t\treturn ValidatedQuery{}, err$/\t\t\treturn ValidatedQuery{Distinct: true}, err/' \
+    'property zero on error' property "$fuzz"
+
+# R4b error class: a branch refusal loses its sentinel, so it reads as plain
+# and is not the CALL-registry arm.
+liveness_row R4b "$resolve" \
+    's/^\t\t\treturn ValidatedQuery{}, err$/\t\t\treturn ValidatedQuery{}, fmt.Errorf("%v", err)/' \
+    'property error class: .* returned a plain error' property "$fuzz"
+
+# R4c well-formed: every accepted model gains a column with no ResolvedType.
+liveness_row R4c "$resolve" \
+    's/^\t\tColumns:    branchCols\[0\],$/\t\tColumns:    append(slices.Clip(branchCols[0]), Column{Name: "planted"}),/' \
+    'property well-formed: .* nil ResolvedType' property "$fuzz"
+
+# R4d marshal: StatementKind refuses to marshal, so every accepted model does.
+liveness_row R4d "$pkg/validated.go" \
+    's/^\treturn json\.Marshal(k\.String())$/\treturn json.Marshal(func() {})/' \
+    'property marshal' property "$fuzz"
+
+# R4e determinism: package state flips Distinct on every second successful
+# Resolve, so the two calls on one input disagree.
+liveness_row R4e "$resolve" \
+    's/^func resolve(q query\.Query, s schema\.Schema, r procsig\.Registry) (ValidatedQuery, error) {$/var plantedCalls int\n\n&/
+s/^\treturn ValidatedQuery{$/\tplantedCalls++\n&/
+s/^\t\tDistinct:   computeDistinct(q),$/\t\tDistinct:   computeDistinct(q) != (plantedCalls%2 == 0),/' \
+    'property determinism' property "$fuzz"
+
+liveness_end
