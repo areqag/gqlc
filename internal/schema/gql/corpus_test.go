@@ -311,12 +311,12 @@ type corpusArea struct {
 // because the value type grammar is half the obligation on its own.
 var corpusAreas = map[string]corpusArea{
 	"A": {
-		prefixes: []string{"12.6-graph-type-statement/", "17-references/", "18.1-nested-graph-type/"},
+		prefixes: []string{"12.4-create-graph-statement/", "12.6-graph-type-statement/", "17-references/", "18.1-nested-graph-type/"},
 		entries:  corpusAreaA,
 		semantic: semanticAreaA,
 	},
 	"B": {
-		prefixes: []string{"18.2-node-type/", "18.4-label-set/", "18.5-property-types/", "18.6-property-type/", "18.7-property-value-type/"},
+		prefixes: []string{"16.7-path-pattern-expression/", "18.2-node-type/", "18.4-label-set/", "18.5-property-types/", "18.6-property-type/", "18.7-property-value-type/"},
 		entries:  corpusAreaB,
 		semantic: semanticAreaB,
 	},
@@ -460,15 +460,29 @@ type ownershipOnlyPrefix struct {
 // here would parse bytes an existing file already parses, and its manifest row would
 // assert nothing the existing row does not.
 //
-// Deleting these four and running TestCorpusAreaParseCarriers reports fieldType,
-// propertyType, propertyTypeList, propertyTypesSpecification and propertyValueType as
-// unowned — names no area answers for. That is strictly weaker than the state this
-// register describes, which is why the empty prefixes stay.
+// Deleting the four 18.x prefixes and running TestCorpusAreaParseCarriers reports
+// fieldType, propertyType, propertyTypeList, propertyTypesSpecification and
+// propertyValueType as unowned; deleting the 12.4 and 16.7 prefixes reports
+// graphTypeLikeGraph, LIKE, isOrColon, IS and COLON — names no area answers for.
+// That is strictly weaker than the state this register describes, which is why the
+// empty prefixes stay.
 //
 // The register is not a permanent exemption. An entry whose prefix gains a file fails,
 // and the fix is to delete the entry rather than to widen it, because a file under the
 // prefix is the direct refutation of the reason the entry states.
 var ownershipOnlyPrefixes = []ownershipOnlyPrefix{
+	{
+		prefix: "12.4-create-graph-statement/",
+		area:   "A",
+		why: "ISO declares <graph type like graph> in 12.4, between <of graph type> and <graph source>, and GQL.g4 keeps it there (graphTypeLikeGraph : LIKE graphExpression, GQL.g4:327-329). " +
+			"The DDL obligation reaches it only through 12.6's graphTypeSource (GQL.g4:347-351), so its one spelling is CREATE GRAPH TYPE ... LIKE, which 12.6-graph-type-statement/like_graph.gql already parses; CREATE GRAPH itself is outside the obligation.",
+	},
+	{
+		prefix: "16.7-path-pattern-expression/",
+		area:   "B",
+		why: "ISO declares <is or colon> in 16.7, beside <is label expression>, and GQL.g4 keeps it there (isOrColon : IS | COLON, GQL.g4:1009-1012). " +
+			"The DDL obligation reaches it only through 18.4's labelSetPhrase (GQL.g4:1679-1683), so its spellings are a label set's IS or colon prefix, which 18.4-label-set/ already parses; path patterns themselves are outside the obligation.",
+	},
 	{
 		prefix: "18.5-property-types/",
 		area:   "B",
