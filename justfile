@@ -241,9 +241,10 @@ init: check-push-keepalive
 # repaired. A marker-bearing copy that FAILS the behavioural check below is not:
 # that is tamper or corruption rather than absence, and it refuses.
 #
-# The hooksPath arms stay hard refusals: self-healing core.hooksPath would
-# rewrite the very drift this recipe exists to report, and the shared config is
-# where the damage lives.
+# The hooksPath arms stay hard refusals: this recipe reports the value, in any
+# spelling. Repair belongs to .githooks/hooks-drift-tripwire, which runs only
+# when git has actually fallen back to the default directory and rewrites only
+# the two drift shapes it recognises (bd gqlc-ofsup).
 [private]
 check-hooks:
     #!/usr/bin/env bash
@@ -1258,6 +1259,14 @@ test-bd-prime-guard:
 # is already a required context.
 test-setup-go-assertion:
     @.github/scripts/assert-go-toolchain.rows .github/scripts/assert-go-toolchain.sh
+
+# The rows for .githooks/hooks-drift-tripwire (bd gqlc-ofsup): both observed
+# drift shapes are refused once and repaired, post-checkout neither blocks nor
+# repairs, and the blocking copies still refuse when check-hooks runs them under
+# a healthy value. Throwaway repositories only; <1s. Enrolled under `tidy`
+# beside the two above.
+test-hooks-drift-tripwire:
+    @.githooks/hooks-drift-tripwire.rows .githooks/hooks-drift-tripwire
 
 # The rows for the `gates` recipe's justfile-format arm, for the comparison it
 # shares with check-just-version, and for that recipe's own answers (bd
@@ -2822,6 +2831,9 @@ gates:
     # The rows for setup-go's provisioned-toolchain assertion (bd gqlc-ma1l).
     # ci.yml's tidy job runs the same command.
     run tidy           just test-setup-go-assertion
+    # The rows for the hooksPath drift tripwire (bd gqlc-ofsup). ci.yml's tidy
+    # job runs the same command.
+    run tidy           just test-hooks-drift-tripwire
     # The rows for the justfile-format arm above (bd gqlc-i2lw). ci.yml's tidy
     # job runs the same command.
     run tidy           just test-gates-justfile-format

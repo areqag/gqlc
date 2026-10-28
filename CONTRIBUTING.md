@@ -17,8 +17,13 @@ Repair with `just init`, which is idempotent.
 default hooks directory (`$(git rev-parse --git-common-dir)/hooks`). That is the
 directory git falls back to when `core.hooksPath` is unset or points at it —
 the shape the drift has taken every time it has been observed — so in the
-drifted state the tripwire is exactly what git runs, and it **refuses the commit
-or the push** and names `just init` as the repair. In the healthy state git never
+drifted state the tripwire is exactly what git runs. It **refuses the commit or
+the push and writes `core.hooksPath` back to `.githooks`**, so running the same
+command again goes through the real hooks (bd gqlc-ofsup). It repairs because the
+writer's own restore does not happen when its process is killed inside the
+window, and four drifts on record stood until someone noticed. It repairs only
+the two observed shapes, and never from `post-checkout`, which fires inside the
+spawn's own `git worktree add`. In the healthy state git never
 looks in that directory and the tripwire is silent. That is what stops the drift
 from depending on someone choosing to run a recipe: it reports at commit and
 push time, which is when it matters.
@@ -40,8 +45,8 @@ is what it repairs, since an absent file is unambiguous. Two other states it
 reports and leaves alone: a hook this repo did not write squatting one of the
 five names, and a marker-bearing copy that fails the behavioural check below.
 Installing over either would be overwriting somebody's file on a guess. And it
-will *not* repair `core.hooksPath` itself: healing that would silently rewrite
-the drift the check exists to report, in the config every worktree shares.
+does *not* repair `core.hooksPath` itself. The tripwire does that, at the moment
+git actually runs it, and says so on stderr; `check-hooks` reports the value.
 
 That refusal comes *first*, which bounds the sentence above: in a fresh clone —
 `core.hooksPath` unset, nothing installed yet — `check-hooks` exits 1 on the
@@ -62,9 +67,9 @@ Four limits, stated rather than left to be found. A drift to some *third*
 directory is not caught, because git then runs that directory's hooks and never
 reaches the tripwire; `just check-hooks` compares the configured value and so
 catches any spelling, but only when someone runs it, and the two are layered
-deliberately. The tripwire refuses rather than repairing: `git commit
---no-verify` skips it exactly as it skips the real hooks, so it is a report, not
-a lock. The self-heal does not reach a fresh clone, for the reason given above.
+deliberately. `git commit --no-verify` skips the tripwire exactly as it skips
+the real hooks, so it is a report and a repair, not a lock. The self-heal does
+not reach a fresh clone, for the reason given above.
 And `check-hooks` runs the five with no arguments and without `GIT_INDEX_FILE`,
 so an installed copy can tell the check apart from a real commit: one keying on
 that variable refuses when the check runs it, permits when git runs it as
