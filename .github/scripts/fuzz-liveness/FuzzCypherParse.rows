@@ -99,11 +99,12 @@ s/^\tq\.ComprehensionPaths = l\.comprehensionPaths$/&\n\tplantedCalls++\n\tif pl
 
 # R5 the classifier's defusing: without it, a query that spells "bug:" in a
 # delimited name is refused with a sentinel whose message echoes the marker,
-# and fuzzkit.ClassifyError reads that as a bug. The committed seed
+# and the marker reads as a bug. The committed seed
 # testdata/fuzz/FuzzCypherParse/echoed-bug-marker is that query. This row
-# mutates the harness, not the parser: it shows the correction is load-bearing.
-liveness_row R5 "$pkg/fuzz_test.go" \
-    's/^\t\terr = defused{err}$/\t\t_ = defused{err}/' \
+# mutates the kit's input-aware classifier (fuzzkit.ClassifyInputError,
+# gqlc-jjot2.18), not the parser: it shows the correction is load-bearing.
+liveness_row R5 internal/fuzzkit/fuzzkit.go \
+    's/^\treturn classify(err, !strings\.Contains(input, bugMarker), isSyntax, sentinels)$/\treturn classify(err, true, isSyntax, sentinels)/' \
     'property error class: .* returned a bug error' property "$fuzz"
 
 liveness_end

@@ -140,24 +140,13 @@ func isSyntaxError(err error) bool {
 	return strings.HasPrefix(err.Error(), "syntax error at ")
 }
 
-// classify is fuzzkit.ClassifyError with one correction. The parser quotes
-// the offending token, or a name from the query, in its messages, so an input
-// that itself contains "bug:" can produce an error carrying the marker that
-// no fail site wrote. When the input contains the marker, the error's text is
-// read with the input's occurrences defused; errors.Is still sees the original
-// chain. A fail site's own "bug:" in such an input is missed: the cost is
-// confined to inputs that spell the marker.
+// classify reads a Parse error. The parser quotes the offending token, or a
+// name from the query, in its messages, so it is classified against the input
+// that produced it: an input spelling "bug:" can echo the marker with no fail
+// site having written it (gqlc-jjot2.18).
 func classify(src string, err error) fuzzkit.ErrClass {
-	if strings.Contains(src, "bug:") {
-		err = defused{err}
-	}
-	return fuzzkit.ClassifyError(err, isSyntaxError, cypher.AllSentinels()...)
+	return fuzzkit.ClassifyInputError(src, err, isSyntaxError, cypher.AllSentinels()...)
 }
-
-type defused struct{ error }
-
-func (d defused) Error() string { return strings.ReplaceAll(d.error.Error(), "bug:", "bug․") }
-func (d defused) Unwrap() error { return d.error }
 
 // seedQueryFileBodies adds each query of every annotated query file matching
 // the globs, split by the queryfile front end the pipeline uses. A file that

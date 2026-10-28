@@ -287,6 +287,12 @@ const (ClassNil ErrClass = iota; ClassSentinel; ClassSyntax; ClassBug; ClassPlai
 // through a listener; WP2/WP4 pin the shape).
 func ClassifyError(err error, isSyntax func(error) bool, sentinels ...error) ErrClass
 
+// ClassifyInputError is ClassifyError for an error produced from input by a
+// call that quotes its input in messages: when input contains "bug:", the
+// marker is not read, since the error may only be echoing it (gqlc-jjot2.18).
+// A fail site's own "bug:" on such an input is missed.
+func ClassifyInputError(input string, err error, isSyntax func(error) bool, sentinels ...error) ErrClass
+
 // Stream reads fuzz bytes as a sequence of small decisions. Exhaustion
 // returns zero values forever, so a generator is total.
 type Stream struct{ /* unexported */ }
