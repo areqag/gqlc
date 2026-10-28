@@ -27,6 +27,11 @@ empty grown corpus. The md5 columns pin movement, not identity.
 | R3b | hang | `Prepare` never returns on R2's condition | cbf78c96 | 5c423b39 | `just fuzz FuzzGeneratedBuilds 5m 2` | **KILLED** | engine reports the worker hung (Guard's watchdog at 50 s), 1 crasher written | 59 s |
 | R4 | property | neo4j's `WithTx` builds its `txDB` with an undeclared field | 611049e1 | e4d537ef | `just fuzz FuzzGeneratedBuilds 5m 2` | **KILLED** | property `builds` (seed pass) | 3 s |
 
+Re-run at `6d895341`, after the build got its own guard (see below), with
+`-fuzzminimizetime 10x` from the batch recipe: every control GREEN (C2
+320 s) and every row KILLED, with the same mutations and md5s — R1 1 s, R2
+22 s, R3 23 s (`fuzzkit.Guard`), R3b 79 s (engine-hang), R4 3 s.
+
 What each row means:
 
 - **R2**: the three seeds are text-arm fixtures with at most five node types;
