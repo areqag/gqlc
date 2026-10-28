@@ -46,13 +46,16 @@ liveness_row R3 "$file" \
     'fuzzkit\.Guard: slow input|hung or terminated unexpectedly|panic: test timed out' fuzz "$fuzz"
 
 # R4a property: exhaustion stops reading as zeros. No panic follows from it.
+# Every seed reads past its end, so the seed pass kills this one.
 liveness_row R4a "$file" \
     "${byte_fn}"'s/^\t\treturn 0$/\t\treturn 0xff/' \
     'property exhaustion' property "$fuzz"
 
-# R4b property: Ident may return one rune more than maxLen. No panic follows.
+# R4b property: Ident may return one rune more than maxLen. No panic follows,
+# and an exhausted stream still reads Int as 0, so the exhaustion property
+# cannot report it first.
 liveness_row R4b "$file" \
-    's/^\tn := 1 + s\.Int(maxLen)$/\tn := 2 + s.Int(maxLen)/' \
+    's/^\tn := 1 + s\.Int(maxLen)$/\tn := 1 + s.Int(maxLen+1)/' \
     'property Ident length' property "$fuzz"
 
 liveness_end

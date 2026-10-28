@@ -16,9 +16,12 @@
 #     seeds already trip the mutant, which is the row claiming the fuzzer found
 #     what the corpus held.
 #   - KILLED means COMMAND exited non-zero AND its log matches the extended
-#     regex EXPECT, so a red for some other reason does not count; in MODE fuzz
-#     and MODE property it also means the engine wrote a new crasher file.
-#     MODE seeds asks neither: its command is a seed pass, which writes none.
+#     regex EXPECT, so a red for some other reason does not count. In MODE fuzz
+#     it also means the engine wrote a new crasher file: that is the mode for a
+#     row whose claim is that the fuzzer, not the corpus, found the defect. MODE
+#     seeds and MODE property ask for no crasher, because a defect the seed pass
+#     reports is reported before the engine writes anything; a property row
+#     killed there shows the property is checked, not that mutation reaches it.
 #   - Restore is cp from a second, pristine extract, for FILE and for the
 #     target's testdata/fuzz/NAME directory, so one row's crasher is not the
 #     next row's seed. Each row also gets its own empty GQLC_FUZZ_CACHEDIR, so
@@ -142,7 +145,7 @@ liveness_row() {
     before="$(md5sum <"$file" | cut -c1-8)"
     sed -i -e "$script" "$file"
     after="$(md5sum <"$file" | cut -c1-8)"
-    diff -u "$lv_pristine/$file" "$file" | sed "1,2s|$lv_scratch/[a-z]*/||" || true
+    diff -u --label "a/$file" --label "b/$file" "$lv_pristine/$file" "$file" || true
     if [ "$before" = "$after" ]; then
         verdict=VOID detail="sed moved nothing"
     elif ! go test -c -o /dev/null "./$lv_pkg" >"$lv_scratch/$id.screen" 2>&1; then
@@ -156,7 +159,7 @@ liveness_row() {
         crashers="$(lv_crashers)"
         detail="rc=$lv_rc detector=$(lv_detectors "$lv_scratch/$id.log") crashers=$crashers"
         if [ "$lv_rc" -ne 0 ] && command grep -Eq -- "$expect" "$lv_scratch/$id.log" &&
-            { [ "$mode" = seeds ] || [ "$crashers" -gt 0 ]; }; then
+            { [ "$mode" != fuzz ] || [ "$crashers" -gt 0 ]; }; then
             verdict=KILLED
             command grep -Em1 -- "$expect" "$lv_scratch/$id.log" | sed 's/^/   evidence: /'
         else

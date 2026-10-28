@@ -5055,8 +5055,9 @@ fuzz-repro name hash:
     #!/usr/bin/env bash
     set -euo pipefail
     line="$('{{ just_executable() }}' --justfile '{{ justfile() }}' fuzz-list --only={{ quote(name) }})"
+    hash={{ quote(hash) }}
     cd {{ quote(justfile_directory()) }}
-    go test -count=1 -v -run "^${line%%$'\t'*}\$/^"{{ quote(hash) }}"\$" "${line#*$'\t'}"
+    go test -count=1 -v -run "^${line%%$'\t'*}\$/^${hash}\$" "${line#*$'\t'}"
 
 # Where the engine keeps one target's grown corpus (§8.4).
 fuzz-corpus-path name:
@@ -5103,9 +5104,10 @@ fuzz-liveness name="":
     #!/usr/bin/env bash
     set -euo pipefail
     dir={{ quote(justfile_directory() + "/.github/scripts/fuzz-liveness") }}
-    if [ -n {{ quote(name) }} ]; then
-        names={{ quote(name) }}
-        '{{ just_executable() }}' --justfile '{{ justfile() }}' fuzz-list --only={{ quote(name) }} >/dev/null
+    name={{ quote(name) }}
+    if [ -n "$name" ]; then
+        names="$name"
+        '{{ just_executable() }}' --justfile '{{ justfile() }}' fuzz-list --only="$name" >/dev/null
     else
         names="$('{{ just_executable() }}' --justfile '{{ justfile() }}' fuzz-list | cut -f1)"
         orphans="$(comm -13 <(sort <<<"$names") <(find "$dir" -name '*.rows' -printf '%f\n' | sed 's/\.rows$//' | sort))"
@@ -5133,13 +5135,16 @@ fuzz-liveness name="":
 fuzz-run name pkg fuzztime parallel:
     #!/usr/bin/env bash
     set -euo pipefail
+    name={{ quote(name) }}
+    pkg={{ quote(pkg) }}
+    parallel={{ quote(parallel) }}
     cd {{ quote(justfile_directory()) }}
     root="${GQLC_FUZZ_CACHEDIR:-$(go env GOCACHE)/fuzz}"
-    args=(-run '^$' -fuzz "^"{{ quote(name) }}"\$" -fuzztime {{ quote(fuzztime) }})
-    if [ -n {{ quote(parallel) }} ]; then
-        args+=(-parallel {{ quote(parallel) }})
+    args=(-run '^$' -fuzz "^${name}\$" -fuzztime {{ quote(fuzztime) }})
+    if [ -n "$parallel" ]; then
+        args+=(-parallel "$parallel")
     fi
     rc=0
-    go test "${args[@]}" {{ quote(pkg) }} -args -test.fuzzcachedir="$root/"{{ quote(pkg) }} || rc=$?
-    echo "corpus: $root/{{ pkg }}/{{ name }}"
+    go test "${args[@]}" "$pkg" -args -test.fuzzcachedir="$root/$pkg" || rc=$?
+    echo "corpus: $root/$pkg/$name"
     exit "$rc"
