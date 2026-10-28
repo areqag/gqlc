@@ -5020,7 +5020,7 @@ fuzz-list *flags:
 fuzz name fuzztime="1m" parallel="":
     #!/usr/bin/env bash
     set -euo pipefail
-    line="$('{{ just_executable() }}' --justfile '{{ justfile() }}' fuzz-list --only={{ quote(name) }})"
+    line="$('{{ just_executable() }}' --justfile '{{ justfile() }}' fuzz-resolve {{ quote(name) }})"
     '{{ just_executable() }}' --justfile '{{ justfile() }}' fuzz-run "${line%%$'\t'*}" "${line#*$'\t'}" {{ quote(fuzztime) }} {{ quote(parallel) }}
 
 # Every target in turn, fuzztime each: what a target's author runs before
@@ -5030,15 +5030,16 @@ fuzz-smoke fuzztime="20s":
     set -euo pipefail
     list="$('{{ just_executable() }}' --justfile '{{ justfile() }}' fuzz-list)"
     red=()
+    fuzztime={{ quote(fuzztime) }}
     while IFS=$'\t' read -r name pkg; do
-        echo "== $name ($pkg) for {{ fuzztime }}"
-        '{{ just_executable() }}' --justfile '{{ justfile() }}' fuzz-run "$name" "$pkg" {{ quote(fuzztime) }} "" || red+=("$name")
+        echo "== $name ($pkg) for $fuzztime"
+        '{{ just_executable() }}' --justfile '{{ justfile() }}' fuzz-run "$name" "$pkg" "$fuzztime" "" </dev/null || red+=("$name")
     done <<<"$list"
     if [ "${#red[@]}" -ne 0 ]; then
         echo "error: fuzz-smoke: red: ${red[*]}" >&2
         exit 1
     fi
-    echo "fuzz-smoke: $(wc -l <<<"$list") target(s) green for {{ fuzztime }} each"
+    echo "fuzz-smoke: $(wc -l <<<"$list") target(s) green for $fuzztime each"
 
 # The seed pass alone, over every package that declares a target: what `just
 # test` already runs, isolated and uncached so a slow seed set is visible.
@@ -5051,19 +5052,40 @@ fuzz-seeds:
     go test -count=1 -run '^Fuzz' "${pkgs[@]}"
 
 # Replays one crasher, hash being its file name under testdata/fuzz/<name>/.
+# Refuses a hash with no such file, and a run in which that subtest did not
+# report: `go test -run` matching nothing exits 0.
 fuzz-repro name hash:
     #!/usr/bin/env bash
     set -euo pipefail
-    line="$('{{ just_executable() }}' --justfile '{{ justfile() }}' fuzz-list --only={{ quote(name) }})"
+    line="$('{{ just_executable() }}' --justfile '{{ justfile() }}' fuzz-resolve {{ quote(name) }})"
+    name="${line%%$'\t'*}"
+    pkg="${line#*$'\t'}"
     hash={{ quote(hash) }}
+    case "$hash" in
+        "" | */* | .*) echo "error: fuzz-repro: '$hash' is not a crasher file name" >&2; exit 1 ;;
+    esac
     cd {{ quote(justfile_directory()) }}
-    go test -count=1 -v -run "^${line%%$'\t'*}\$/^${hash}\$" "${line#*$'\t'}"
+    module="$(go list -m)"
+    file="${pkg#"$module"/}/testdata/fuzz/$name/$hash"
+    if [ ! -f "$file" ]; then
+        echo "error: fuzz-repro: no crasher at $file" >&2
+        exit 1
+    fi
+    scratch="$(mktemp -d)"
+    trap 'rm -rf "$scratch"' EXIT
+    rc=0
+    go test -count=1 -v -run "^${name}\$/^${hash}\$" "$pkg" 2>&1 | tee "$scratch/out" || rc=$?
+    if ! command grep -Eq -- "--- (PASS|FAIL): ${name}/${hash} " "$scratch/out"; then
+        echo "error: fuzz-repro: $name/$hash did not report, so nothing was replayed" >&2
+        exit 1
+    fi
+    exit "$rc"
 
 # Where the engine keeps one target's grown corpus (§8.4).
 fuzz-corpus-path name:
     #!/usr/bin/env bash
     set -euo pipefail
-    line="$('{{ just_executable() }}' --justfile '{{ justfile() }}' fuzz-list --only={{ quote(name) }})"
+    line="$('{{ just_executable() }}' --justfile '{{ justfile() }}' fuzz-resolve {{ quote(name) }})"
     root="${GQLC_FUZZ_CACHEDIR:-$(go env GOCACHE)/fuzz}"
     echo "$root/${line#*$'\t'}/${line%%$'\t'*}"
 
@@ -5073,8 +5095,13 @@ fuzz-corpus-path name:
 fuzz-corpus-export name:
     #!/usr/bin/env bash
     set -euo pipefail
+    line="$('{{ just_executable() }}' --justfile '{{ justfile() }}' fuzz-resolve {{ quote(name) }})"
     src="$('{{ just_executable() }}' --justfile '{{ justfile() }}' fuzz-corpus-path {{ quote(name) }})"
-    dst={{ quote(justfile_directory() + "/.fuzz-corpus/" + name) }}
+    dst={{ quote(justfile_directory() + "/.fuzz-corpus/") }}"${line%%$'\t'*}"
+    case "$dst" in
+        */.fuzz-corpus/Fuzz*) ;;
+        *) echo "error: fuzz-corpus-export: refusing to replace '$dst'" >&2; exit 1 ;;
+    esac
     rm -rf "$dst"
     mkdir -p "$dst"
     if [ -d "$src" ]; then
@@ -5087,8 +5114,9 @@ fuzz-corpus-export name:
 fuzz-corpus-import name:
     #!/usr/bin/env bash
     set -euo pipefail
+    line="$('{{ just_executable() }}' --justfile '{{ justfile() }}' fuzz-resolve {{ quote(name) }})"
     dst="$('{{ just_executable() }}' --justfile '{{ justfile() }}' fuzz-corpus-path {{ quote(name) }})"
-    src={{ quote(justfile_directory() + "/.fuzz-corpus/" + name) }}
+    src={{ quote(justfile_directory() + "/.fuzz-corpus/") }}"${line%%$'\t'*}"
     if [ ! -d "$src" ]; then
         echo "fuzz-corpus-import: no $src, so this is a cold start"
         exit 0
@@ -5107,7 +5135,7 @@ fuzz-liveness name="":
     name={{ quote(name) }}
     if [ -n "$name" ]; then
         names="$name"
-        '{{ just_executable() }}' --justfile '{{ justfile() }}' fuzz-list --only="$name" >/dev/null
+        '{{ just_executable() }}' --justfile '{{ justfile() }}' fuzz-resolve "$name" >/dev/null
     else
         names="$('{{ just_executable() }}' --justfile '{{ justfile() }}' fuzz-list | cut -f1)"
         orphans="$(comm -13 <(sort <<<"$names") <(find "$dir" -name '*.rows' -printf '%f\n' | sed 's/\.rows$//' | sort))"
@@ -5129,6 +5157,27 @@ fuzz-liveness name="":
         echo "error: fuzz-liveness: red: ${red[*]}" >&2
         exit 1
     fi
+
+# Resolves one target name to its single `name<TAB>package` line, for every
+# recipe above that takes one. Refuses what is not one name before fuzz-list
+# sees it: fuzz-list reads "" as every target and "A,B" as two, and a caller
+# that went on to `rm -rf` a per-name path would act on all of them.
+[private]
+fuzz-resolve name:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    name={{ quote(name) }}
+    if ! [[ "$name" =~ ^Fuzz[A-Za-z0-9_]*$ ]]; then
+        echo "error: '$name' is not one fuzz target name (want Fuzz followed by letters, digits or _)" >&2
+        exit 1
+    fi
+    lines="$('{{ just_executable() }}' --justfile '{{ justfile() }}' fuzz-list --only="$name")"
+    count="$(command grep -c '' <<<"$lines")"
+    if [ "$count" -ne 1 ]; then
+        echo "error: '$name' resolved to $count lines, not 1" >&2
+        exit 1
+    fi
+    printf '%s\n' "$lines"
 
 # The one go test -fuzz invocation every fuzzing recipe above shares.
 [private]

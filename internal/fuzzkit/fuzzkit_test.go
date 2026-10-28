@@ -24,7 +24,10 @@ func TestHelperProcess(t *testing.T) {
 	case "":
 		t.Skip("run only as a child of the tests below")
 	case "guard-slow":
-		fuzzkit.Guard(t, 10*time.Millisecond, func() { time.Sleep(200 * time.Millisecond) })
+		fuzzkit.Guard(t, 20*time.Millisecond, func() { time.Sleep(50 * time.Millisecond) })
+		t.Log("REACHED: Guard returned")
+	case "guard-never":
+		fuzzkit.Guard(t, 20*time.Millisecond, func() { select {} })
 		t.Log("REACHED: Guard returned")
 	case "guard-fast":
 		fuzzkit.Guard(t, 2*time.Second, func() {})
@@ -61,6 +64,18 @@ func TestGuardReportsASlowCall(t *testing.T) {
 	}
 	if strings.Contains(out, "REACHED") {
 		t.Fatalf("Guard reported the slow call but did not stop the test:\n%s", out)
+	}
+}
+
+func TestGuardWatchdogEndsACallThatNeverReturns(t *testing.T) {
+	out, err := child(t, "guard-never")
+	var exit *exec.ExitError
+	if !errors.As(err, &exit) {
+		t.Fatalf("child: want a non-zero exit, got %v\n%s", err, out)
+	}
+	want := "fuzzkit.Guard: watchdog: TestHelperProcess has not returned after 100ms (5× its 20ms limit)"
+	if !strings.Contains(out, want) {
+		t.Fatalf("child died, but not through Guard's watchdog; want %q in:\n%s", want, out)
 	}
 }
 
@@ -102,9 +117,12 @@ func TestClassifyErrorCoversEveryClass(t *testing.T) {
 		{"syntax", errSyntax, fuzzkit.ClassSyntax},
 		{"bug", errors.New("age codegen bug: no arm"), fuzzkit.ClassBug},
 		{"plain", errors.New("registry miss"), fuzzkit.ClassPlain},
-		// The first match wins, in the documented order.
-		{"sentinel before bug", fmt.Errorf("%w: resolver bug: x", errSentinel), fuzzkit.ClassSentinel},
-		{"syntax before bug", errors.New("syntax error near bug: x"), fuzzkit.ClassSyntax},
+		// The first match wins, in the documented order: a bug a fail site
+		// wrapped in a sentinel, or one whose text a syntax predicate
+		// matches, is still a bug.
+		{"bug before sentinel", fmt.Errorf("%w: resolver bug: x", errSentinel), fuzzkit.ClassBug},
+		{"bug before syntax", errors.New("syntax error near bug: x"), fuzzkit.ClassBug},
+		{"sentinel before syntax", fmt.Errorf("%w: %w", errSentinel, errSyntax), fuzzkit.ClassSentinel},
 	}
 	for _, tc := range cases {
 		if got := fuzzkit.ClassifyError(tc.err, isSyntax, errSentinel, errOther); got != tc.want {
@@ -121,7 +139,7 @@ func TestClassifyErrorNilPredicateMatchesNothing(t *testing.T) {
 
 func TestSeedAddsEveryMatchedFile(t *testing.T) {
 	var got []string
-	if msg := fuzzkit.Seed([]string{"testdata/seedfiles/*.txt"}, func(s string) { got = append(got, s) }); msg != "" {
+	if msg := fuzzkit.Seed([]string{"testdata/seedfiles/*.txt"}, func(b []byte) { got = append(got, string(b)) }); msg != "" {
 		t.Fatal(msg)
 	}
 	if want := []string{"one\n", "two\n"}; strings.Join(got, "|") != strings.Join(want, "|") {
@@ -137,7 +155,7 @@ func TestSeedRefusesAGlobThatMatchesNothing(t *testing.T) {
 		"bad pattern":           {"testdata/["},
 	}
 	for name, globs := range cases {
-		if msg := fuzzkit.Seed(globs, func(string) {}); msg == "" {
+		if msg := fuzzkit.Seed(globs, func([]byte) {}); msg == "" {
 			t.Errorf("%s: want a refusal, got none", name)
 		}
 	}

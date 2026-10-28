@@ -38,12 +38,21 @@ liveness_row R2 "$file" \
     "${byte_fn}"'s/^\ts\.i++$/\ts.i++\n\tif c == 0xa7 {\n\t\tif s.i >= 2 \&\& s.b[s.i-2] == 0x3c {\n\t\t\tpanic("planted: R2")\n\t\t}\n\t}/' \
     'panic: planted: R2' fuzz "$fuzz"
 
-# R3 hang: R2's condition, sleeping past Guard's 2 s limit instead of panicking.
-# EXPECT admits every detector; the table's detector column says which fired.
+# R3 slow call: R2's condition, sleeping 3 s instead of panicking. Both of
+# FuzzStream's streams read the trigger, so one guarded call takes ~6 s: past
+# Guard's 2 s limit and short of its 10 s watchdog, so this row is Guard's
+# after-the-fact report and nothing else.
 liveness_row R3 "$file" \
     's/^import "strings"$/import (\n\t"strings"\n\t"time"\n)/
-'"${byte_fn}"'s/^\ts\.i++$/\ts.i++\n\tif c == 0xa7 {\n\t\tif s.i >= 2 \&\& s.b[s.i-2] == 0x3c {\n\t\t\ttime.Sleep(10 * time.Second)\n\t\t}\n\t}/' \
-    'fuzzkit\.Guard: slow input|hung or terminated unexpectedly|panic: test timed out' fuzz "$fuzz"
+'"${byte_fn}"'s/^\ts\.i++$/\ts.i++\n\tif c == 0xa7 {\n\t\tif s.i >= 2 \&\& s.b[s.i-2] == 0x3c {\n\t\t\ttime.Sleep(3 * time.Second)\n\t\t}\n\t}/' \
+    'fuzzkit\.Guard: slow input' fuzz "$fuzz"
+
+# R3b hang: R2's condition, never returning. Guard's watchdog ends the worker;
+# the engine reports a worker that terminated unexpectedly (the worker's own
+# panic text does not reach the coordinator's log) and writes the input.
+liveness_row R3b "$file" \
+    "${byte_fn}"'s/^\ts\.i++$/\ts.i++\n\tif c == 0xa7 {\n\t\tif s.i >= 2 \&\& s.b[s.i-2] == 0x3c {\n\t\t\tfor {\n\t\t\t}\n\t\t}\n\t}/' \
+    'hung or terminated unexpectedly|fuzzkit\.Guard: watchdog' fuzz "$fuzz"
 
 # R4a property: exhaustion stops reading as zeros. No panic follows from it.
 # Every seed reads past its end, so the seed pass kills this one.

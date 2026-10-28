@@ -213,17 +213,25 @@ them:
   defect that needs a larger input to show is not found by this harness.
 - **Slow-input detector.** The call under test is wrapped in
   `fuzzkit.Guard(t, 2*time.Second, fn)`; an input that takes longer is
-  reported with `t.Fatalf` and so saved as a crasher. This is the hang
-  detector at the property level; `-fuzztime` and the job's `timeout-minutes`
-  are the backstops, and §10's hang row measures which of the three actually
-  fires.
+  reported with `t.Fatalf` and so saved as a crasher. A call that never
+  returns cannot reach that report, so Guard also arms a watchdog: if the call
+  is still running at `fuzzkit.WatchdogFactor` (5) times the limit, the
+  watchdog panics on its own goroutine and ends the process, and the engine
+  writes the input it was running as a crasher. Measured 2026-10-27 (WP1,
+  `docs/mutation/fuzz-liveness-FuzzStream.md`): without the watchdog, a worker
+  spinning forever on one input left `just fuzz FuzzStream 45s` green with no
+  crasher, because the engine stops workers at `-fuzztime` without reporting
+  the input they hold. `-fuzztime` and the job's `timeout-minutes` stay as
+  backstops; §10's R3 and R3b rows measure which detector fires.
 - **Determinism.** The call is made twice on the same input and the two
   results must be `reflect.DeepEqual` (or byte-equal for `[]File`). Pure
   functions that disagree with themselves are findings.
 - **Sentinel classification.** `fuzzkit.ClassifyError(err, sentinels...)`
   returns `sentinel`, `syntax`, `bug` or `plain`. A `bug` (an error whose
   text carries "bug:" — the `codegenBug` and `resolver bug:` convention) is a
-  finding. A `plain` error is a finding **unless** the target's row says
+  finding, and the marker is tested before the sentinels, so an internal bug
+  a fail site wrapped in a sentinel (a gofmt failure under
+  `codegen.ErrFormatFailure`) is still a bug. A `plain` error is a finding **unless** the target's row says
   otherwise, in which case it is counted and reported in the step summary
   rather than failed; the first full run (§12, WP10) decides per class
   whether to promote it.
@@ -263,14 +271,17 @@ const MaxInput = 256 << 10
 func Skip(t *testing.T, b []byte)
 
 // Guard runs fn on the calling goroutine and t.Fatalf's, naming the elapsed
-// time, when it takes longer than limit. It does not interrupt fn.
+// time, when it takes longer than limit. It does not interrupt fn; if fn is
+// still running at WatchdogFactor × limit, a watchdog panics on its own
+// goroutine, ending the process so the engine records the input as a crasher.
+const WatchdogFactor = 5
 func Guard(t *testing.T, limit time.Duration, fn func())
 
 type ErrClass int
 const (ClassNil ErrClass = iota; ClassSentinel; ClassSyntax; ClassBug; ClassPlain)
 
-// ClassifyError: nil → ClassNil; errors.Is any of sentinels → ClassSentinel;
-// isSyntax(err) → ClassSyntax; text containing "bug:" → ClassBug; else ClassPlain.
+// ClassifyError: nil → ClassNil; text containing "bug:" → ClassBug; errors.Is
+// any of sentinels → ClassSentinel; isSyntax(err) → ClassSyntax; else ClassPlain.
 // isSyntax is a per-package predicate the caller passes, because what a syntax
 // error looks like is each parser's own (both parsers route ANTLR errors
 // through a listener; WP2/WP4 pin the shape).
@@ -288,8 +299,12 @@ func (s *Stream) Ident(alphabet string, maxLen int) string
 
 // SeedFiles adds every file matching the globs (relative to the test's cwd)
 // to f with f.Add(string(contents)); it fails f if no file matched, so a
-// moved corpus directory cannot silently seed nothing.
+// moved corpus directory cannot silently seed nothing. (Implemented per glob:
+// any one glob matching no file fails f.)
 func SeedFiles(f *testing.F, globs ...string)
+
+// SeedFilesBytes is SeedFiles for a []byte target (T6–T8, T10): f.Add(contents).
+func SeedFilesBytes(f *testing.F, globs ...string)
 ```
 
 ### 6.2 `internal/fuzzkit/gen` (WP3)
@@ -524,11 +539,14 @@ Rows every target carries:
   an argument count. Command: `just fuzz <name> 5m`. Must be KILLED within
   the budget; the row records time-to-kill. This is the row that says the
   fuzzer, not the corpus, finds things.
-- **R3 hang.** `time.Sleep(10 * time.Second)` on the R2 condition. Command:
-  `just fuzz <name> 5m`. Must be KILLED and the row records *which* detector
-  fired — `fuzzkit.Guard`, the engine's own worker handling, or neither
-  before the deadline. That answers §5's open question about Go's treatment
-  of a hung worker with a measurement rather than a belief.
+- **R3 slow call.** A `time.Sleep` on the R2 condition, long enough to pass
+  the target's Guard limit and short of its watchdog (5× the limit). Command:
+  `just fuzz <name> 5m`. Must be KILLED by Guard's `Fatalf`, with a crasher
+  written, and the row records *which* detector fired.
+- **R3b hang.** A call that never returns (`for {}`) on the R2 condition.
+  Command: `just fuzz <name> 5m`. Must be KILLED with a crasher written: that
+  is Guard's watchdog ending the worker. Without the watchdog this row was
+  measured SURVIVED (green, no crasher) — the case §5's watchdog exists for.
 - **R4 property.** For a target with a property beyond panic-freedom, a
   mutation that breaks the property without panicking (for T4: drop one byte
   from `SourceText`; for T8: emit a file out of order). Must be KILLED by the
@@ -630,7 +648,8 @@ member and may run concurrently when they own different files.
   all green; `just lint-just`, `just check-justfile-format`, `just lint`
   green.
 - `fuzzkit.Guard`'s own unit test plants a `time.Sleep` and sees the
-  `Fatalf`; `ClassifyError`'s test covers all five classes.
+  `Fatalf`, and plants a call that never returns and sees the watchdog;
+  `ClassifyError`'s test covers all five classes.
 
 ### Acceptance for WP9
 

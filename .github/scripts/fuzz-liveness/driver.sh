@@ -80,6 +80,8 @@ lv_restore() {
     local file="$1"
     lv_assert_in_copy
     cp "$lv_pristine/$file" "$lv_copy/$file"
+    [ "$(md5sum <"$lv_copy/$file")" = "$(md5sum <"$lv_pristine/$file")" ] ||
+        lv_die "$file differs from the pristine extract after restoring it"
     rm -rf "$lv_copy/$lv_pkg/testdata/fuzz/$lv_name"
     if [ -d "$lv_pristine/$lv_pkg/testdata/fuzz/$lv_name" ]; then
         cp -R "$lv_pristine/$lv_pkg/testdata/fuzz/$lv_name" "$lv_copy/$lv_pkg/testdata/fuzz/$lv_name"
@@ -102,6 +104,7 @@ lv_run() {
 lv_detectors() {
     local log="$1" found=()
     command grep -q 'fuzzkit.Guard: slow input' "$log" && found+=(fuzzkit.Guard)
+    command grep -q 'fuzzkit.Guard: watchdog' "$log" && found+=(Guard-watchdog)
     command grep -q 'hung or terminated unexpectedly' "$log" && found+=(engine-hang)
     command grep -q 'panic: test timed out' "$log" && found+=(test-timeout)
     command grep -q '^panic: \|panic: planted' "$log" && found+=(panic)
