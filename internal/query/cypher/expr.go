@@ -461,15 +461,11 @@ func (l *listener) classifyAggregateCall(fi gen.IOC_FunctionInvocationContext, f
 	var refs []query.Ref
 	var params []antlr.Tree
 	args := fi.AllOC_Expression()
-	if len(args) > 0 {
-		var opRefs []query.Ref
-		var opParams []antlr.Tree
-		operand, opRefs, opParams = l.typeExpressionMining(args[0])
-		refs = append(refs, opRefs...)
-		params = append(params, opParams...)
-	}
-	for _, arg := range args[1:] {
-		_, more, moreParams := l.typeExpressionMining(arg)
+	for i, arg := range args {
+		t, more, moreParams := l.typeExpressionMining(arg)
+		if i == 0 {
+			operand = t
+		}
 		refs = append(refs, more...)
 		params = append(params, moreParams...)
 	}
@@ -477,6 +473,50 @@ func (l *listener) classifyAggregateCall(fi gen.IOC_FunctionInvocationContext, f
 	l.addExprUses(params, resultType, query.ExprInProjection)
 	distinct := fi.DISTINCT() != nil
 	return query.NewAggregateProjectionWithAxes(fn, refs, distinct, resultType, aggregateLeavesAreRefs(fn, args))
+}
+
+// aggregateArity is the number of arguments each aggregate takes. openCypher
+// fixes it per function; count(*) is a separate grammar alternative, not a
+// zero-argument count.
+func aggregateArity(fn query.AggregateFunc) int {
+	if fn == query.AggPercentile {
+		return 2
+	}
+	return 1
+}
+
+// refuseAggregateArity fails the parse when any aggregate function call in the
+// tree has fewer arguments than its arity (ErrAggregateArity). The grammar
+// admits any count, including none, and the aggregate classifier and typer read
+// their operand from the first argument.
+//
+// Too MANY arguments is not refused here: collect(x, y) and min(x, y) parse,
+// and aggregateLeavesAreRefs' len(args) == 1 clause is what keeps them from
+// minting (certificate_test.go pins both).
+//
+// It is a pre-walk sweep, like refuseEmptyIdentifiers, so one check covers
+// every position an aggregate call reaches — RETURN, WITH, ORDER BY, a rich
+// expression, an EXISTS subquery — instead of one check per read site, and so
+// EXISTS suppression inside the collection walk cannot drop it.
+func (l *listener) refuseAggregateArity(t antlr.Tree) {
+	if t == nil || l.err != nil {
+		return
+	}
+	if fi, ok := t.(gen.IOC_FunctionInvocationContext); ok {
+		if name, ok := functionName(fi); ok {
+			if fn, ok := aggregateFunc(name); ok {
+				want, got := aggregateArity(fn), len(fi.AllOC_Expression())
+				if got < want {
+					l.fail(fmt.Errorf("%w: %s expects %d argument(s), got %d", ErrAggregateArity, name, want, got))
+					return
+				}
+			}
+		}
+	}
+	// No stop at a match, unlike findNodesOfType: calls nest (toString(sum())).
+	for i := 0; i < t.GetChildCount(); i++ {
+		l.refuseAggregateArity(t.GetChild(i))
+	}
 }
 
 // aggregateLeavesAreRefs decides whether an aggregate call mints the

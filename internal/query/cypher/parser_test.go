@@ -3219,6 +3219,18 @@ var mustReject = map[string]struct {
 		query: "MATCH (n:``) RETURN n",
 		want:  cypher.ErrEmptyIdentifier,
 	},
+	// AUTHORED (gqlc-jjot2.1): an aggregate call with no argument. The
+	// grammar admits any argument count and no TCK scenario writes one,
+	// so there is nothing verbatim to take; the query is the fuzz probe's
+	// reproducer, which panicked the aggregate classifier before the
+	// refusal existed. Fail-site: refuseAggregateArity, the pre-walk
+	// sweep in listener.walk. The per-function and per-position rows live
+	// in aggregate_arity_test.go; this pin exists so the sentinel is
+	// reachable from the canonical sweep.
+	"zero-argument aggregate call": {
+		query: "RETURN Count()",
+		want:  cypher.ErrAggregateArity,
+	},
 }
 
 func TestMustReject(t *testing.T) {

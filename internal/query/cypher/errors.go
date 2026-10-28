@@ -134,6 +134,27 @@ var (
 	// refuseEmptyIdentifiers rather than any one read site: the check is total
 	// over the parse tree, so a read site added later cannot forget it.
 	ErrEmptyIdentifier = errors.New("empty delimited identifier")
+
+	// ErrAggregateArity rejects an aggregate function call with fewer
+	// arguments than the function's arity: count, sum, avg, min, max,
+	// collect, stDev and stDevP take one argument, percentileCont and
+	// percentileDisc take two. Wrapped message: "aggregate arity mismatch:
+	// <name> expects <expected> argument(s), got <actual>". The grammar
+	// admits any argument count, including none; openCypher reports a wrong
+	// one as a compile-time SyntaxError: InvalidNumberOfArguments, the TCK
+	// class ErrProcedureArity already answers for CALL. count(*) is a
+	// separate grammar alternative and never reaches this check. bd
+	// gqlc-jjot2.1: before the refusal, `RETURN count()` panicked the
+	// aggregate classifier.
+	//
+	// Too many arguments is NOT refused: collect(x, y) parses, and the
+	// certificate predicate's own arity clause declines to mint for it.
+	//
+	// The sentinel is durable — the arity is a fact about the language — and
+	// its fail-site is the pre-walk sweep refuseAggregateArity, total over
+	// the parse tree, so an aggregate at any position (RETURN, WITH, ORDER BY,
+	// a rich expression, an EXISTS subquery) is refused by the same check.
+	ErrAggregateArity = errors.New("aggregate arity mismatch")
 )
 
 // allSentinels is the canonical closed set of sentinels Parse may return
@@ -152,6 +173,7 @@ var allSentinels = []error{
 	ErrProcedureArity,
 	ErrUnsatisfiableRelationshipType,
 	ErrEmptyIdentifier,
+	ErrAggregateArity,
 }
 
 // AllSentinels returns a copy of the cypher package's user-input-reachable
