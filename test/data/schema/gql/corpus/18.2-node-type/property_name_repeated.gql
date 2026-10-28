@@ -3,13 +3,12 @@
 -- type> }...] states no uniqueness constraint — so it parses. gqlc rejects it
 -- with ErrDuplicatePropertyName.
 --
--- That rejection is ADR 0030, and it is provisional by construction. The free
--- BNF settles the SYNTAX and nothing else; whether a repeat is an error is
--- Syntax Rules prose in the paid PDF gqlc-lir declined to buy. Two readings
--- were defensible — reject, or define a precedence between the two
--- declarations — and rejection is the interim posture on the same grounds as
--- ErrEdgeKindArcMismatch: it is the only one of the two that cannot be wrong
--- silently. gqlc-tlbo revisits it if the clause is ever bought.
+-- That rejection is ADR 0030, made permanent by ADR 0049 as gqlc's own
+-- decision. The free BNF settles the SYNTAX and nothing else; whether a repeat
+-- is an error is Syntax Rules prose in the paid PDF gqlc-lir declined to buy.
+-- Two readings were defensible — reject, or define a precedence between the
+-- two declarations — and gqlc rejects because it is the only one of the two
+-- that cannot be wrong silently. ADR 0049 says what would reopen it.
 --
 -- Until gqlc-4np this file resolved, to ONE property, the last one.
 -- listener.properties built a map keyed by name and wrote every element of the

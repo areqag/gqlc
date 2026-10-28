@@ -157,4 +157,5 @@ without a reason is indistinguishable from an accident that nobody has hit yet.
   keeping the parent path or recording why two paths ending in the same
   component may collide.
 - Nothing here unblocks `gqlc-h9n.28` or `gqlc-h9n.29`. Items 1 and 4 are both
-  decided *without* the prose that would settle them, and both say so.
+  decided *without* the prose that would settle them, and both say so. (ADR
+  0049 later settled those two beads the same way, as gqlc decisions.)

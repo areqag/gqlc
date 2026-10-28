@@ -116,8 +116,8 @@ var corpusAreaB = []corpusEntry{
 		outcome:  unsupported,
 		sentinel: gql.ErrDuplicatePropertyName,
 		feature:  "mandatory",
-		bead:     "gqlc-tlbo",
-		reason:   "ADR 0030 rejects a repeated property name rather than deciding a precedence between the two declarations. The free ISO BNF admits the syntax — <property type list> states no uniqueness constraint — so which reading the standard intends is Syntax Rules prose gqlc has not bought, and rejection is the interim posture on the same grounds as ErrEdgeKindArcMismatch: keeping one declaration and discarding the other is the only reading that can be wrong silently. This was a resolves entry with a semanticCase pinning the accidental last-wins; the sentinel supersedes both",
+		bead:     "gqlc-0ri",
+		reason:   "ADR 0030 rejects a repeated property name rather than deciding a precedence between the two declarations. The free ISO BNF admits the syntax — <property type list> states no uniqueness constraint — so which reading the standard intends is Syntax Rules prose gqlc does not have, and rejection was chosen because keeping one declaration and discarding the other is the only reading that can be wrong silently. Declined permanently as a gqlc decision, not a reading of ISO (ADR 0049). This was a resolves entry with a semanticCase pinning the accidental last-wins; the sentinel supersedes both",
 	},
 	{
 		file:    "18.4-label-set/label_forms.gql",

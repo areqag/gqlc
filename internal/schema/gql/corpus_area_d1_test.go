@@ -58,7 +58,7 @@ var corpusAreaD1 = []corpusEntry{
 		outcome: resolves,
 		feature: "mandatory",
 		bead:    "gqlc-h9n.31",
-		reason:  "FLOAT's parenthetical is never folded, so FLOAT(10) and FLOAT(10, 2) both resolve to TypeFloat, byte-identical to bare FLOAT; ADR 0017 accepts the loss, and gqlc-h9n.28 — whether that precision counts bits or digits — is why the owning bead is provisional",
+		reason:  "FLOAT's parenthetical is never folded, so FLOAT(10) and FLOAT(10, 2) both resolve to TypeFloat, byte-identical to bare FLOAT; ADR 0017 accepts the loss and ADR 0049 makes not folding final; gqlc does not decide whether that precision counts bits or digits, which is why the owning bead is provisional",
 	},
 	{
 		file:    "18.9-value-type/scalar_local_datetime.gql",
@@ -344,7 +344,7 @@ var semanticAreaD1 = []semanticCase{
 	{
 		file: "18.9-value-type/scalar_float.gql",
 		bead: "gqlc-h9n.31",
-		why:  "FLOAT(10) resolves to the same PropertyType as bare FLOAT and as FLOAT(10, 2), because FLOAT's parenthetical is not folded at all (ADR 0002) and PropertyType has nowhere to keep it; whether the discarded precision counts mantissa bits or decimal digits is gqlc-h9n.28, which is why this row's bead is the provisional one",
+		why:  "FLOAT(10) resolves to the same PropertyType as bare FLOAT and as FLOAT(10, 2), because FLOAT's parenthetical is not folded at all (ADR 0002) and PropertyType has nowhere to keep it; gqlc does not decide whether the discarded precision counts mantissa bits or decimal digits (ADR 0049), which is why this row's bead is the provisional one",
 		// FLOAT(10, 2) as a sibling makes the collision class wider than the other
 		// two rows': it pins that precision-with-scale is no more distinguishable
 		// than precision alone, which is the shape the h9n.28 question turns on.

@@ -180,8 +180,8 @@ var corpusAreaD2 = []corpusEntry{
 		outcome:  unsupported,
 		sentinel: gql.ErrDuplicateFieldName,
 		feature:  "mandatory",
-		bead:     "gqlc-tlbo",
-		reason:   "ADR 0030's reading of a repeated property name applied one level down, for the same reason and with the same provisional standing: <field type list> states no uniqueness constraint either, so which reading the standard intends is Syntax Rules prose gqlc-lir declined to buy, and rejection is the interim posture because keeping one field and discarding the other is the only reading that can be wrong silently. New with gqlc-h9n.33 — while a record was declined at its outermost context its fields were never read, so a duplicate among them was unreachable",
+		bead:     "gqlc-0ri",
+		reason:   "ADR 0030's reading of a repeated property name applied one level down, for the same reason and with the same permanent standing (ADR 0049): <field type list> states no uniqueness constraint either, so which reading the standard intends is Syntax Rules prose gqlc-lir declined to buy, and rejection is gqlc's decision because keeping one field and discarding the other is the only reading that can be wrong silently. New with gqlc-h9n.33 — while a record was declined at its outermost context its fields were never read, so a duplicate among them was unreachable",
 	},
 	{
 		file:     "18.9-value-type/constructed_graph_open_property.gql",

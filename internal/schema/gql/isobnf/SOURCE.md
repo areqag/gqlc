@@ -65,8 +65,9 @@ pins both halves.
 
 The BNF is syntax only. It cannot answer any question of the form *"what does
 the standard say this production means"* — that prose is in the paid PDF, which
-`gqlc-lir` declined to buy. `gqlc-h9n.28` and `gqlc-h9n.29` are blocked on
-exactly that prose and are **not** unblocked by this list.
+`gqlc-lir` declined to buy. `gqlc-h9n.28` and `gqlc-h9n.29` were held on
+exactly that prose, and this list did **not** unblock them. ADR 0049 settles
+both as gqlc decisions instead, without claiming a reading of the standard.
 
 Coverage of this production list is a **necessary but not sufficient** condition
 for conformance. See `docs/adr/0014-iso-bnf-as-coverage-denominator.md`.

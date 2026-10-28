@@ -241,9 +241,9 @@ func hasNotNull(t antlr.Tree) bool {
 // scale-bearing shape byte-identical to DECIMAL(p,s) at :1832, not to the
 // scale-free binary integer parentheticals. Nothing in the grammar establishes
 // that FLOAT's precision counts bits, so FLOAT(16) falls through to the
-// truncated-spelling fallback and lands on TypeFloat, exactly as today. Fixing
-// this needs an ISO 39075 citation, not an inference, and is deferred to
-// gqlc-h9n.28.
+// truncated-spelling fallback and lands on TypeFloat. That is gqlc's settled
+// decision (ADR 0049), not one pending an ISO citation: the precision is
+// dropped, and gqlc does not decide whether it counts bits or digits.
 //
 // DURATION is present only as the bare key: the grammar (GQL.g4:1893) makes
 // the `(YEAR TO MONTH)` / `(DAY TO SECOND)` qualifier mandatory, so
