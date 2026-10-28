@@ -46,7 +46,8 @@ var (
 	// imported name) — the operative semantic is "binding collision in scope,"
 	// not strictly node/edge/path (Q4 ruling, matching the Stage-9 unwind-vs-
 	// unwind precedent: the `if unwindByVar[v]` arm of func addUnwindScope
-	// in build.go). The message text mirrors that
+	// in build.go). A path variable bound twice in one part is the same
+	// collision (bd gqlc-jjot2.15, partScope). The message text mirrors that
 	// broader semantic; the sentinel identity (not the text) is the stable
 	// contract.
 	ErrVariableKindConflict = errors.New("variable bound with conflicting kinds")

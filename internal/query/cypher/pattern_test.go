@@ -177,3 +177,48 @@ func TestNodeRebindUnionsLabels(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, graph.LabelSet{"Person", "Employee"}, namedNodeLabels(t, got, "n"))
 }
+
+// --- re-binding a path variable within one part (bd gqlc-jjot2.15) ---
+//
+// A path variable names one path, and the model holds one binding per name in
+// a part (query.Part.Bindings), so a second `p = (...)` in the same part has
+// nothing to merge into: two paths are not one path the way two occurrences of
+// a node are one node. openCypher refuses it as VariableAlreadyBound. Until
+// gqlc-jjot2.15 it parsed into two PathBindings of one name, which FuzzCypherParse
+// caught through the named-bindings-unique invariant.
+
+// TestPathVariableReboundInOnePartIsRefused covers the shapes the fuzz finding
+// and its hand variants reach: a second MATCH, one MATCH with two pattern
+// parts, an OPTIONAL MATCH, and a re-bound path with a relationship in it.
+func TestPathVariableReboundInOnePartIsRefused(t *testing.T) {
+	for name, tc := range map[string]struct{ query, variable string }{
+		"the fuzz reproducer":       {"MATCH r =()MATCH r =()RETURN 0", "r"},
+		"two MATCH clauses":         {"MATCH p = (a) MATCH p = (b) RETURN p", "p"},
+		"one MATCH, two parts":      {"MATCH p = (a), p = (b) RETURN p", "p"},
+		"with a relationship":       {"MATCH p = (a)-->(b) MATCH p = (a)-->(b) RETURN p", "p"},
+		"under an OPTIONAL MATCH":   {"MATCH p = (a) OPTIONAL MATCH p = (a) RETURN p", "p"},
+		"after a WITH, in one part": {"MATCH (a) WITH a MATCH q = (a), q = (a) RETURN q", "q"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			got, err := cypher.New().Parse(strings.NewReader(tc.query))
+			require.ErrorIs(t, err, cypher.ErrVariableKindConflict, "query: %q", tc.query)
+			require.ErrorContains(t, err, ": "+tc.variable, "message must name the re-bound variable")
+			require.Equal(t, query.Query{}, got, "model must be the zero value on error")
+		})
+	}
+}
+
+// TestPathVariableInSeparatePartsParses is the control: the refusal is about
+// one part. A WITH starts a new part, and two different path variables in one
+// part are two bindings, so neither is refused.
+func TestPathVariableInSeparatePartsParses(t *testing.T) {
+	for name, src := range map[string]string{
+		"two path variables in one part": "MATCH p = (a), q = (b) RETURN p, q",
+		"one path per part":              "MATCH p = (a) WITH a MATCH p = (a) RETURN p",
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := cypher.New().Parse(strings.NewReader(src))
+			require.NoError(t, err, "query: %q", src)
+		})
+	}
+}
