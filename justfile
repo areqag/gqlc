@@ -5052,8 +5052,10 @@ fuzz-seeds:
     go test -count=1 -run '^Fuzz' "${pkgs[@]}"
 
 # Replays one crasher, hash being its file name under testdata/fuzz/<name>/.
-# Refuses a hash with no such file, and a run in which that subtest did not
-# report: `go test -run` matching nothing exits 0.
+# Refuses a hash with no such file, and a run in which that subtest never
+# started: `go test -run` matching nothing exits 0. A started subtest is the
+# proof, not a finished one, because a hang crasher kills the binary (Guard's
+# watchdog) before `--- FAIL` is printed.
 fuzz-repro name hash:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -5075,8 +5077,8 @@ fuzz-repro name hash:
     trap 'rm -rf "$scratch"' EXIT
     rc=0
     go test -count=1 -v -run "^${name}\$/^${hash}\$" "$pkg" 2>&1 | tee "$scratch/out" || rc=$?
-    if ! command grep -Eq -- "--- (PASS|FAIL): ${name}/${hash} " "$scratch/out"; then
-        echo "error: fuzz-repro: $name/$hash did not report, so nothing was replayed" >&2
+    if ! command grep -Eq -e "^=== RUN +${name}/${hash}\$" -e "--- (PASS|FAIL): ${name}/${hash} " "$scratch/out"; then
+        echo "error: fuzz-repro: $name/$hash never started, so nothing was replayed" >&2
         exit 1
     fi
     exit "$rc"

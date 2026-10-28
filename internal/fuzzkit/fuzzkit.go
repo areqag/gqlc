@@ -64,9 +64,12 @@ func Guard(t *testing.T, limit time.Duration, fn func()) {
 		panic(fmt.Sprintf("fuzzkit.Guard: watchdog: %s has not returned after %s (%d× its %s limit); ending the process so the input is recorded",
 			name, WatchdogFactor*limit, WatchdogFactor, limit))
 	})
+	// Deferred, not called after fn: a t.Fatal or a recovered panic inside fn
+	// leaves Guard without returning normally, and a timer still armed then
+	// kills the process later with a false "has not returned".
+	defer watchdog.Stop()
 	start := time.Now()
 	fn()
-	watchdog.Stop()
 	if elapsed := time.Since(start); elapsed > limit {
 		t.Fatalf("fuzzkit.Guard: slow input: the call took %s, over the %s limit", elapsed, limit)
 	}

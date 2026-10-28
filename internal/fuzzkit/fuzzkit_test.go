@@ -26,6 +26,25 @@ func TestHelperProcess(t *testing.T) {
 	case "guard-slow":
 		fuzzkit.Guard(t, 20*time.Millisecond, func() { time.Sleep(50 * time.Millisecond) })
 		t.Log("REACHED: Guard returned")
+	case "guard-fatal-then-later":
+		t.Run("fatal", func(t *testing.T) {
+			fuzzkit.Guard(t, 20*time.Millisecond, func() { t.Fatal("planted fatal inside Guard") })
+		})
+		t.Run("later", func(t *testing.T) {
+			time.Sleep(300 * time.Millisecond)
+			t.Log("REACHED: later test")
+		})
+	case "guard-recovered-panic":
+		func() {
+			defer func() {
+				if recover() == nil {
+					t.Error("the planted panic did not reach the recover")
+				}
+			}()
+			fuzzkit.Guard(t, 20*time.Millisecond, func() { panic("planted panic inside Guard") })
+		}()
+		time.Sleep(300 * time.Millisecond)
+		t.Log("REACHED: after the recovered panic")
 	case "guard-never":
 		fuzzkit.Guard(t, 20*time.Millisecond, func() { select {} })
 		t.Log("REACHED: Guard returned")
@@ -76,6 +95,29 @@ func TestGuardWatchdogEndsACallThatNeverReturns(t *testing.T) {
 	want := "fuzzkit.Guard: watchdog: TestHelperProcess has not returned after 100ms (5× its 20ms limit)"
 	if !strings.Contains(out, want) {
 		t.Fatalf("child died, but not through Guard's watchdog; want %q in:\n%s", want, out)
+	}
+}
+
+// A Guard left by t.Fatal must disarm its watchdog: the later test sleeps past
+// 5× the limit, and an armed timer would kill the binary under it.
+func TestGuardDisarmsAfterFatal(t *testing.T) {
+	out, err := child(t, "guard-fatal-then-later")
+	var exit *exec.ExitError
+	if !errors.As(err, &exit) || !strings.Contains(out, "--- FAIL: TestHelperProcess/fatal") {
+		t.Fatalf("child: want the planted Fatal to fail its subtest, got %v\n%s", err, out)
+	}
+	if strings.Contains(out, "watchdog") || !strings.Contains(out, "REACHED: later test") ||
+		!strings.Contains(out, "--- PASS: TestHelperProcess/later") {
+		t.Fatalf("the watchdog outlived Guard's Fatal exit, or the later test did not report:\n%s", out)
+	}
+}
+
+// Likewise a panic in fn that a caller recovers: the test passes, and stays
+// passing past 5× the limit.
+func TestGuardDisarmsAfterARecoveredPanic(t *testing.T) {
+	out, err := child(t, "guard-recovered-panic")
+	if err != nil || strings.Contains(out, "watchdog") || !strings.Contains(out, "REACHED: after the recovered panic") {
+		t.Fatalf("child: want a pass with no watchdog, got %v\n%s", err, out)
 	}
 }
 
