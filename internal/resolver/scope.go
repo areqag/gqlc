@@ -1261,6 +1261,9 @@ func (s *scope) selectionProjectionType(t query.Type, refs []query.Ref, certifie
 //   - DECIMAL. Not among the families the ruling enumerates. Excluding it
 //     degrades to any, which costs a column its type and cannot be wrong;
 //     admitting it would be a decision no one has made.
+//   - UUID. Ordered meaningfully only when every value is version 7, and the
+//     version is the application's choice, invisible to the schema (owner
+//     ruling, bd gqlc-fdfk).
 //   - ANY, LIST<ANY>, RECORD<ANY> and every composite spelling (LIST<INT32>,
 //     RECORD<...>). Ordering these is engine-dependent at best, and "can
 //     min/max over a list be typed" is explicitly not opened by the ruling.
