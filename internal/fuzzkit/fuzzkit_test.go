@@ -185,7 +185,7 @@ func TestClassifyInputErrorDefusesAnEchoedMarker(t *testing.T) {
 	}{
 		{"echoed marker reads as its sentinel", "RETURN `bug:x`", echoed, fuzzkit.ClassSentinel},
 		{"echoed marker on a plain error is plain", "bug:", errors.New("bug: x"), fuzzkit.ClassPlain},
-		{"echoed marker on a syntax error is syntax", "bug:", errors.New("syntax error near bug:"), fuzzkit.ClassSyntax},
+		{"echoed marker on a syntax error is syntax", "bug:", errors.New("syntax error near bug: x"), fuzzkit.ClassSyntax},
 		{"nil", "bug:", nil, fuzzkit.ClassNil},
 		// Without the marker in the input, it is ClassifyError exactly.
 		{"marker not in input is a bug", "RETURN x", echoed, fuzzkit.ClassBug},
