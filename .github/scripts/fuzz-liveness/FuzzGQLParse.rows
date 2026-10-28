@@ -1,0 +1,90 @@
+#!/usr/bin/env bash
+# Liveness rows for FuzzGQLParse (internal/schema/gql), run by `just
+# fuzz-liveness FuzzGQLParse`: each row plants one defect in the GQL schema
+# parser with sed, in a scratch copy of HEAD, and asks whether the harness
+# reports it. The protocol and the verdicts are driver.sh's; the recorded run,
+# with every row's diff, is docs/mutation/fuzz-liveness-FuzzGQLParse.md.
+#
+# R2's condition, a property name containing the digit 7, is one no committed
+# seed meets (the driver re-checks that on the mutant before it fuzzes) and one
+# a single changed byte inside any seed's property name does.
+set -euo pipefail
+
+# SC1091: `just lint-hooks` runs shellcheck without -x, so it cannot follow the
+# source; driver.sh is linted in its own right by the same sweep.
+# shellcheck source=driver.sh disable=SC1091
+. "$(dirname "${BASH_SOURCE[0]}")/driver.sh"
+
+parser=internal/schema/gql/parser.go
+listener=internal/schema/gql/listener.go
+resolve=internal/schema/gql/resolve.go
+seeds="go test -count=1 -run '^FuzzGQLParse\$' ./internal/schema/gql"
+# Expanded by driver.sh's `bash -c` in the copy, not here.
+# shellcheck disable=SC2016
+fuzz='just fuzz FuzzGQLParse "$LIVENESS_BUDGET"'
+# The site R2, R3 and R3b plant on: each property as the listener files it.
+filed='s/^\t\tout\[p\.Name\] = p$/\t\tif strings.ContainsRune(p.Name, '"'7'"') {\n\t\t\tPLANT\n\t\t}\n&/'
+imports='s/^\t"fmt"$/\t"fmt"\n\t"strings"\n\t"time"/'
+
+liveness_begin FuzzGQLParse internal/schema/gql
+
+liveness_control C1 "$seeds"
+liveness_control C2 "$fuzz"
+
+# R1 seed-reach: every seed that parses cleanly resolves.
+liveness_row R1 "$parser" \
+    's/^\treturn raw\.resolve()$/\tpanic("planted: R1")/' \
+    'panic: planted: R1' seeds "$seeds"
+
+# R2 mutation-reach.
+liveness_row R2 "$listener" \
+    "${filed/PLANT/panic(\"planted: R2\")}
+s/^\t\"fmt\"$/\t\"fmt\"\n\t\"strings\"/" \
+    'panic: planted: R2' fuzz "$fuzz"
+
+# R3 slow call: R2's condition, sleeping 3 s: past Guard's 2 s limit and short
+# of its 10 s watchdog, so this row is Guard's after-the-fact report alone.
+liveness_row R3 "$listener" \
+    "${filed/PLANT/time.Sleep(3 * time.Second)}
+$imports" \
+    'fuzzkit\.Guard: slow input' fuzz "$fuzz"
+
+# R3b hang: R2's condition, never returning. Guard's watchdog ends the worker;
+# the engine reports a worker that terminated unexpectedly and writes the input.
+liveness_row R3b "$listener" \
+    "${filed/PLANT/for \{\\n\\t\\t\\t\}}
+s/^\t\"fmt\"$/\t\"fmt\"\n\t\"strings\"/" \
+    'hung or terminated unexpectedly|fuzzkit\.Guard: watchdog' fuzz "$fuzz"
+
+# R4a property zero on error: a refused COPY OF hands back the name it read.
+# The fourteen COPY OF seeds reach it, so the seed pass reports it.
+liveness_row R4a "$parser" \
+    's/^\t\treturn schema\.Schema{}, ErrCopyOfSource$/\t\treturn schema.Schema{Name: raw.name}, ErrCopyOfSource/' \
+    'property zero on error' property "$seeds"
+
+# R4b property error class: a repeated property name stops wrapping its
+# sentinel, so a caller's errors.Is no longer matches.
+liveness_row R4b "$listener" \
+    's/^\(\t\t\treturn nil, fmt\.Errorf("\)%w\(: %q", ErrDuplicatePropertyName, p\.Name)\)$/\1%v\2/' \
+    'property error class' property "$seeds"
+
+# R4c property edge endpoint: every edge's target names a node type nobody
+# declared, while the edge stays filed under its own key.
+liveness_row R4c "$resolve" \
+    's/^\treturn schema\.EdgeKey{Source: source, KeyLabels: key, Target: target}, nil$/\treturn schema.EdgeKey{Source: source, KeyLabels: key, Target: target + "\&Planted"}, nil/' \
+    'property edge endpoint' property "$seeds"
+
+# R4d property edge key: an edge is filed under its own key reversed, which a
+# schema with any edge that is not a self-loop shows.
+liveness_row R4d "$resolve" \
+    's/^\t\t\tEdgeKey:        edgeKey,$/\t\t\tEdgeKey:        schema.EdgeKey{Source: edgeKey.Target, KeyLabels: edgeKey.KeyLabels, Target: edgeKey.Source},/' \
+    'property edge key' property "$seeds"
+
+# R4e property determinism: every second successful Parse in the process renames
+# the graph type, so the target's two calls on one input disagree.
+liveness_row R4e "$parser" \
+    's/^type parser struct{}$/&\n\nvar parseCalls int/
+s/^\treturn raw\.resolve()$/\tparseCalls++\n\ts, err := raw.resolve()\n\tif err == nil \&\& parseCalls%2 == 0 {\n\t\ts.Name += "_"\n\t}\n\treturn s, err/' \
+    'property determinism' property "$seeds"
+
+liveness_end
