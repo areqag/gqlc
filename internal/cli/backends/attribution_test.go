@@ -387,6 +387,21 @@ func declaredWidths(t *testing.T) []graph.PropertyType {
 		graph.UnionOf([]graph.UnionMember{{Type: graph.TypeDate}, {Type: graph.TypeString}}),
 		graph.UnionOf([]graph.UnionMember{{Type: graph.TypeBool}, {Type: graph.TypeInt64}}),
 	)
+
+	// Every vector, built rather than declared because VECTOR is
+	// parameterised and the read above sees constants only (ADR 0050). The
+	// bare width is the sweep's only one that divides the two neo4j MAJORS:
+	// neo4j-go-v6 emits it, and neo4j-go-v5 and AGE refuse it, each owing
+	// its name — v5 under ErrUnrepresentableOnDriverVersion, AGE under the
+	// width sentinel with its no-vector-semantics reason. The list and the
+	// record wrap are the other half: every target refuses a vector inside
+	// a container under one sentinel, so none of them may name itself.
+	for _, elem := range graph.VectorElements {
+		vec, ok := graph.VectorOf(elem)
+		require.True(t, ok, "graph.VectorOf refuses %s, which graph.VectorElements lists", elem)
+		rec := graph.RecordOf([]graph.RecordField{{Name: "f", Type: vec, NotNull: true}})
+		widths = append(widths, vec, graph.ListOf(vec, true), rec)
+	}
 	return widths
 }
 

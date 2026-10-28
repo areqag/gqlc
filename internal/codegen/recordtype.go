@@ -67,9 +67,10 @@ func recordFieldLegality(pt graph.PropertyType) (graph.PropertyType, string, boo
 			}
 		}
 		return "", "", false
-	case graph.KindScalar:
-		// A scalar declares no fields and has no contents. Named rather
-		// than left to the default so a fifth kind cannot be added
+	case graph.KindScalar, graph.KindVector:
+		// A scalar declares no fields and has no contents, and a vector's
+		// element is always a numeric scalar (graph.VectorOf). Named
+		// rather than left to the default so a sixth kind cannot be added
 		// silently.
 	}
 	return "", "", false
@@ -473,9 +474,10 @@ func (w *reachableEncodingWalk) descend(pt graph.PropertyType) {
 		}
 	case graph.KindList:
 		w.enter(pt.Elem())
-	case graph.KindScalar:
-		// A scalar has no contents, so nothing hides inside one.
-		// Named rather than defaulted so a fifth kind cannot be added
+	case graph.KindScalar, graph.KindVector:
+		// A scalar has no contents, so nothing hides inside one, and a
+		// vector's element is always a numeric scalar (graph.VectorOf).
+		// Named rather than defaulted so a sixth kind cannot be added
 		// silently.
 	}
 }

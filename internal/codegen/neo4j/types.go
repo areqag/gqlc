@@ -1,15 +1,23 @@
 package neo4j
 
 import (
+	"slices"
+
 	"github.com/areqag/gqlc/internal/codegen"
 	"github.com/areqag/gqlc/internal/graph"
 	"github.com/areqag/gqlc/internal/resolver"
 )
 
 // typeMap is the driver's Go-type table (spec §5.1) the shared phases
-// read. Every entry is a pure function of the resolved type, and the two
-// driver majors answer every width alike, so the table has no fields.
-type typeMap struct{}
+// read. Every entry is a pure function of the resolved type and of the one
+// field below, so two tables built for the same major answer alike.
+//
+// vectors reports whether this major carries VECTOR, which only v6 does:
+// dbtype.Vector is a v6 type with no v5 counterpart (ADR 0050). It is the
+// only width the two majors disagree about, and it is zero-valued at the
+// v5 answer on purpose: a bare typeMap{} refuses the width, which is the
+// direction that cannot emit code the driver will not pack.
+type typeMap struct{ vectors bool }
 
 // Property maps a resolved property type to its native Go emission (spec
 // §5.1). Returns (typeText, ok): ok=false for the eight unrepresentable
@@ -63,8 +71,11 @@ type typeMap struct{}
 // table rests on the rows walk alone — do not read the age comment as also
 // describing this one.
 func (t typeMap) Property(pt graph.PropertyType) (string, bool) {
+	if pt.Kind() == graph.KindVector {
+		return t.vector(pt)
+	}
 	if pt.Kind() == graph.KindList {
-		elemTy, ok := t.Property(pt.Elem())
+		elemTy, ok := t.contained(pt.Elem())
 		if !ok {
 			return "", false
 		}
@@ -98,7 +109,7 @@ func (t typeMap) Property(pt graph.PropertyType) (string, bool) {
 		// this table has no case for refuses the whole record, through
 		// the same ErrUnrepresentableWidth channel a bare property of
 		// that width would.
-		return codegen.RecordStructText(pt.Fields(), t.Property)
+		return codegen.RecordStructText(pt.Fields(), t.contained)
 	}
 	if pt.Kind() == graph.KindUnion {
 		// The carrier is `any` and the admission rule is the whole of the
@@ -106,13 +117,54 @@ func (t typeMap) Property(pt graph.PropertyType) (string, bool) {
 		// THIS driver's wire, because the emitted decode has the wire shape
 		// and nothing else to narrow by. UNION<INT32|INT64> is refused
 		// here, both widths arriving as int64.
-		return codegen.UnionCarrier(pt, t.Property, wireFamily)
+		return codegen.UnionCarrier(pt, t.contained, wireFamily)
 	}
 	// PropertyType is an open string type, so a width internal/graph gains
 	// without a row arrives here rather than failing to compile, and reads
 	// the same empty text a refused row holds: the caller routes both to
 	// ErrUnrepresentableWidth naming the width.
 	return propertyCarriers[pt], propertyCarriers[pt] != ""
+}
+
+// vector answers a VECTOR width: a plain Go slice of the element's own
+// carrier, []float32 for VECTOR<FLOAT32>, on the major that has
+// dbtype.Vector, and a refusal on the one that does not (ADR 0050). The
+// dimension never reached the width, so it cannot reach the Go type; a
+// fixed-size array was declined by the owner.
+//
+// The slice is the PUBLIC carrier. The driver's dbtype.Vector[T] wraps the
+// same slice in its Elems field and is reached only inside the emitted
+// vector_neo4j.go, which converts in both directions; the emitted public
+// surface names no driver type (ADR 0033).
+//
+// The element check is a belt. graph.VectorOf admits exactly the six
+// elements dbtype.VectorElement does, so a parsed schema cannot reach the
+// false arm; a width assembled by hand, which graph's contract already
+// calls a defect, refuses here rather than emitting dbtype.Vector[string].
+func (t typeMap) vector(pt graph.PropertyType) (string, bool) {
+	if !t.vectors || !slices.Contains(graph.VectorElements, pt.Elem()) {
+		return "", false
+	}
+	return "[]" + propertyCarriers[pt.Elem()], true
+}
+
+// contained is Property for a width INSIDE a container — a list element, a
+// record field or a union member — and refuses a vector there on every
+// major.
+//
+// Not because the driver could not hand one back: a list of vectors would
+// arrive as []any holding dbtype.Vector values. Because the server stores
+// neither — a property array is homogeneous in its scalar storage type, and
+// a map is no property at all (StorableProperty) — and the query-value
+// positions that could still carry one would each need a decode walk this
+// backend does not have. A slice-typed element would otherwise ride the
+// list walk, which asserts each element to []any and fails on every vector
+// at run time. Refused at generation, where the width can be named.
+func (t typeMap) contained(pt graph.PropertyType) (string, bool) {
+	if pt.Kind() == graph.KindVector {
+		return "", false
+	}
+	return t.Property(pt)
 }
 
 // propertyCarriers is the per-width half of the type table: the Go type
@@ -312,7 +364,10 @@ func (t typeMap) StorableProperty(pt graph.PropertyType) bool {
 	case graph.KindList:
 		elem := pt.Elem().Kind()
 		return elem != graph.KindList && elem != graph.KindRecord && elem != graph.KindUnion
-	case graph.KindScalar:
+	case graph.KindScalar, graph.KindVector:
+		// A vector is a property value in its own right on a server that
+		// has the type (Neo4j 2025.10 and later), not an array of scalars:
+		// it is stored whole, as itself.
 	}
 	return true
 }

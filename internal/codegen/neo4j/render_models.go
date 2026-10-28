@@ -131,7 +131,7 @@ func modelImportNeeds(entities, decoded []codegen.Entity) (anyNonNull, anyTime b
 			// declared shape never reaches (ridesADriverCarrier) and a
 			// nullable one reads round through the Props map. An import
 			// nothing names does not compile.
-			if !f.Nullable && ridesADriverCarrier(f.GoType) {
+			if !f.Nullable && ridesADriverCarrier(f.GoType) && !isVector(f.Width) {
 				anyNonNull = true
 			}
 		}
@@ -352,6 +352,13 @@ func writeLabelGuard(b *strings.Builder, e codegen.Entity, arg string) {
 // argument itself would emit a redeclaration, and generation would still
 // exit 0 because the format gate only parses.
 func writeEntityFieldDecode(b *strings.Builder, e codegen.Entity, i int, f codegen.EntityField, arg string) {
+	if isVector(f.Width) {
+		// Asked first, and of the width: a vector's carrier is a plain
+		// slice, which every test below would read as a LIST and decode
+		// from the []any the driver never hands back for one.
+		writeVectorFieldDecode(b, e, i, f, arg)
+		return
+	}
 	if codegen.IsDeclaredUnion(f.GoType, f.Width) || isUnionList(f.GoType, f.Width) {
 		// Asked before BOTH tests below it, because a closed union takes
 		// the wrong one of them at each arity: on its own it carries as
@@ -393,6 +400,37 @@ func writeEntityFieldDecode(b *strings.Builder, e codegen.Entity, i int, f codeg
 	default:
 		fmt.Fprintf(b, "\tout.%s = %s\n", f.Field, value)
 	}
+}
+
+// writeVectorFieldDecode emits the read of a VECTOR property: the Props
+// lookup, then toVector, which asserts the driver's dbtype.Vector[T] and
+// hands back its Elems (ADR 0050). Through the Props map rather than
+// neo4j.GetProperty for toVector's reason — the generic helper cannot
+// name a constrained instantiation — and worded on the miss the way
+// GetProperty words its own, as writeShapelessFieldDecode is.
+func writeVectorFieldDecode(b *strings.Builder, e codegen.Entity, i int, f codegen.EntityField, arg string) {
+	fail := func(indent string) {
+		fmt.Fprintf(b, "%sif err != nil {\n", indent)
+		fmt.Fprintf(b, "%s\treturn %s{}, fmt.Errorf(\"decode %s.%s: property %%q: %%w\", %q, err)\n", indent, e.Name, e.Name, f.Field, f.PropName)
+		fmt.Fprintf(b, "%s}\n", indent)
+	}
+	elem := vectorElem(strings.TrimPrefix(f.GoType, "*"))
+	if f.Nullable {
+		fmt.Fprintf(b, "\tif v, ok := %s.Props[%q]; ok {\n", arg, f.PropName)
+		fmt.Fprintf(b, "\t\tnarrowed, err := toVector[%s](v)\n", elem)
+		fail("\t\t")
+		fmt.Fprintf(b, "\t\tout.%s = &narrowed\n", f.Field)
+		b.WriteString("\t}\n")
+		return
+	}
+	value := valueName(i)
+	fmt.Fprintf(b, "\t%s, ok := %s.Props[%q]\n", value, arg, f.PropName)
+	b.WriteString("\tif !ok {\n")
+	fmt.Fprintf(b, "\t\treturn %s{}, fmt.Errorf(\"decode %s.%s: could not find any property named %%s\", %q)\n", e.Name, e.Name, f.Field, f.PropName)
+	b.WriteString("\t}\n")
+	fmt.Fprintf(b, "\t%sn, err := toVector[%s](%s)\n", value, elem, value)
+	fail("\t")
+	fmt.Fprintf(b, "\tout.%s = %sn\n", f.Field, value)
 }
 
 // writeNullableEntityFieldDecode emits writeEntityFieldDecode's nullable
