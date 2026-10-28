@@ -213,6 +213,14 @@ not, because it upper-cases the write and the parameter alike.
   `gqlc-fdfk`): only version 7 orders meaningfully, and the version is the
   application's choice, invisible to the schema.
 
+- **The schema keyword `UUID` is non-reserved since 2026-10-27** (bead
+  `gqlc-dftpc`). From PR #2898 until then it was a reserved word in `GQL.g4`,
+  so a property, label or variable spelled `uuid` failed to parse, a
+  regression on valid ISO GQL, which has no such keyword. It is now in
+  `nonReservedWords`, as `VECTOR` is (ADR 0051), and
+  `TestPropertyUUIDIsNotReserved` pins it. This is about the schema grammar,
+  not the generated Go identifier of the bullet above.
+
 - **No server upgrade is needed**, which is what unblocked `gqlc-ybk2`. Moving
   the pinned image to a Bolt 6.1 line remains an owner call with every live
   arm in its blast radius, and nothing about UUID now waits on it.

@@ -687,3 +687,21 @@ func TestTheFunctionScansStillQuoteTheAuthorsText(t *testing.T) {
 	require.Len(t, qcalls, 1)
 	require.Equal(t, "`duration`.`between`", qcalls[0].Text)
 }
+
+// TestUUIDIsANameInAQuery is the query half of bd gqlc-dftpc. The schema
+// grammar once reserved UUID; Cypher.g4 declares no such token, so the word is
+// an ordinary symbolic name here in every position a schema author's uuid
+// property or Uuid label would be referenced from: a label, a property key, a
+// variable and a parameter.
+func TestUUIDIsANameInAQuery(t *testing.T) {
+	for _, src := range []string{
+		"MATCH (u:Uuid {uuid: $uuid}) RETURN u",
+		"MATCH (uuid:UUID) WHERE uuid.uuid = $uuid RETURN uuid.uuid AS uuid",
+		"MATCH (:A)-[r:UUID]->(:B) RETURN r",
+	} {
+		t.Run(src, func(t *testing.T) {
+			_, err := cypher.New().Parse(strings.NewReader(src))
+			require.NoError(t, err)
+		})
+	}
+}
