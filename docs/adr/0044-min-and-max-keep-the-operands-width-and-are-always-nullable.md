@@ -108,14 +108,18 @@ the degrade is a resolver decision that needs no emission to record.
 The orderable families are the scalars carrying a total order the selection
 stays inside: `STRING`, `BOOL`, the five temporal carriers, and every signed,
 unsigned and floating width. It is an **allow-list**, so a family nobody has
-ruled on degrades rather than guessing. Two exclusions are deliberate and named
-rather than accidental:
+ruled on degrades rather than guessing. Three exclusions are deliberate and
+named rather than accidental:
 
 - **`BYTES`** is the ruling's own named refusal: it is not ordered by the
   aggregate.
 - **`DECIMAL`** carries an order but is not among the families the ruling
   enumerates. Refusing it is a non-decision that costs a column its type;
   admitting it would be a decision nobody has taken.
+- **`UUID`** was added to this list by the owner's ruling of 2026-10-27 (bead
+  `gqlc-fdfk`; the carrier is ADR 0047). Only a version 7 UUID orders
+  meaningfully, and the version is chosen by the application minting the
+  value, which the schema cannot see.
 
 `ANY VALUE`, `LIST` and `RECORD` stay out for a third reason: whether a list
 ordering is well-defined enough to type its result is a question the ruling
