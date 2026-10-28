@@ -592,7 +592,7 @@ var scalarArity = map[string]struct{ min, max int }{
 	"sin": {1, 1}, "sinh": {1, 1}, "tan": {1, 1}, "tanh": {1, 1},
 	// String.
 	"btrim": {1, 2}, "left": {2, 2}, "lower": {1, 1}, "ltrim": {1, 2},
-	"normalize": {1, 2}, "replace": {3, 3}, "right": {2, 2}, "rtrim": {1, 2},
+	"normalize": {1, 2}, "replace": {3, 3}, "right": {2, 2}, "rtrim": {1, 2}, //nolint:misspell // a Cypher built-in's name, spelt as the server spells it
 	"split": {2, 2}, "substring": {2, 3}, "tolower": {1, 1}, "tostring": {1, 1},
 	"tostringornull": {1, 1}, "toupper": {1, 1}, "trim": {1, 2}, "upper": {1, 1},
 	// Spatial and temporal.
