@@ -115,15 +115,6 @@ type carrierExemption struct {
 // times is not the reviewer's checklist this list claims to be, so that class
 // moved to clause21Unowned below, where its reason is stated once.
 var carrierExemptions = []carrierExemption{
-	// Section-heading misfits: declared under a section number that no area owns
-	// by prefix, but semantically belong to one that does. Moving the declarations
-	// under the right heading in GQL.g4 retires these — that is gqlc-h9n.27.
-	{name: "graphTypeLikeGraph", kind: "rule", bead: "gqlc-h9n.27", why: "section 12.4 in the grammar for typesetting reasons, but the LIKE alternative belongs to 12.6 area A and 12.6-graph-type-statement/like_graph.gql carries it. Retire by moving the declaration under // 12.6."},
-	{name: "isOrColon", kind: "rule", bead: "gqlc-h9n.27", why: "section 16.7 pattern lexis; reached by every area's label spelling and by the phrase forms in 18.2 and 18.3. Retire when 16.7 declarations move to the area that owns them."},
-	{name: "IS", kind: "token", bead: "gqlc-h9n.27", why: "section 16.7 pattern lexis; label-set prefix keyword, alternate of COLON. Retire when 16.7 declarations move to the area that owns them."},
-	{name: "COLON", kind: "token", bead: "gqlc-h9n.27", why: "section 16.7 pattern lexis; label-set prefix. Retire when 16.7 declarations move to the area that owns them."},
-	{name: "LIKE", kind: "token", bead: "gqlc-h9n.27", why: "section 12.4 in the grammar but reachable from 12.6 through graphTypeLikeGraph, above. Retire by moving the declaration under // 12.6."},
-
 	// The query-surface cut has no retirement path from within this gate — the
 	// DDL areas are not meant to own query-side productions. It stays here rather
 	// than joining clause21Unowned because its reason is its own: section 11.1 is

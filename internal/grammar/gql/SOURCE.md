@@ -108,6 +108,37 @@ property the delta test relies on.
    as misplaced as well as misspelled; that half was checked on 2026-07-28 and
    is wrong.
 4. **"sematically"** — a second misspelling, in the comment above item 1.
+5. **`booleanValueExpression` sits under `// 20.1 <value expression>`**
+   (2196–2198). ISO's production order puts `<boolean value expression>` between
+   `<field>` and `<truth value>`, which is the 20.20 heading's place in this file
+   (2554), so this is a rule filed under a clause that does not declare it. It
+   moves no ownership in the corpus gates, which assign nothing under clause 20,
+   and fixing it means reordering upstream lines, which the delta test above
+   refuses by design — so it is recorded here and not moved. `gqlc-h9n.27`.
+6. **Heading labels in clause 12.** `// 12.4 <insert graph statement>` (311)
+   names no ISO production; the rule under it is `createGraphStatement`,
+   ISO's `<create graph statement>`. `// 12.7 <drop graph statement>` (357)
+   repeats 12.5's label over `dropGraphTypeStatement`, ISO's
+   `<drop graph type statement>`. The section *numbers* match ISO's order; the
+   labels do not, and the corpus gates read only the numbers.
+
+`gqlc-h9n.27` swept every heading for item 5's class on 2026-10-27, at
+`9884911b`. The method: take ISO's free BNF (see **What has been verified**
+below) in its published order, keep the 563 productions whose camel-cased name
+is a rule here, and require the heading numbers to be non-decreasing along that
+order. Item 5 was the only break. The sweep cannot see the 36 rules here with no
+same-named ISO production (12 parser rules, among them gqlc's `uuidType` and the
+`characterOrByteStringFunction` family under 20.1, and 24 lexer rules), and it
+cannot place a rule that sits at a clause boundary, since either neighbouring
+heading keeps the order. Ownership of those is unmeasured, not confirmed.
+
+That sweep also refuted the bead's original premise. `graphTypeLikeGraph` (and
+`LIKE` through it) under 12.4, and `isOrColon` (and `IS`, `COLON`) under 16.7,
+were thought to be misfiled for typesetting reasons. ISO declares
+`<graph type like graph>` in 12.4, between `<of graph type>` and
+`<graph source>`, and `<is or colon>` in 16.7, beside `<is label expression>`.
+The headings are right. What was missing was an area owning those two clauses,
+and that is `ownershipOnlyPrefixes` in `internal/schema/gql/corpus_test.go`.
 
 The list is what has been found, not what exists. Finding more of it is the
 standing job of `gqlc-h9n.9`.
