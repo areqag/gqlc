@@ -35,7 +35,7 @@ What each row means:
   13 s on an earlier run.
 - **R3 sleeps once per process, and that is the second version.** The first
   slept 6 s on every six-node `Prepare` (12 to 18 s an exec, past the 10 s
-  limit). It was measured SURVIVED twice: green, no crasher, 23 execs in
+  limit; the guard then covered the build too). It was measured SURVIVED twice: green, no crasher, 23 execs in
   5 minutes and 11 in 3, although a six-node seed replayed under the same
   mutant failed Guard in 12 s. Not measured, read from
   `internal/fuzz/worker.go`: the engine minimises every new interesting input,
@@ -51,10 +51,11 @@ What each row means:
   Every seed emits `WithTx`, so
   the seed pass reports it.
 
-## buildLimit, and what an exec costs
+## buildLimit, compileLimit, and what an exec costs
 
-`buildLimit` is 10 s over the whole exec — front end, three emissions and the
-`go build` — with the watchdog at 50 s. Measured 2026-10-28 on this machine:
+Two guards per exec: `buildLimit`, 10 s (watchdog 50 s), over the front end
+and the three emissions, and `compileLimit`, 1 minute (watchdog 5 minutes),
+over the `go build`. Measured 2026-10-28 on this machine:
 
 - a `go build` of three freshly written emitted packages, warm cache: 0.04 to
   0.07 s (seven runs); one outlier of 7.2 s wall with 0.2 s CPU, under a load
@@ -64,11 +65,17 @@ What each row means:
   three seed fixtures' committed goldens before `f.Fuzz`, so no guarded exec
   pays for them; warm, that costs 0.2 s.
 
-10 s is two orders over the warm cost and leaves room for the outlier; a
-GitHub runner's 4 vCPUs make the warm compile slower, not the dependency
-build, which `warmBuild` has already paid. If WP10's first nights show
-`slow input` crashers on this target whose replay is fast, the limit is too
-tight for the runner, not the input too slow.
+The first version had one 10 s guard over the whole exec, and that was
+falsified at `af395f8a`: a `just fuzz FuzzGeneratedBuilds 5m 2` run reported
+`slow input: the call took 11.7s` on an input that replayed in 0.08 s three
+times out of three. The build is a child process contending with every other
+`go` invocation on the host for the build cache, so its wall time measures
+the host as much as the input. The emissions are this process's own CPU and
+keep the 10 s limit, which is also what R3 and R3b plant against. A minute
+for the compile is about a thousand times the warm cost and eight times the
+worst outlier seen; a GitHub runner's 4 vCPUs slow the warm compile, not the
+dependency build `warmBuild` has already paid. What would move it: WP10's
+nights showing `slow input` crashers on this target whose replay is fast.
 
 Seed pass: 0.28 to 0.31 s for the three seeds, warm (`go test -run
 '^FuzzGeneratedBuilds$'`), which is what `just test` pays.

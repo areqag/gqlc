@@ -421,14 +421,21 @@ func pathSet(files []codegen.File, omit string) string {
 	return strings.Join(out, ",")
 }
 
-// buildLimit is how long one FuzzGeneratedBuilds exec — front end, three
-// emissions and the `go build` of what they emitted — may take before
-// fuzzkit.Guard reports the input as slow. Its watchdog is then at 50 s. The
-// measurement behind the number is in
-// docs/mutation/fuzz-liveness-FuzzGeneratedBuilds.md; the driver
-// dependencies are compiled before fuzzing starts (warmBuild), so no exec pays
-// for them.
-const buildLimit = 10 * time.Second
+// buildLimit is how long FuzzGeneratedBuilds' front end and three emissions
+// may take before fuzzkit.Guard reports the input as slow (watchdog 50 s), and
+// compileLimit is the same for the `go build` of what they emitted (watchdog
+// 5 min). They are two because their costs differ in kind: the first is this
+// process's own CPU, the second a child process contending for the shared
+// build cache. A warm build measured 0.04 to 0.07 s, but one 5-minute run
+// under a shared host's load reported an 11.7 s exec whose input replayed in
+// 0.08 s, so a single 10 s limit over both reds the night on the host, not the
+// input. The measurements are in
+// docs/mutation/fuzz-liveness-FuzzGeneratedBuilds.md; the driver dependencies
+// are compiled before fuzzing starts (warmBuild), so no exec pays for them.
+const (
+	buildLimit   = 10 * time.Second
+	compileLimit = time.Minute
+)
 
 // buildSeeds are the fixtures FuzzGeneratedBuilds starts from, three so that
 // every `go test` of this package pays three builds and no more. Between them
@@ -458,21 +465,26 @@ func FuzzGeneratedBuilds(f *testing.F) {
 	warmBuild(f, module)
 	f.Fuzz(func(t *testing.T, b []byte) {
 		fuzzkit.Skip(t, b)
+		var emitted map[string]emission
 		fuzzkit.Guard(t, buildLimit, func() {
-			in, ok := fuzzFrontEnd(b)
-			if !ok {
-				return
-			}
-			emitted := emitAll(in)
-			for _, e := range emitted {
-				if e.err != nil {
-					return
-				}
-			}
-			if out, err := buildEmitted(t, module, emitted); err != nil {
-				t.Fatalf("property builds: the emitted packages do not compile (%v):\n%s", err, out)
+			if in, ok := fuzzFrontEnd(b); ok {
+				emitted = emitAll(in)
 			}
 		})
+		if emitted == nil {
+			return
+		}
+		for _, e := range emitted {
+			if e.err != nil {
+				return
+			}
+		}
+		var out []byte
+		var err error
+		fuzzkit.Guard(t, compileLimit, func() { out, err = buildEmitted(t, module, emitted) })
+		if err != nil {
+			t.Fatalf("property builds: the emitted packages do not compile (%v):\n%s", err, out)
+		}
 	})
 }
 
