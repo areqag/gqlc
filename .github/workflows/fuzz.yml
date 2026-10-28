@@ -1,0 +1,269 @@
+# Nightly fuzzing: every Fuzz target in the tree, one matrix leg each, for a
+# budget of hours. The plan is docs/specs/nightly-fuzzing-plan.md (§8); the
+# recipes it calls are the justfile's fuzz section (§9).
+#
+# NOT a merge gate, and it must never become one. There is no pull_request,
+# merge_group or push trigger, and no job id below may be added to master's
+# required contexts (ADR 0023): a context that reports only from a schedule
+# leaves every PR pending forever.
+name: fuzz
+
+on:
+  schedule:
+    # 00:37 UTC. codegen-live's nightly is 04:17 and on its own runners.
+    - cron: "37 0 * * *"
+  workflow_dispatch:
+    inputs:
+      fuzztime:
+        description: per-target fuzz budget, any Go duration ("2m" is the smoke run)
+        type: string
+        default: 4h30m
+      targets:
+        description: comma-separated Fuzz names; empty fuzzes every discovered target
+        type: string
+        default: ""
+      parallel:
+        description: go test -parallel per leg; empty means GOMAXPROCS
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+# One run at a time, and never cancel one: a cancelled night saves a corpus but
+# reports nothing, and a queued dispatch can wait.
+concurrency:
+  group: fuzz
+  cancel-in-progress: false
+
+# Explicit so `run:` gets -o pipefail; the fuzz step's tee depends on it to
+# pass go's exit status through.
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  # The target list is derived from the tree on every run (§8.2), never kept in
+  # this file. fuzz-list refuses an empty list, a duplicate name, and a
+  # `targets` name the tree does not have, so a run that would fuzz nothing is
+  # red here rather than green below.
+  discover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      matrix: ${{ steps.list.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-go
+      - uses: ./.github/actions/setup-just
+      - name: discover the fuzz targets
+        id: list
+        env:
+          TARGETS: ${{ inputs.targets }}
+        run: |
+          set -euo pipefail
+          matrix="$(just fuzz-list --json --only="$TARGETS")"
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+          {
+            echo "### fuzz targets"
+            jq -r '.[] | "- `\(.name)` (\(.package))"' <<<"$matrix"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  fuzz:
+    needs: discover
+    runs-on: ubuntu-latest
+    # -fuzztime 4h30m under 5h30m: the 45 minutes between are for the restore,
+    # the seed baseline, the export, the cache save and the uploads (§8.3). A
+    # job killed by this limit loses its always() steps, so do not raise the
+    # fuzztime default without moving this too.
+    timeout-minutes: 330
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.discover.outputs.matrix) }}
+    env:
+      NAME: ${{ matrix.name }}
+      # The engine's corpus root for every fuzz recipe. Kept out of GOCACHE,
+      # which setup-go saves under one key per job id that every leg shares:
+      # there the first leg to save would carry its corpus into every other
+      # leg's next restore, and a "Cache restored" line below would no longer
+      # be the only way a corpus arrives. Go skips dot directories in ./...,
+      # so fuzz-list does not walk it.
+      GQLC_FUZZ_CACHEDIR: ${{ github.workspace }}/.fuzz-engine
+    steps:
+      - uses: actions/checkout@v4
+      # The suffix carries the nested codegen module's dependencies, which a
+      # target that builds emitted code (T9) compiles against.
+      - uses: ./.github/actions/setup-go
+        with:
+          cache-key-suffix: -${{ hashFiles('test/data/codegen/go.sum') }}
+      - uses: ./.github/actions/setup-just
+
+      # Per target, rolling key (§8.4). actions/cache saves only on a primary
+      # miss, so a fixed key would freeze the first night's corpus; run_attempt
+      # is in it so a re-run can save too. The first run on a branch with no
+      # master entry is cold by construction: judge restore on the second.
+      - name: restore the grown corpus
+        uses: actions/cache/restore@v4
+        with:
+          path: .fuzz-corpus/${{ matrix.name }}
+          key: fuzz-corpus-${{ matrix.name }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            fuzz-corpus-${{ matrix.name }}-
+      - name: import the corpus
+        id: import
+        run: just fuzz-corpus-import "$NAME"
+
+      - name: fuzz
+        id: fuzz
+        env:
+          FUZZTIME: ${{ inputs.fuzztime || '4h30m' }}
+          PARALLEL: ${{ inputs.parallel }}
+        run: just fuzz "$NAME" "$FUZZTIME" "$PARALLEL" 2>&1 | tee "$RUNNER_TEMP/fuzz-$NAME.log"
+
+      # Gated on the import having succeeded, not on always() alone: an export
+      # that ran without it would save an empty corpus under a newer key, and
+      # the next night would restore that instead of the real one. A red or
+      # cancelled fuzz step still exports, because the inputs that led to a
+      # finding are the ones worth keeping.
+      - name: export the corpus
+        id: export
+        if: always() && steps.import.outcome == 'success'
+        run: just fuzz-corpus-export "$NAME"
+      - name: save the grown corpus
+        if: always() && steps.export.outcome == 'success'
+        uses: actions/cache/save@v4
+        with:
+          path: .fuzz-corpus/${{ matrix.name }}
+          key: fuzz-corpus-${{ matrix.name }}-${{ github.run_id }}-${{ github.run_attempt }}
+
+      # The engine writes a crasher into the package's testdata/fuzz/<name>/,
+      # beside the committed seeds; only the untracked files are new. A red leg
+      # with none (a build failure) still uploads its log.
+      - name: collect the crasher and the log
+        if: failure() && steps.fuzz.outcome == 'failure'
+        run: |
+          set -euo pipefail
+          out="$RUNNER_TEMP/crasher"
+          mkdir -p "$out"
+          cp "$RUNNER_TEMP/fuzz-$NAME.log" "$out/"
+          git ls-files -z --others --exclude-standard -- ':(glob)**/testdata/fuzz/**' \
+            | xargs -0 -r cp --parents -t "$out"
+          find "$out" -type f | sed "s|^$out/||"
+      - name: upload the crasher
+        if: failure() && steps.fuzz.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-crasher-${{ matrix.name }}
+          path: ${{ runner.temp }}/crasher
+          if-no-files-found: error
+          retention-days: 14
+
+      # One line per leg, red or green, for fuzz-alert and for a reader of a
+      # green night: the last `fuzz: elapsed` line carries execs, rate and
+      # corpus size.
+      - name: record the result
+        if: always()
+        env:
+          OUTCOME: ${{ steps.fuzz.outcome }}
+        run: |
+          set -euo pipefail
+          last="$(grep '^fuzz: elapsed' "$RUNNER_TEMP/fuzz-$NAME.log" 2>/dev/null | tail -n 1 || true)"
+          line="$NAME $OUTCOME ${last:-(no fuzz: line)}"
+          mkdir -p "$RUNNER_TEMP/result"
+          echo "$line" > "$RUNNER_TEMP/result/$NAME.txt"
+          echo "- \`$line\`" >> "$GITHUB_STEP_SUMMARY"
+      - name: upload the result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-result-${{ matrix.name }}
+          path: ${{ runner.temp }}/result
+          if-no-files-found: error
+          retention-days: 14
+
+  # Modelled on codegen-live.yml's nightly-alert (bd gqlc-0oau): one tracking
+  # issue, opened or reopened and commented on every red night, closed by hand.
+  # Scheduled runs only, for that job's reason: whoever dispatched a run is
+  # watching it. `cancelled` is in the condition because a leg killed at
+  # timeout-minutes is a hang candidate, and silence is the failure mode. A
+  # discovery refusal fails `discover`, which reaches here through `needs`.
+  fuzz-alert:
+    needs: [discover, fuzz]
+    if: >-
+      ${{ always() && github.event_name == 'schedule'
+      && (contains(needs.*.result, 'failure')
+      || contains(needs.*.result, 'cancelled')) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      # Allowed to find nothing: a red discover and a leg killed at its
+      # timeout both leave no result file, and the body names what is missing.
+      - name: download the per-target results
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          pattern: fuzz-result-*
+          path: results
+          merge-multiple: true
+      - name: open or update the fuzz-red tracking issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          DISCOVER_RESULT: ${{ needs.discover.result }}
+          FUZZ_RESULT: ${{ needs.fuzz.result }}
+          MATRIX: ${{ needs.discover.outputs.matrix }}
+        run: |
+          set -euo pipefail
+          label='fuzz-red'
+          title='nightly fuzz is red'
+
+          gh label create "$label" --color B60205 \
+              --description 'the scheduled fuzz run found something or did not finish (bd gqlc-jjot2)' \
+              --force
+
+          lines=""
+          if [ -d results ]; then
+            lines="$(find results -name '*.txt' -exec cat {} + | sort | sed "s/^/- \`/; s/\$/\`/")"
+          fi
+          missing=""
+          if [ -n "$MATRIX" ]; then
+            missing="$(jq -r '.[].name' <<<"$MATRIX" | while read -r n; do
+              [ -f "results/$n.txt" ] || echo "- \`$n\`: no result (killed at timeout-minutes before its always() steps: a hang candidate)"
+            done)"
+          fi
+
+          body="$(printf '%s\n' \
+              "The scheduled \`fuzz\` run is red." \
+              "" \
+              "- discover: \`${DISCOVER_RESULT}\`" \
+              "- fuzz: \`${FUZZ_RESULT}\`" \
+              "- run: ${RUN_URL}" \
+              "" \
+              "Per target (\`<name> <outcome> <last fuzz: line>\`):" \
+              "" \
+              "${lines:-- (no result files)}" \
+              "${missing}" \
+              "" \
+              "Each red leg has a \`fuzz-crasher-<name>\` artifact on the run. Triage is" \
+              "docs/specs/nightly-fuzzing-plan.md §11: one bead per distinct finding, the" \
+              "crasher committed as a regression seed named for its bead. Close this issue" \
+              "when the nightly is green again; the next red night reopens it.")"
+
+          num="$(gh issue list --label "$label" --state all --limit 1 \
+              --json number --jq '.[0].number // ""')"
+
+          if [ -z "$num" ]; then
+            gh issue create --title "$title" --label "$label" --body "$body"
+            exit 0
+          fi
+
+          state="$(gh issue view "$num" --json state --jq '.state')"
+          if [ "$state" = "CLOSED" ]; then
+            gh issue reopen "$num"
+          fi
+          gh issue comment "$num" --body "$body"
