@@ -34,9 +34,9 @@ close it.
 scale)? RIGHT_PAREN)` at `:1849` — the same scale-bearing shape as
 `DECIMAL(p,s)` at `:1832`, not a bit-width spelling — and nothing in the
 grammar establishes that its precision counts bits. `FLOAT(16)` therefore
-resolves to `Float`, exactly as today; deciding what its `precision` counts
-needs an ISO 39075 citation rather than an inference, and is tracked as
-`gqlc-h9n.28`.
+resolves to `Float`, exactly as today. ADR 0049 makes that gqlc's settled
+decision rather than one pending an ISO citation: the precision is dropped, and
+gqlc does not decide whether it counts bits or decimal digits.
 
 The length/character/decimal-digit parenthetical on other branches
 (`VARCHAR(255)`, `STRING(10)`, `DECIMAL(p,s)`, `CHAR(4)`) is a qualifier on the

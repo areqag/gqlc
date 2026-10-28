@@ -130,7 +130,8 @@ the corpus file says so where an author would meet it.
 refusal: `ErrDuplicateFieldName`. This is ADR 0030's rule read onto fields, and
 it is provisional on exactly the same footing — `<field type list>` states no
 uniqueness constraint either, so the free BNF admits it and the reading lives in
-Syntax Rules prose gqlc has not bought.
+Syntax Rules prose gqlc has not bought. (2026-10-27: ADR 0049 settles the
+rejection as permanent gqlc behaviour, for fields as for properties.)
 
 It is a sentinel of its own rather than a reuse of `ErrDuplicatePropertyName`
 because the two are not interchangeable to a reader: a field name repeats inside

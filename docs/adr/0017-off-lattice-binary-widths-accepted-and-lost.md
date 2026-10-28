@@ -149,6 +149,12 @@ blocked on that permanently and instructs that a shipped behaviour be recorded
 record. `gqlc-h9n.28` stays open; answering it could still move `FLOAT(p)`'s
 ownership from `gqlc-h9n.31` to `gqlc-5md`.
 
+*Amended 2026-10-27:* ADR 0049 settles `gqlc-h9n.28` as a gqlc decision. The
+paid text will not be bought, so `FLOAT(p)` resolving to `Float` with its
+precision dropped is final. The bits-or-digits question stays unanswered,
+deliberately. The ownership question above stays open with it; ADR 0049 does
+not move the semantic case.
+
 ## Considered options
 
 **Reject `INT(7)` with `ErrUnsupportedType`.** Rejected: it fails a whole schema
@@ -188,6 +194,8 @@ directive end up predicting different behaviours from the same tree.
   is recorded here instead, which is the distinction the register cannot make.
 - `gqlc-h9n.28` is unaffected and stays open. So does the possibility that
   `FLOAT(p)`'s eventual owner is `gqlc-5md` rather than `gqlc-h9n.31`.
+  (Superseded 2026-10-27: ADR 0049 settles `gqlc-h9n.28` as a gqlc decision.
+  The ownership possibility remains.)
 - The day `gqlc-h9n.31` lands, `TestSemanticCaseCollisions` goes red on all three
   files and the rows are deleted with `wantSemanticCases`. That is the intended
   end state, not a regression.
