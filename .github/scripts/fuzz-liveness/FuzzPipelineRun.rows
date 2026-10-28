@@ -19,9 +19,10 @@ set -euo pipefail
 file=internal/cli/pipeline/pipeline.go
 procsig_fn='s/^\tvar reg procsig\.Registry$/\tif tgt.ProcsigPath != "" {\n\t\t'
 seeds="go test -count=1 -run '^FuzzPipelineRun\$' ./internal/cli/pipeline"
-# Expanded by driver.sh's `bash -c` in the copy, not here.
+# Expanded by driver.sh's `bash -c` in the copy, not here. -parallel 4: the
+# host is shared.
 # shellcheck disable=SC2016
-fuzz='just fuzz FuzzPipelineRun "$LIVENESS_BUDGET"'
+fuzz='just fuzz FuzzPipelineRun "$LIVENESS_BUDGET" 4'
 
 liveness_begin FuzzPipelineRun internal/cli/pipeline
 
