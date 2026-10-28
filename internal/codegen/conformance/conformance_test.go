@@ -263,6 +263,8 @@ func sentinelIdent(err error) string {
 		return "ErrEmptyIdentifier"
 	case cypher.ErrAggregateArity:
 		return "ErrAggregateArity"
+	case cypher.ErrIntegerOverflow:
+		return "ErrIntegerOverflow"
 	default:
 		return "unknown"
 	}

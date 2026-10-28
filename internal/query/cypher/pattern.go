@@ -1,6 +1,7 @@
 package cypher
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -359,22 +360,25 @@ func (l *listener) mergeNamedEdge(variable string, occ mergeOccurrence) {
 // discriminates the fixed-count case (one integer, no '..') from the
 // lower-bound-only case (one integer, '..' present but no upper). Walk the
 // direct children and pair each integer with its position relative to the '..'.
+//
+// oC_IntegerLiteral is HexInteger (0x…), OctalInteger (0o…) or a DecimalInteger
+// with no leading zero, which is exactly what strconv.ParseInt reads at base 0;
+// Atoi read only the decimal form and refused a valid *0x2 (bd gqlc-jjot2.16).
+// A literal past the platform int is ErrIntegerOverflow.
 func edgeHopsFromRangeLiteral(rl gen.IOC_RangeLiteralContext) (query.EdgeHops, error) {
 	var minPtr, maxPtr *int
 	dotsSeen := false
 	for i := 0; i < rl.GetChildCount(); i++ {
 		child := rl.GetChild(i)
 		if intLit, ok := child.(gen.IOC_IntegerLiteralContext); ok {
-			n, err := strconv.Atoi(intLit.GetText())
+			v, err := hopBound(intLit)
 			if err != nil {
-				return query.EdgeHops{}, fmt.Errorf("query: invalid integer in hop range: %w", err)
+				return query.EdgeHops{}, err
 			}
 			if !dotsSeen {
-				v := n
 				minPtr = &v
 				continue
 			}
-			v := n
 			maxPtr = &v
 			continue
 		}
@@ -389,6 +393,19 @@ func edgeHopsFromRangeLiteral(rl gen.IOC_RangeLiteralContext) (query.EdgeHops, e
 		maxPtr = &v
 	}
 	return query.NewEdgeHops(minPtr, maxPtr)
+}
+
+// hopBound reads one hop-range bound at base 0, refusing a value past the
+// platform int with ErrIntegerOverflow.
+func hopBound(lit gen.IOC_IntegerLiteralContext) (int, error) {
+	n, err := strconv.ParseInt(lit.GetText(), 0, strconv.IntSize)
+	if errors.Is(err, strconv.ErrRange) {
+		return 0, fmt.Errorf("%w: hop range bound %s", ErrIntegerOverflow, lit.GetText())
+	}
+	if err != nil {
+		return 0, fmt.Errorf("query: invalid integer in hop range: %w", err)
+	}
+	return int(n), nil
 }
 
 // endpoint forms an edge endpoint from a node pattern: a VarEndpoint for a named

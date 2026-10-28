@@ -156,6 +156,15 @@ var (
 	// the parse tree, so an aggregate at any position (RETURN, WITH, ORDER BY,
 	// a rich expression, an EXISTS subquery) is refused by the same check.
 	ErrAggregateArity = errors.New("aggregate arity mismatch")
+
+	// ErrIntegerOverflow rejects an integer literal the grammar admits but
+	// the model cannot hold: a variable-length relationship's hop bound past
+	// the platform int (`*9227000000000000000`). openCypher reports an
+	// out-of-range literal as SyntaxError: IntegerOverflow. The fail-site is
+	// edgeHopsFromRangeLiteral, the one place the parser reads an integer
+	// literal's value rather than only its type. bd gqlc-jjot2.16: before
+	// the sentinel, the refusal was a plain strconv error.
+	ErrIntegerOverflow = errors.New("integer literal out of range")
 )
 
 // allSentinels is the canonical closed set of sentinels Parse may return
@@ -175,6 +184,7 @@ var allSentinels = []error{
 	ErrUnsatisfiableRelationshipType,
 	ErrEmptyIdentifier,
 	ErrAggregateArity,
+	ErrIntegerOverflow,
 }
 
 // AllSentinels returns a copy of the cypher package's user-input-reachable

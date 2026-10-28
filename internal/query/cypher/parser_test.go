@@ -3231,6 +3231,16 @@ var mustReject = map[string]struct {
 		query: "RETURN Count()",
 		want:  cypher.ErrAggregateArity,
 	},
+	// AUTHORED (gqlc-jjot2.16): a hop-range bound past int64. The grammar
+	// admits an integer literal of any length and no TCK scenario writes
+	// one; the query is the fuzz finding's reproducer. Fail-site:
+	// edgeHopsFromRangeLiteral. The per-position and per-spelling rows live
+	// in hop_range_test.go; this pin exists so the sentinel is reachable
+	// from the canonical sweep.
+	"hop-range bound past int64": {
+		query: "MATCH()-[*9227000000000000000]-()RETURN 0",
+		want:  cypher.ErrIntegerOverflow,
+	},
 }
 
 func TestMustReject(t *testing.T) {
