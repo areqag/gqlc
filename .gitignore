@@ -39,3 +39,7 @@ __pycache__/
 # a leaked one out of every `./...` sweep; this keeps it out of `git add -A`.
 /test/_complexityprobe.*/
 /test/data/codegen/_complexityprobe.*/
+
+# Nightly fuzzing: `just fuzz-corpus-export` writes each target's grown corpus
+# here for the workflow's cache to save and restore. Never committed.
+/.fuzz-corpus/
