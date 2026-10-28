@@ -13,7 +13,7 @@ which executes `.github/scripts/fuzz-liveness/FuzzStream.rows` through
 
 ## The run
 
-Measured 2026-10-27 at `3cc76ada` (branch `feat/gqlc-jjot2.2-fuzzkit`),
+Measured 2026-10-27 at `cc6680a7` (branch `feat/gqlc-jjot2.2-fuzzkit`),
 go1.27.3, 24 CPUs, default `-parallel`, budget `LIVENESS_BUDGET=5m`. Every
 row and control started from an empty grown corpus (`GQLC_FUZZ_CACHEDIR` set
 per row), so the times are from the committed seeds alone. Wall time includes
@@ -25,12 +25,13 @@ after the `sed`, and the diffs below are the bytes.
 
 | row | kind | mutation | md5 before | md5 after | command | verdict | detector | wall |
 |---|---|---|---|---|---|---|---|---|
-| C1 | control | none | - | - | `go test -count=1 -run '^FuzzStream$' ./internal/fuzzkit` | GREEN | - | 1 s |
+| C1 | control | none | - | - | `go test -count=1 -run '^FuzzStream$' ./internal/fuzzkit` | GREEN | - | 0 s |
 | C2 | control | none | - | - | `just fuzz FuzzStream 5m` | GREEN | - | 307 s |
-| R1 | seed-reach | `NewStream` panics | 1b2aff3f | d8412b60 | C1's command | **KILLED** | panic, no crasher (seed pass) | 0 s |
+| R1 | seed-reach | `NewStream` panics | 1b2aff3f | d8412b60 | C1's command | **KILLED** | panic, no crasher (seed pass) | 1 s |
 | R2 | mutation-reach | `Byte` panics on `0x3c 0xa7` | 1b2aff3f | 90429112 | `just fuzz FuzzStream 5m` | **KILLED** | panic, 1 crasher written | 4 s |
-| R3 | hang | `Byte` sleeps 10 s on `0x3c 0xa7` | 1b2aff3f | e1cd5b28 | `just fuzz FuzzStream 5m` | **KILLED** | `fuzzkit.Guard`, 1 crasher written | 88 s |
-| R4a | property | `Byte` returns `0xff` when exhausted | 1b2aff3f | be685790 | `just fuzz FuzzStream 5m` | **KILLED** | property `exhaustion` (seed pass) | 2 s |
+| R3 | slow call | `Byte` sleeps 3 s on `0x3c 0xa7` | 1b2aff3f | b30d7fa9 | `just fuzz FuzzStream 5m` | **KILLED** | `fuzzkit.Guard` Fatalf, 1 crasher written | 21 s |
+| R3b | hang | `Byte` never returns on `0x3c 0xa7` | 1b2aff3f | b84f8424 | `just fuzz FuzzStream 5m` | **KILLED** | Guard's watchdog ends the worker; engine reports it as hung, 1 crasher written | 14 s |
+| R4a | property | `Byte` returns `0xff` when exhausted | 1b2aff3f | be685790 | `just fuzz FuzzStream 5m` | **KILLED** | property `exhaustion` (seed pass) | 1 s |
 | R4b | property | `Ident` may return `maxLen+1` runes | 1b2aff3f | 28aa63ec | `just fuzz FuzzStream 5m` | **KILLED** | property `Ident length`, 1 crasher written | 1 s |
 
 What each row means:
@@ -43,15 +44,24 @@ What each row means:
   `testdata/fuzz/FuzzStream/`. The 4 s is mostly discovery; the plan's warning
   about an R2 that kills in under a second is answered by that seed check,
   which is part of the row rather than a later re-check.
-- **R3 answers §5's open question with one measurement:** a call that returns
-  late is reported by `fuzzkit.Guard`, as `slow input: the call took 20.018s,
-  over the 2s limit` (20 s because both of FuzzStream's streams read the
-  trigger, so it slept twice). The engine did **not** report it as a hung
-  worker first, and nothing reported a test timeout. The 88 s is the find plus
-  the engine's minimisation of the crasher, each minimisation step paying the
-  sleep again. This does not measure a call that never returns: Guard cannot
-  see one by construction, and what ends it is `-fuzztime` or the job's
-  `timeout-minutes`, which no row here exercises.
+- **R3** is Guard's after-the-fact report: one guarded call took 6.0 s (both
+  of FuzzStream's streams read the trigger, so it slept twice) against the
+  2 s limit, under the 10 s watchdog. Guard's `Fatalf` reported it, and nothing
+  else did. Most of the 21 s is the engine minimising the crasher, each step
+  paying the sleep again.
+- **R3b is a call that never returns, and it is why Guard has a watchdog.**
+  The same mutation with the watchdog switched off (`WatchdogFactor = 1 << 20`
+  in a scratch copy, otherwise identical) was measured on 2026-10-27:
+  `go test -fuzz '^FuzzStream$' -fuzztime 45s` exited 0, printed PASS and
+  wrote no crasher. The engine stops its workers at `-fuzztime` and says
+  nothing about the input a spinning worker holds. With the watchdog, the
+  worker dies at 5 × 2 s, the coordinator reports `fuzzing process hung or
+  terminated unexpectedly` and writes the input, and replaying that crasher
+  with `go test -run` names the cause: `fuzzkit.Guard: watchdog: FuzzStream/…
+  has not returned after 10s`. The watchdog's own panic text does not appear
+  in the fuzzing log (the coordinator does not relay a worker's stderr), so
+  this row's evidence is the coordinator's line plus the crasher; the replay
+  was checked by hand, not by the driver.
 - **R4a and R4b** break a property without a panic. R4a is reported at the
   seed pass, before the engine writes anything, which shows the exhaustion
   property is checked, not that mutation reaches it. R4b's mutation is
@@ -109,7 +119,24 @@ R3:
  	s.i++
 +	if c == 0xa7 {
 +		if s.i >= 2 && s.b[s.i-2] == 0x3c {
-+			time.Sleep(10 * time.Second)
++			time.Sleep(3 * time.Second)
++		}
++	}
+ 	return c
+ }
+```
+
+R3b:
+
+```diff
+@@ -23,6 +23,12 @@
+ 	}
+ 	c := s.b[s.i]
+ 	s.i++
++	if c == 0xa7 {
++		if s.i >= 2 && s.b[s.i-2] == 0x3c {
++			for {
++			}
 +		}
 +	}
  	return c
