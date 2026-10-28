@@ -2,8 +2,9 @@
 
 > **Superseded** on 2026-10-27 by
 > [ADR 0050](0050-a-declared-binary-width-rounds-up-to-the-smallest-go-type-that-fits.md).
-> On an owner ruling, `INT(p)`, `INTEGER(p)` and `UINT(p)` now round up to the
-> smallest width constant that holds `p` bits: `INT(7)` is `Int8`, `INT(10)` is
+> On an owner ruling, `INT(p)`, `INTEGER(p)`, `SIGNED INTEGER(p)`, `UINT(p)`
+> and `UNSIGNED INTEGER(p)` now round up to the smallest width constant that
+> holds `p` bits: `INT(7)` is `Int8`, `INT(10)` is
 > `Int16`. The rounding this ADR rejected is now the rule. The `FLOAT(p)`
 > section below is still in force, as ADR 0049 restates it. The rest is kept as
 > the record of why the earlier answer was chosen.

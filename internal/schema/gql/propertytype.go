@@ -1,6 +1,7 @@
 package gql
 
 import (
+	"errors"
 	"fmt"
 	"slices"
 	"strconv"
@@ -194,10 +195,25 @@ func declineValueType(vt gen.IValueTypeContext) error {
 	return nil
 }
 
-// spelling returns the value type's source text via the token stream so internal
-// whitespace is preserved (GetText() collapses it: "ZONED DATETIME" -> "ZONEDDATETIME").
+// spelling returns the value type's default-channel tokens joined by single
+// spaces. Joining keeps word boundaries GetText() loses ("ZONED DATETIME" ->
+// "ZONEDDATETIME"); reading tokens rather than the source text between them
+// drops what the parser never saw. A comment is a hidden-channel token, so the
+// source text would carry `INT /* c */ (10)` into the lookup, and a closing
+// paren needs no space before NOT NULL, so `INT(10)NOT NULL` would miss the
+// " NOT NULL" trim. canonicalSpelling collapses the spaces this inserts around
+// a parenthetical.
 func spelling(vt antlr.ParserRuleContext, ts *antlr.CommonTokenStream) string {
-	return ts.GetTextFromInterval(vt.GetSourceInterval())
+	// Indexed rather than through ts.GetTokens, which stops one short of the
+	// interval's inclusive Stop in antlr4-go v4.
+	iv := vt.GetSourceInterval()
+	words := make([]string, 0, iv.Length())
+	for i := iv.Start; i <= iv.Stop; i++ {
+		if tok := ts.Get(i); tok.GetChannel() == antlr.TokenDefaultChannel {
+			words = append(words, tok.GetText())
+		}
+	}
+	return strings.Join(words, " ")
 }
 
 // hasNotNull reports whether the value type carries a NOT NULL qualifier. The
@@ -233,15 +249,15 @@ func hasNotNull(t antlr.Tree) bool {
 // TestPropertyVerboseIntegerSignedness rows go red if any alias row is deleted.
 //
 // FLOAT(p) is not folded even though its bare form is here. Its parenthetical
-// is (LEFT_PAREN precision (COMMA scale)? RIGHT_PAREN) at GQL.g4:1849 — a
-// scale-bearing shape byte-identical to DECIMAL(p,s) at :1832, not to the
+// is (LEFT_PAREN precision (COMMA scale)? RIGHT_PAREN) at GQL.g4:1871 — a
+// scale-bearing shape byte-identical to DECIMAL(p,s) at :1854, not to the
 // scale-free binary integer parentheticals. Nothing in the grammar establishes
 // that FLOAT's precision counts bits, so FLOAT(16) falls through to the
 // truncated-spelling fallback and lands on TypeFloat. That is gqlc's settled
 // decision (ADR 0049), not one pending an ISO citation: the precision is
 // dropped, and gqlc does not decide whether it counts bits or digits.
 //
-// DURATION is present only as the bare key: the grammar (GQL.g4:1893) makes
+// DURATION is present only as the bare key: the grammar (GQL.g4:1914) makes
 // the `(YEAR TO MONTH)` / `(DAY TO SECOND)` qualifier mandatory, so
 // `DURATION(YEAR TO MONTH)` and `DURATION(DAY TO SECOND)` both reach this
 // table via truncateParenthetical and share a single row. Bare `DURATION`
@@ -391,8 +407,7 @@ var binaryWidths = map[graph.PropertyType][]struct {
 // bits: INT(8) is TypeInt8, INT(7) is TypeInt8 too, INT(10) is TypeInt16
 // (ADR 0050). A width wider than 256 takes the widest constant, which both
 // codegen targets refuse: nothing fits, and the machine word would narrow it
-// silently. Zero bits is not a width and keeps the unqualified machine word, as
-// does a number too large to read as an integer at all.
+// silently. Zero bits is not a width and keeps the unqualified machine word.
 //
 // Every other parenthetical is dropped by the truncated lookup, which is what
 // keeps length/character/decimal-digit qualifiers (STRING(10), DECIMAL(10,2))
@@ -424,7 +439,6 @@ func normaliseType(spelling string) (graph.PropertyType, bool) {
 // grammar's UNSIGNED_DECIMAL_INTEGER admits a leading zero and an underscore
 // between digits, so INT(08) and INT(1_6) are read as the numbers they spell.
 // Zero is reported as no width at all: no lattice step is a width of zero bits.
-// So is a number wider than uint64, which is not a width any reading can use.
 func parenthesisedWidth(paren string) (uint64, bool) {
 	inner, ok := strings.CutPrefix(paren, "(")
 	if !ok {
@@ -434,8 +448,10 @@ func parenthesisedWidth(paren string) (uint64, bool) {
 	if !ok {
 		return 0, false
 	}
+	// ParseUint saturates at MaxUint64 on ErrRange, which is still wider than
+	// the lattice, so an overflowing width takes the widest constant too.
 	bits, err := strconv.ParseUint(strings.ReplaceAll(inner, "_", ""), 10, 64)
-	if err != nil || bits == 0 {
+	if (err != nil && !errors.Is(err, strconv.ErrRange)) || bits == 0 {
 		return 0, false
 	}
 	return bits, true

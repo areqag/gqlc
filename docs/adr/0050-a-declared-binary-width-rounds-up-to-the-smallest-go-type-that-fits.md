@@ -34,7 +34,7 @@ whose bit count is at least `p`, and to the widest constant when none is:
 | 33 – 64 | `Int64` | `Uint64` | `int64` / `uint64` |
 | 65 – 128 | `Int128` | `Uint128` | none, refused by both targets |
 | 129 – 256 | `Int256` | `Uint256` | none, refused by both targets |
-| above 256 | `Int256` | `Uint256` | none, refused by both targets |
+| above 256, however large | `Int256` | `Uint256` | none, refused by both targets |
 | 0 | `Int` | `Uint` | `int` / `uint`, unchanged |
 
 The exact widths keep the fold `gqlc-h9n.16` gave them (`INT(8)` is still
@@ -86,10 +86,18 @@ What the grammar admits as `precision` is `UNSIGNED_DECIMAL_INTEGER`, which is
   loudly and names the width, exactly as it does for 65 to 256. The schema
   itself still parses: rejecting valid ISO GQL at the parser is the dialect
   ADR 0017 argued against.
-- **A number too large to read.** A `p` wider than an unsigned 64-bit integer,
-  such as `INT(18446744073709551616)`, cannot be read as a width at all and keeps
-  resolving to `Int` or `Uint`, as before. This is the only fallback left to the
-  machine word apart from zero.
+- **A number too large for 64 bits.** `INT(18446744073709551616)` and longer are
+  still wider than 256, so they resolve to `Int256` or `Uint256` like any other
+  width above the lattice. With that, zero is the only width that resolves to
+  the machine word.
+- **Comments and spacing.** The width is read from the tokens the parser saw,
+  so a comment inside or before the parenthetical (`INT(/* c */10)`,
+  `INT /* c */ (10)`) and a `NOT NULL` with no space after the paren
+  (`INT(10)NOT NULL`) give the same result as the plain spelling. Before this
+  decision the lookup read the source text between the tokens, so the first two
+  resolved to `Int` or failed with `ErrUnsupportedType` and the third resolved to
+  `Int`. This was not specific to widths: `ZONED /* c */ DATETIME` failed the
+  same way, and is fixed by the same change.
 - **Leading zeros and digit separators.** `INT(08)` and `INT(1_6)` are read for
   the number they spell, giving `Int8` and `Int16`. Before this decision they
   missed the exact-width rows, which were matched as text, and resolved to `Int`.
@@ -109,7 +117,8 @@ Measured 2026-10-27 by running `gqlc generate` on a one-property schema, `p ::
 | `INT(65)` | refused: `unrepresentable property width … has INT128` | refused: query dropped, `projects property:INT128` |
 | `UINT(200)` | refused, `UINT256` | refused, `UINT256` |
 | `INT(300)` | refused, `INT256` | refused, `INT256` |
-| `INT(0)`, `INT(18446744073709551616)` | `int` | `int` |
+| `INT(18446744073709551616)` | refused, `INT256` | refused, `INT256` |
+| `INT(0)` | `int` | `int` |
 
 **This is a breaking change for a schema that declares a width above 64.**
 Before, it generated `int` or `uint`, so it silently held less than declared.
