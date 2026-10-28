@@ -5193,8 +5193,11 @@ fuzz-run name pkg fuzztime parallel:
     root="${GQLC_FUZZ_CACHEDIR:-$(go env GOCACHE)/fuzz}"
     # Go's default -fuzzminimizetime is 60s, and no new fuzz work is dispatched
     # while an input is minimized: on the gen-driven targets (ms per exec) that
-    # stalled the engine at 0 execs/s for tens of seconds per new input.
-    minimize="${GQLC_FUZZ_MINIMIZETIME:-10s}"
+    # stalled the engine at 0 execs/s for tens of seconds per new input, and a
+    # Guard slow-input failure hit while minimizing an interesting input was
+    # dropped without a crasher (gqlc-jjot2.25). Re-minimize a crasher locally
+    # with GQLC_FUZZ_MINIMIZETIME=60s when it is unreadable.
+    minimize="${GQLC_FUZZ_MINIMIZETIME:-10x}"
     args=(-run '^$' -fuzz "^${name}\$" -fuzztime {{ quote(fuzztime) }} -fuzzminimizetime "$minimize")
     if [ -n "$parallel" ]; then
         args+=(-parallel "$parallel")
