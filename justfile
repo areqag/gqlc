@@ -4971,7 +4971,7 @@ fuzz-list *flags:
     if ! go test -list '^Fuzz' -json ./... >"$scratch/list.json" 2>"$scratch/err"; then
         echo "error: fuzz-list: go test -list failed, so the target set is unknown:" >&2
         jq -r 'select(.Output != null and (.Action == "output" or .Action == "build-output")) | .Output' \
-            "$scratch/list.json" | command grep -v '^ok ' >&2 || true
+            "$scratch/list.json" | command grep -v -e '^ok ' -e '^?' -e '^[[:space:]]*$' >&2 || true
         cat "$scratch/err" >&2
         exit 1
     fi
