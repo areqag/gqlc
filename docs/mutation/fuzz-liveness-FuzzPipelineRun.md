@@ -202,17 +202,27 @@ of seconds at a time.
 - No row plants a determinism defect. `pipeline.go` has no state to carry
   across calls, so there is nothing a one-line `sed` could make
   nondeterministic without also planting a panic.
-- **C2's red at `aff40090` is gqlc-jjot2.28**, a resolver determinism
-  defect. The same generated project, laid down in two directories, had query
-  F0Q1 refused with `ambiguous label` (n5 satisfied by `Employee&Forum` and
+- **C2's red at `aff40090` was gqlc-jjot2.28, and it is gqlc-jjot2.20.** The
+  same generated project, laid down in two directories, had query F0Q1
+  refused with `ambiguous label` (n5 satisfied by `Employee&Forum` and
   `Forum`) in one `Run` and accepted in the other. The crasher was lost when
   the next row's restore deleted the copy's `testdata/fuzz` (gqlc-jjot2.24).
-  Eight more minutes of fuzzing and a hand probe did not re-find it. The
-  target now tolerates exactly that shape, two runs whose Diagnostics differ
-  only by ambiguous-label or ambiguous-binding lines, keyed to the bead (the
-  `openFinding` arm in `fuzz_test.go`). A determinism failure now prints the
-  whole project, so the next one can be rebuilt from the log even if the
-  crasher is lost.
+  The mechanism: endpoint narrowing learns only from edges whose OPTIONAL
+  group is demoted (proven), and which groups got demoted depended on map
+  order in `demoteProvenGroups`. A hand-built shape of that kind,
+  `OPTIONAL MATCH (n0:Forum)<-[r1:KNOWS]-(n2:Person) WITH * MATCH (n2)
+  OPTIONAL MATCH (n0)<-[r5:KNOWS]-(n6:Person) RETURN n0`, against a schema in
+  which only `Forum` is reached by KNOWS, resolved in 116 of 200 calls and
+  was refused in 84 before `ee8470c3` (gqlc-jjot2.20's fix, cherry-picked
+  here as `0334abca`), and was refused in 200 of 200 after it. That project
+  is the regression test `TestRunAmbiguityIsDeterministic` in `fuzz_test.go`:
+  red with `scope.go` reverted to the pre-fix version, green with the fix.
+  The tolerance was removed. A determinism failure still prints the whole
+  project, so the next one can be rebuilt even if its crasher is lost.
+  An audit of every `range` over a map in `internal/resolver` (23 sites,
+  found by type rather than by grep, 2026-10-28 at `0334abca`) found no
+  other order-dependent one on the narrowing path. The others are copies,
+  set unions and intersections, singleton reads, or are sorted before use.
 - What the target cannot see: anything gen does not generate (gen's package doc
   lists CALL, MERGE, comprehensions and more), so with gen's queries the
   procsig file is loaded but never used; schemas reached through COPY OF
