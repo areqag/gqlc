@@ -21,7 +21,7 @@ prepare=internal/codegen/prepare.go
 # why each body is a variable of its own.
 named='s/^func Prepare(in Input, tm TypeMap, packageName string) (Prepared, error) {$/&\n\tif len(in.Schema.Nodes) == 6 {\n\t\tPLANT\n\t}/'
 plant_panic='panic("planted: R2")'
-plant_sleep='time.Sleep(6 * time.Second)'
+plant_sleep='plantedSlow.Do(func() { time.Sleep(11 * time.Second) })'
 plant_hang='for {\n\t\t}'
 seeds="go test -count=1 -run '^FuzzGeneratedBuilds\$' ./$pkg"
 # -parallel 2: every exec that reaches the build is a `go build`, and the host
@@ -44,11 +44,19 @@ liveness_row R2 "$prepare" \
     "${named/PLANT/$plant_panic}" \
     'panic: planted: R2' fuzz "$fuzz"
 
-# R3 slow call: R2's condition, sleeping 6 s per Prepare. The guarded exec runs
-# every backend and two or three reach Prepare, so it takes 12 to 18 s: past
-# the 10 s buildLimit and short of its 50 s watchdog.
+# R3 slow call: R2's condition, sleeping 11 s, once per process: past the 10 s
+# buildLimit and short of its 50 s watchdog. Once, because a 6 s sleep on every
+# six-node Prepare (12 to 18 s an exec) was measured SURVIVED twice — green, no
+# crasher, 23 and 11 execs in 5 and 3 minutes — although a seed with six node
+# types replayed under the same mutant failed Guard in 12 s. Not measured, read
+# from internal/fuzz/worker.go: the engine minimises every new interesting
+# input, the minimiser's candidates rewrite a stream's leading bytes and so
+# land on six node types often, and every such candidate paid the sleep, so
+# the budget went on minimisation. A sleep paid once leaves the minimiser
+# nothing slow to replay.
 liveness_row R3 "$prepare" \
-    's/^\t"strings"$/&\n\t"time"/
+    's/^\t"strings"$/&\n\t"sync"\n\t"time"/
+s/^\/\/ Prepare runs every shared phase/var plantedSlow sync.Once\n\n&/
 '"${named/PLANT/$plant_sleep}" \
     'fuzzkit\.Guard: slow input' fuzz "$fuzz"
 
