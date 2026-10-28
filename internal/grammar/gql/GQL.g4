@@ -1752,6 +1752,27 @@ predefinedType
     // this grammar has been bitten by an unreachable alternative before; last
     // position cannot shadow an alternative that already decided.
     | uuidType
+    // gqlc extension, appended after uuidType for the reason uuidType is
+    // appended last: an alternative at the end cannot shadow one that
+    // already decided. VECTOR is Cypher 25's spelling (Neo4j 2025.10+);
+    // ISO/IEC 39075 has no vector value type (bd gqlc-do1, ADR 0049).
+    | vectorType
+    ;
+
+// gqlc extension. VECTOR<element>(dimension), Cypher 25's spelling of a
+// fixed-dimension numeric vector. Both parameters are mandatory, as they
+// are in Cypher's own property type constraints. The element is a full
+// valueType rather than a numeric one so that an element no target can
+// carry is refused by schema admission under a named sentinel, which can
+// say what is admitted, rather than by the parser, which cannot. The
+// dimension is parsed and dropped, like every other magnitude qualifier
+// (ADR 0002).
+//
+// VECTOR is RESERVED, for uuidType's reason; the escape hatch for a name
+// spelled vector is the delimited identifier, pinned by
+// TestPropertyVectorReservedWordEscapeHatch.
+vectorType
+    : VECTOR LEFT_ANGLE_BRACKET valueType RIGHT_ANGLE_BRACKET LEFT_PAREN unsignedInteger RIGHT_PAREN notNull?
     ;
 
 // gqlc extension. UUID carries no parameters — no length, no precision, no
@@ -3506,6 +3527,7 @@ VALUE: 'VALUE';
 VARBINARY: 'VARBINARY';
 VARCHAR: 'VARCHAR';
 VARIABLE: 'VARIABLE';
+VECTOR: 'VECTOR';
 WHEN: 'WHEN';
 WHERE: 'WHERE';
 WITH: 'WITH';

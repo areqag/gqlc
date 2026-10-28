@@ -1,7 +1,7 @@
 # GQL.g4 — provenance
 
 `GQL.g4` is a **community-contributed ANTLR grammar**, vendored from
-`antlr/grammars-v4` and since `gqlc-eg4b` carrying one gqlc addition on top
+`antlr/grammars-v4` and since `gqlc-eg4b` carrying gqlc additions on top
 (**Local modifications**, below). It is not a WG3 artefact, not an ISO
 publication, and not derived from either by anyone whose method we can inspect.
 
@@ -24,8 +24,8 @@ grammar defect, and two candidates are listed below.
 - **Upstream SHA-256:**
   `e1b4a24c6b88dedddc0a1fff97df0fc30bf118cea51539e26d71c717cb737bbf`
 - **Vendored-file SHA-256** (upstream plus **Local modifications**):
-  `25a7e536b7e6ab6b539aaca0af5347e979f29db5880dc2ddd7149251d382ecb9`
-- **Lines:** 3774 upstream, 3797 as vendored
+  `283e1301f5b0dea55165755fbb91e625a357aa59a066ad302a2485db498a8c14`
+- **Lines:** 3774 upstream, 3819 as vendored
 - **Licence:** MIT, at the repository level; the `.g4` carries no header of its
   own and begins at `grammar GQL;`
 - **Upstream's own cited reference:** ISO/IEC 39075:2024
@@ -63,9 +63,10 @@ reasons the word "faithful" was never earned.
 
 ## Local modifications
 
-One, added by `gqlc-eg4b` (stage 1 of `gqlc-do1`). Both hunks are pure
-insertions; no upstream line is edited, reordered or removed, which is the
-property the delta test relies on.
+Two: UUID, added by `gqlc-eg4b` (stage 1 of `gqlc-do1`), and VECTOR, added by
+`gqlc-do1` itself. Every hunk is a pure insertion; no upstream line is edited,
+reordered or removed, which is the property the delta test relies on. The
+VECTOR rule hunk sits inside the UUID one, so the delta test removes it first.
 
 1. **`UUID` as a predefined type.** A lexer token `UUID: 'UUID';` in the
    keyword block, a `uuidType : UUID notNull? ;` rule, and `| uuidType`
@@ -88,6 +89,24 @@ property the delta test relies on.
    `UUID` is reserved, like every other type keyword this grammar declares and
    unlike ISO's `<non-reserved word>` list, which cannot name it. The escape
    hatch for a property or label spelled `uuid` is the delimited identifier.
+
+2. **`VECTOR` as a predefined type.** A lexer token `VECTOR: 'VECTOR';` in the
+   keyword block, a `vectorType : VECTOR '<' valueType '>' '(' unsignedInteger
+   ')' notNull? ;` rule, and `| vectorType` appended after `| uuidType` as the
+   new last alternative of `predefinedType`, for the reason given in item 1.
+
+   The spelling is Cypher 25's (`VECTOR<FLOAT32>(1024)`, Neo4j 2025.10 and
+   later). ISO/IEC 39075 has no vector value type, so this is an extension in
+   the same sense UUID is and the corpus file is `feature: "extension"`. Both
+   parameters are mandatory, as they are in Cypher's own property type
+   constraints. The element is a full `valueType`, so that an element no target
+   can carry is refused by schema admission under a sentinel that can list the
+   admitted ones, rather than by the parser. The dimension is parsed and
+   dropped (ADR 0049).
+
+   Verified the same way: the regenerated `PredefinedType()` gains a single
+   `case GQLParserVECTOR:` and loses none. `VECTOR` is reserved like `UUID`, and
+   `TestPropertyVectorReservedWordEscapeHatch` pins the delimited escape hatch.
 
 ## Known ANTLR adaptations and transcription artefacts
 

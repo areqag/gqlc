@@ -106,7 +106,9 @@ const (
 	// corpus file whose construct is not ISO's. The UUID keyword is gqlc's own
 	// addition to GQL.g4, so no earlier corpus author could have written this
 	// file — the grammar would not have parsed it.
-	wantCorpusEntries = 138
+	// 138 → 139 under gqlc-do1: 18.9-value-type/scalar_vector.gql, the
+	// second, for the same reason — VECTOR is gqlc's addition too.
+	wantCorpusEntries = 139
 	// 68 → 67 under gqlc-4np: 18.2-node-type/property_name_repeated.gql was
 	// demoted from resolves to unsupported, ADR 0030 having decided that a
 	// repeated property name is rejected rather than silently resolved to one
@@ -125,7 +127,10 @@ const (
 	//
 	// 86 → 87 under gqlc-eg4b: scalar_uuid.gql resolves, TypeUUID being a
 	// parameterless width the flat enum already had room for.
-	wantCorpusResolving = 87
+	//
+	// 87 → 88 under gqlc-do1: scalar_vector.gql resolves, to a VectorOf
+	// encoding (ADR 0049).
+	wantCorpusResolving = 88
 	// 18 → 17 under gqlc-4np, the legitimate once-per-case drop this pin exists
 	// to make an author account for: the property_name_repeated case is closed
 	// by ErrDuplicatePropertyName, so it is an unsupported entry now rather than

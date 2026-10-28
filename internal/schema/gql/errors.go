@@ -179,3 +179,14 @@ var (
 	ErrReferenceValueType  = fmt.Errorf("%w: a graph, node, edge or binding table reference is a handle into a graph rather than a value, and a property holding one would be a relationship no traversal can follow", ErrUnsupportedType)
 	ErrImmaterialValueType = fmt.Errorf("%w: NULL admits only null, which the property's own nullability already records, and NOTHING (with NULL NOT NULL) admits nothing at all", ErrUnsupportedType)
 )
+
+// ErrVectorElementType is returned for a VECTOR whose element is not one of
+// the coordinate types Cypher 25 defines. It wraps ErrUnsupportedType like the
+// three families above, but it is not one of them and is not named after an
+// ISO production: VECTOR is a gqlc extension to the grammar (GQL.g4
+// vectorType), and ISO/IEC 39075 has no vector value type to name it after.
+//
+// The admitted set is graph.VectorElements. It is also exactly the element set
+// neo4j-go-driver v6's dbtype.VectorElement admits, so an element refused here
+// is one no target could carry as a vector coordinate (ADR 0049).
+var ErrVectorElementType = fmt.Errorf("%w: a vector's element must be INT8, INT16, INT32, INT64 (or INT), FLOAT32 or FLOAT64 (or FLOAT), the coordinate types Cypher 25 defines", ErrUnsupportedType)

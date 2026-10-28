@@ -1094,6 +1094,9 @@ type GQLVisitor interface {
 	// Visit a parse tree produced by GQLParser#predefinedType.
 	VisitPredefinedType(ctx *PredefinedTypeContext) interface{}
 
+	// Visit a parse tree produced by GQLParser#vectorType.
+	VisitVectorType(ctx *VectorTypeContext) interface{}
+
 	// Visit a parse tree produced by GQLParser#uuidType.
 	VisitUuidType(ctx *UuidTypeContext) interface{}
 

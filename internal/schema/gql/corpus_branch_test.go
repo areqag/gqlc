@@ -247,7 +247,10 @@ func optionalityCoverage(t *testing.T) (map[string]branchState, int) {
 // move with it — "18.9 :: notNull" was already there, every other scalar type
 // spelling its own optional NOT NULL — which is why the count is pinned
 // separately from the membership.
-const wantOptionalityPoints = 138
+//
+// 138 → 139 under gqlc-do1: vectorType's `notNull?`, for the same reason and
+// with the same unmoved class golden.
+const wantOptionalityPoints = 139
 
 // optionalityClassGolden is every class the reachable grammar defines. Checked in as
 // membership, not as a count, on the same argument the obligation goldens are: a size
