@@ -27,7 +27,7 @@ const grammarPath = "../../grammar/gql/GQL.g4"
 // internal/grammar/gql/SOURCE.md outside its "Local modifications" section is a
 // statement about the upstream file, and a drift re-fetch is compared against
 // upstreamSHA256.
-const grammarSHA256 = "25a7e536b7e6ab6b539aaca0af5347e979f29db5880dc2ddd7149251d382ecb9"
+const grammarSHA256 = "1f19435071f86fd3be5fcaccbd3957fbb29327a66d5a3a573ea0ab06315d1b78"
 
 // upstreamSHA256 is the hash of the file as vendored, before gqlc's own
 // additions: the value SOURCE.md's two re-fetch commands are checked against.
@@ -50,6 +50,36 @@ const upstreamSHA256 = "e1b4a24c6b88dedddc0a1fff97df0fc30bf118cea51539e26d71c717
 // definition of the reachable grammar and would then be pinning a grammar that
 // is not the one compiled.
 var localInsertions = []string{
+	// gqlc-do1: VECTOR. Listed FIRST because it is inserted inside the UUID
+	// region below — between its "| uuidType" alternative and the ";" that
+	// closes predefinedType — so the UUID entry is only contiguous again, and
+	// only matches, once this one has been removed.
+	`    // gqlc extension, appended after uuidType for the reason uuidType is
+    // appended last: an alternative at the end cannot shadow one that
+    // already decided. VECTOR is Cypher 25's spelling (Neo4j 2025.10+);
+    // ISO/IEC 39075 has no vector value type (bd gqlc-do1, ADR 0051).
+    | vectorType
+    ;
+
+// gqlc extension. VECTOR<element>(dimension), Cypher 25's spelling of a
+// fixed-dimension numeric vector. Both parameters are mandatory, as they
+// are in Cypher's own property type constraints. The element is a full
+// valueType rather than a numeric one so that an element no target can
+// carry is refused by schema admission under a named sentinel, which can
+// say what is admitted, rather than by the parser, which cannot. The
+// dimension is parsed and dropped, like every other magnitude qualifier
+// (ADR 0002).
+//
+// VECTOR is NON-reserved, unlike UUID: it is a member of nonReservedWords,
+// so a property, label or variable spelled vector still lexes as a name,
+// pinned by TestPropertyVectorIsNotReserved.
+vectorType
+    : VECTOR LEFT_ANGLE_BRACKET valueType RIGHT_ANGLE_BRACKET LEFT_PAREN unsignedInteger RIGHT_PAREN notNull?
+`,
+	"VECTOR: 'VECTOR';\n",
+	// VECTOR as a non-reserved word, so a name spelled vector still lexes as
+	// an identifier (TestPropertyVectorIsNotReserved).
+	"    | VECTOR\n",
 	`    // gqlc extension, appended last. ISO/IEC 39075 <predefined type> has no
     // UUID alternative and neither does Cypher 25, so the bare UUID keyword
     // is gqlc's own proposal (bd gqlc-do1 DESIGN). Appended rather than
@@ -308,6 +338,7 @@ var (
 		"unsignedInteger",
 		"uuidType",
 		"valueType",
+		"vectorType",
 		"verboseBinaryExactNumericType",
 	}
 	wantObligationTokens = []string{
@@ -438,6 +469,7 @@ var (
 		"VALUE",
 		"VARBINARY",
 		"VARCHAR",
+		"VECTOR",
 		"VERTEX",
 		"VERTICAL_BAR",
 		"WITH",

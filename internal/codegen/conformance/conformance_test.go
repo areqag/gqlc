@@ -1421,6 +1421,12 @@ var driverSliceCarriers = map[string]bool{
 // reads. Its flag flipping to true is a
 // driver type returning to the emitted code, which is what the row is
 // kept to catch.
+//
+// dbtype.Vector[T] is spelled as the emission spells it: the assertion is
+// inside the generic toVector of vector_neo4j.go (ADR 0051), over a type
+// parameter constrained to dbtype.VectorElement. neo4j.PropertyValue names
+// all six instantiations that constraint admits, so the assertion is true
+// for every vector the v6 driver can hand back.
 var driverScalarCarriers = map[string]bool{
 	"bool":                true,
 	"int64":               true,
@@ -1432,6 +1438,7 @@ var driverScalarCarriers = map[string]bool{
 	"dbtype.LocalTime":    true,
 	"dbtype.Time":         true,
 	"dbtype.Relationship": true,
+	"dbtype.Vector[T]":    true,
 
 	"map[string]any":       false,
 	"dbtype.UUID":          false,

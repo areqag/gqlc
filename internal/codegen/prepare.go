@@ -1715,6 +1715,16 @@ func propertyListElemPlan(tt resolver.ResolvedProperty, entities []Entity, entit
 	if !ok {
 		return nil, unrepresentableWidth(tt.Type, "%w: list element has unrepresentable property width %s", ErrUnrepresentableWidth, tt.Type)
 	}
+	if tt.Type.Kind() == graph.KindVector {
+		// A vector a backend carries bare is still refused as a list
+		// element, on every backend: no list walk here decodes one, and
+		// the slice its type map answers would ride the element walk for
+		// LIST<T>, which no vector satisfies (ADR 0051). The refusal names
+		// the list, which is the width a type map refuses as a declared
+		// property too, so the message reads the same from either side.
+		list := graph.ListOf(tt.Type, !tt.Nullable)
+		return nil, unrepresentableWidth(list, "%w: list element is a vector, so the list is a %s", ErrUnrepresentableWidth, list)
+	}
 	// An element the schema permits to be NULL is emitted as a pointer,
 	// the rule every other nullable position already obeys. Without it
 	// the resolver's committed nullability is discarded here and the

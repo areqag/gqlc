@@ -134,6 +134,16 @@ type typeMap struct{}
 //     skipping it — the lookup below is admitted by name because the values
 //     it indexes were read, and a return of the form `t.someHelper(pt)` reds.
 func (t typeMap) Property(pt graph.PropertyType) (string, bool) {
+	if pt.Kind() == graph.KindVector {
+		// Refused, and NOT stored as the agtype list it could be (owner
+		// ruling, ADR 0051). AGE stores lists at any depth, so a vector's
+		// coordinates would round-trip — but AGE has no vector type and
+		// no vector functions: no similarity search, no dimension
+		// enforcement. A VECTOR declaration would then mean a vector on
+		// neo4j-go-v6 and a plain list here, which is one schema
+		// meaning two things. nameBackend gives the author that reason.
+		return "", false
+	}
 	if pt.Kind() == graph.KindList {
 		elemTy, ok := t.Property(pt.Elem())
 		if !ok || carriesZone(elemTy) {

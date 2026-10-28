@@ -87,6 +87,7 @@ func TestPropertyTypeKindDiscriminates(t *testing.T) {
 		{"RECORD<>", graph.KindRecord},
 		{graph.RecordOf([]graph.RecordField{{Name: "a", Type: graph.TypeInt}}), graph.KindRecord},
 		{graph.UnionOf([]graph.UnionMember{{Type: graph.TypeString}, {Type: graph.TypeInt}}), graph.KindUnion},
+		{mustVector(t, graph.TypeFloat32), graph.KindVector},
 	} {
 		require.Equal(t, row.want, row.pt.Kind(), "Kind of %q", row.pt)
 	}
@@ -337,5 +338,65 @@ func TestElemTrimChainSurvivesParameterisedElements(t *testing.T) {
 	} {
 		require.Equal(t, row.wantElem, row.list.Elem(), "Elem of %q", row.list)
 		require.Equal(t, row.wantNotNull, row.list.ElemNotNull(), "ElemNotNull of %q", row.list)
+	}
+}
+
+func mustVector(t *testing.T, elem graph.PropertyType) graph.PropertyType {
+	t.Helper()
+	pt, ok := graph.VectorOf(elem)
+	require.True(t, ok, "VectorOf(%s) refused an element it should admit", elem)
+	return pt
+}
+
+// TestVectorOfAdmitsTheCoordinateTypes pins the admitted set and the two folds.
+// The folds are the canonicalisation clause applied to vectors: VECTOR<INT> and
+// VECTOR<INT64> are one Cypher 25 type, so they have to be one string or a
+// query reading both spellings refuses to unify (ADR 0051).
+func TestVectorOfAdmitsTheCoordinateTypes(t *testing.T) {
+	for _, row := range []struct {
+		elem graph.PropertyType
+		want graph.PropertyType
+	}{
+		{graph.TypeInt8, "VECTOR<INT8>"},
+		{graph.TypeInt16, "VECTOR<INT16>"},
+		{graph.TypeInt32, "VECTOR<INT32>"},
+		{graph.TypeInt64, "VECTOR<INT64>"},
+		{graph.TypeInt, "VECTOR<INT64>"},
+		{graph.TypeFloat32, "VECTOR<FLOAT32>"},
+		{graph.TypeFloat64, "VECTOR<FLOAT64>"},
+		{graph.TypeFloat, "VECTOR<FLOAT64>"},
+	} {
+		got := mustVector(t, row.elem)
+		require.Equal(t, row.want, got, "VectorOf(%s)", row.elem)
+		require.Equal(t, graph.KindVector, got.Kind())
+		require.Contains(t, graph.VectorElements, got.Elem(), "Elem of %s is not a canonical element", got)
+	}
+}
+
+// TestElemOfAListOfVectorsIsTheVector pins the one place the two prefixes
+// meet. Elem strips one level, so a list of vectors answers the vector and not
+// the vector's element; a stripper that took both prefixes in sequence would
+// answer "FLOAT32> NOT NULL>", which is no type at all.
+func TestElemOfAListOfVectorsIsTheVector(t *testing.T) {
+	vec := mustVector(t, graph.TypeFloat32)
+	require.Equal(t, vec, graph.ListOf(vec, true).Elem())
+	require.Equal(t, vec, graph.ListOf(vec, false).Elem())
+	require.True(t, graph.ListOf(vec, true).ElemNotNull())
+}
+
+// TestVectorOfRefusesEveryOtherElement is the other half: every element the
+// driver's VectorElement does not admit, including the widths a Go type exists
+// for. UINT8 and FLOAT16 are the rows that matter most — a numeric that looks
+// like it belongs and has no vector coordinate in Cypher 25.
+func TestVectorOfRefusesEveryOtherElement(t *testing.T) {
+	for _, elem := range []graph.PropertyType{
+		graph.TypeString, graph.TypeBool, graph.TypeBytes, graph.TypeDate, graph.TypeUUID,
+		graph.TypeUint, graph.TypeUint8, graph.TypeUint16, graph.TypeUint32, graph.TypeUint64,
+		graph.TypeInt128, graph.TypeFloat16, graph.TypeFloat128, graph.TypeDecimal,
+		graph.TypeAnyPropertyValue, graph.TypeList, graph.ListOf(graph.TypeFloat32, true),
+		"VECTOR<FLOAT32>",
+	} {
+		_, ok := graph.VectorOf(elem)
+		require.False(t, ok, "VectorOf(%s) admitted an element no vector holds", elem)
 	}
 }

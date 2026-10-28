@@ -942,3 +942,122 @@ func TestPropertyUUIDReservedWordEscapeHatch(t *testing.T) {
 		})
 	}
 }
+
+// TestVectorPropertyResolves pins VECTOR's spellings end to end: the dimension
+// dropped (ADR 0002, ADR 0051), the element resolved through the ordinary
+// spelling table and then folded by graph.VectorOf, and the outer NOT NULL read
+// from the vector's own node rather than from the element.
+func TestVectorPropertyResolves(t *testing.T) {
+	for _, tc := range []struct {
+		spelling string
+		want     graph.PropertyType
+		nullable bool
+	}{
+		{"VECTOR<FLOAT32>(1024)", "VECTOR<FLOAT32>", true},
+		{"VECTOR<FLOAT32>(3) NOT NULL", "VECTOR<FLOAT32>", false},
+		{"vector<float32>(3)", "VECTOR<FLOAT32>", true},
+		{"VECTOR<FLOAT64>(3)", "VECTOR<FLOAT64>", true},
+		{"VECTOR<FLOAT>(3)", "VECTOR<FLOAT64>", true},
+		{"VECTOR<INT8>(3)", "VECTOR<INT8>", true},
+		{"VECTOR<INTEGER8>(3)", "VECTOR<INT8>", true},
+		{"VECTOR<INT16>(3)", "VECTOR<INT16>", true},
+		{"VECTOR<INT32>(3)", "VECTOR<INT32>", true},
+		{"VECTOR<INT64>(3)", "VECTOR<INT64>", true},
+		{"VECTOR<INT>(3)", "VECTOR<INT64>", true},
+		{"VECTOR<INTEGER>(3)", "VECTOR<INT64>", true},
+		{"VECTOR<SIGNED INTEGER64>(3)", "VECTOR<INT64>", true},
+		{"VECTOR<BIGINT>(3)", "VECTOR<INT64>", true},
+		{"LIST<VECTOR<INT16>(4)>", "LIST<VECTOR<INT16>>", true},
+	} {
+		t.Run(tc.spelling, func(t *testing.T) {
+			got, err := parseFirstProperty(t, tc.spelling)
+			require.NoError(t, err)
+			require.Equal(t, tc.want, got.Type)
+			require.Equal(t, tc.nullable, got.Nullable)
+		})
+	}
+}
+
+// TestVectorDimensionIsNotPartOfTheType is the drop stated as an equality: two
+// dimensions of one element are one type, as STRING(10) and STRING(20) are.
+func TestVectorDimensionIsNotPartOfTheType(t *testing.T) {
+	a, err := parseFirstProperty(t, "VECTOR<FLOAT32>(3)")
+	require.NoError(t, err)
+	b, err := parseFirstProperty(t, "VECTOR<FLOAT32>(4096)")
+	require.NoError(t, err)
+	require.Equal(t, a.Type, b.Type)
+}
+
+// TestVectorElementRefused pins ErrVectorElementType for every way an element
+// can be wrong: a non-numeric, a numeric with no Cypher 25 coordinate, and an
+// admitted element carrying a NOT NULL. A declined family inside the element
+// reports its own family, as it does inside a record or a union.
+func TestVectorElementRefused(t *testing.T) {
+	for _, tc := range []struct {
+		spelling string
+		want     error
+		detail   string
+	}{
+		{"VECTOR<STRING>(3)", gql.ErrVectorElementType, "element STRING"},
+		{"VECTOR<UINT8>(3)", gql.ErrVectorElementType, "element UINT8"},
+		{"VECTOR<FLOAT16>(3)", gql.ErrVectorElementType, "element FLOAT16"},
+		{"VECTOR<DECIMAL>(3)", gql.ErrVectorElementType, "element DECIMAL"},
+		{"VECTOR<LIST<FLOAT32>>(3)", gql.ErrVectorElementType, "element LIST<FLOAT32>"},
+		{"VECTOR<FLOAT32 NOT NULL>(3)", gql.ErrVectorElementType, "element FLOAT32 NOT NULL"},
+		{"VECTOR<PATH>(3)", gql.ErrPathValueType, ""},
+	} {
+		t.Run(tc.spelling, func(t *testing.T) {
+			_, err := parseFirstProperty(t, tc.spelling)
+			require.ErrorIs(t, err, tc.want)
+			require.ErrorIs(t, err, gql.ErrUnsupportedType)
+			if tc.detail != "" {
+				require.ErrorContains(t, err, tc.detail)
+			}
+		})
+	}
+}
+
+// TestVectorDimensionIsMandatory pins the grammar's reading: Cypher 25's
+// property type constraints spell both parameters, and so does vectorType.
+func TestVectorDimensionIsMandatory(t *testing.T) {
+	for _, spelling := range []string{"VECTOR<FLOAT32>", "VECTOR(3)", "VECTOR"} {
+		t.Run(spelling, func(t *testing.T) {
+			_, err := gql.New().Parse(strings.NewReader("CREATE PROPERTY GRAPH TYPE T AS { (:A { p :: " + spelling + " }) }"))
+			require.ErrorContains(t, err, "syntax error")
+		})
+	}
+}
+
+// TestPropertyVectorIsNotReserved is cited by name from GQL.g4, above the
+// vectorType rule. VECTOR is in nonReservedWords, unlike UUID, so adding the
+// type cost a schema author no name: a property, a label and a variable spelled
+// vector all still parse, including beside the type itself, and the delimited
+// spellings still work too.
+func TestPropertyVectorIsNotReserved(t *testing.T) {
+	for _, src := range []string{
+		"CREATE PROPERTY GRAPH TYPE T AS { (:Doc { vector :: STRING }) }",
+		"CREATE PROPERTY GRAPH TYPE T AS { (:Vector { vector :: STRING }) }",
+		"CREATE PROPERTY GRAPH TYPE T AS { (:Vector { vector :: VECTOR<FLOAT32>(4) NOT NULL }) }",
+		"CREATE PROPERTY GRAPH TYPE T AS { (vector :Doc { vector :: STRING }) }",
+		"CREATE PROPERTY GRAPH TYPE T AS { (:Doc { `vector` :: STRING }) }",
+		`CREATE PROPERTY GRAPH TYPE T AS { (:Doc { "vector" :: STRING }) }`,
+	} {
+		t.Run(src, func(t *testing.T) {
+			got, err := gql.New().Parse(strings.NewReader(src))
+			require.NoError(t, err, "VECTOR is non-reserved, so a name spelled vector must parse")
+			require.Len(t, got.Nodes, 1)
+			for _, node := range got.Nodes {
+				require.Contains(t, node.Properties, "vector")
+				require.Len(t, node.Properties, 1)
+			}
+		})
+	}
+
+	got, err := gql.New().Parse(strings.NewReader(
+		"CREATE PROPERTY GRAPH TYPE T AS { (:Vector { vector :: VECTOR<FLOAT32>(4) NOT NULL }) }"))
+	require.NoError(t, err)
+	for _, node := range got.Nodes {
+		require.Equal(t, graph.PropertyType("VECTOR<FLOAT32>"), node.Properties["vector"].Type)
+		require.False(t, node.Properties["vector"].Nullable)
+	}
+}

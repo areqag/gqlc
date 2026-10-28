@@ -23,21 +23,26 @@ func Registry() (codegen.Registry, error) {
 			New: func(pkg string) codegen.Generator {
 				return neo4j.New(neo4j.WithDriverVersion(neo4j.DriverV5), neo4j.WithPackageName(pkg))
 			},
+			// Both neo4j entries publish the same map, and the registry
+			// merges two entries publishing one name under one value
+			// without complaint — these two wire keys are one backend
+			// package. The map holds the one refusal neo4j raises of its
+			// own, ErrUnrepresentableOnDriverVersion, for a width the
+			// backend carries on the other driver major (VECTOR, ADR 0051).
+			Sentinels: neo4j.Sentinels(),
 		},
 		codegen.Entry{
 			Key: string(config.DriverNeo4jGoV6),
 			New: func(pkg string) codegen.Generator {
 				return neo4j.New(neo4j.WithDriverVersion(neo4j.DriverV6), neo4j.WithPackageName(pkg))
 			},
+			Sentinels: neo4j.Sentinels(),
 		},
 		codegen.Entry{
 			Key: string(config.DriverApacheAgePgxV5),
 			New: func(pkg string) codegen.Generator {
 				return age.New(age.WithPackageName(pkg))
 			},
-			// The two neo4j entries above publish nothing on purpose:
-			// their exported Err* vars are template text emitted INTO
-			// generated code, never refusals their generator returns.
 			Sentinels: age.Sentinels(),
 		},
 	)

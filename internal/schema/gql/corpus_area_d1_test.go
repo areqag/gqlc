@@ -200,6 +200,16 @@ var corpusAreaD1 = []corpusEntry{
 		feature: "extension",
 	},
 	{
+		// The second "extension" entry: bd gqlc-do1 added VECTOR to GQL.g4
+		// as Cypher 25 spells it, under <predefined type> beside UUID, which
+		// is why it is D1's. Both the NOT NULL and the nullable forms, and
+		// two elements, so the element and the outer qualifier are each read
+		// from the right node.
+		file:    "18.9-value-type/scalar_vector.gql",
+		outcome: resolves,
+		feature: "extension",
+	},
+	{
 		file:    "18.9-value-type/scalar_zoned_time.gql",
 		outcome: resolves,
 		feature: "mandatory",
