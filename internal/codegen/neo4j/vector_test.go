@@ -18,7 +18,7 @@ func vectorOf(t *testing.T, elem graph.PropertyType) graph.PropertyType {
 	return vec
 }
 
-// TestVectorCarrierIsASliceOnV6Alone pins the per-major answer ADR 0050
+// TestVectorCarrierIsASliceOnV6Alone pins the per-major answer ADR 0051
 // records: neo4j-go-v6 carries every vector as a plain slice of its element's
 // own Go type, and neo4j-go-v5, whose driver has no dbtype.Vector, carries
 // none. The six rows are the whole of graph.VectorElements, so the table is

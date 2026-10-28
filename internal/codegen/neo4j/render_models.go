@@ -404,7 +404,7 @@ func writeEntityFieldDecode(b *strings.Builder, e codegen.Entity, i int, f codeg
 
 // writeVectorFieldDecode emits the read of a VECTOR property: the Props
 // lookup, then toVector, which asserts the driver's dbtype.Vector[T] and
-// hands back its Elems (ADR 0050). Through the Props map rather than
+// hands back its Elems (ADR 0051). Through the Props map rather than
 // neo4j.GetProperty for toVector's reason — the generic helper cannot
 // name a constrained instantiation — and worded on the miss the way
 // GetProperty words its own, as writeShapelessFieldDecode is.

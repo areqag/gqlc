@@ -22,7 +22,7 @@ func vectorInput(pt graph.PropertyType) codegen.Input {
 	}}
 }
 
-// TestAVectorIsRefusedWithItsReason pins the owner's ruling (ADR 0050): AGE
+// TestAVectorIsRefusedWithItsReason pins the owner's ruling (ADR 0051): AGE
 // refuses every VECTOR rather than storing it as the agtype list it could
 // round-trip as, and the refusal says why, because "AGE stores lists" is the
 // objection an author reaches for. It names the backend: neo4j-go-v6 carries

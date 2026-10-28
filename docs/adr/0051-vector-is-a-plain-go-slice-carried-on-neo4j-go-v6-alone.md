@@ -35,9 +35,12 @@ drops.
    mandatory, as Neo4j's own property type constraints spell it. ISO/IEC 39075
    has no vector value type — the vendored production list has no `VECTOR` — so
    this is a gqlc extension to `GQL.g4`, the second after UUID, added under
-   `predefinedType` as its new last alternative. `VECTOR` becomes a reserved
-   word, and the delimited identifier is the escape hatch for a name spelled
-   `vector` (`TestPropertyVectorReservedWordEscapeHatch`).
+   `predefinedType` as its new last alternative. Unlike `UUID`, `VECTOR` is
+   **non-reserved**: it is added to `nonReservedWords` too, so a property, label
+   or variable spelled `vector` still parses — `(:Vector { vector ::
+   VECTOR<FLOAT32>(4) NOT NULL })` included — and adding the type cost no schema
+   a name. The grammar regenerates with no ANTLR warning
+   (`TestPropertyVectorIsNotReserved`).
 
 2. **The width is `graph.VectorOf(element)`**, encoded `VECTOR<ELEMENT>`, with a
    new `KindVector`. The element is resolved through the ordinary spelling table
@@ -159,12 +162,40 @@ null row and the stored-list row green, as predicted.
   witnessed by `test/data/codegen/invalid/vector_width_driver_version`, and the
   registry's two neo4j entries publish it.
 
-- **`VECTOR` is reserved** in schema source. A schema using `vector` as a bare
-  property, label or variable name stops parsing.
+- **`VECTOR` is not reserved**, so no existing schema stops parsing because of
+  it.
 
-- **A slice-carried `:one` column zeroes as `nil`.** `goTypeZeroText` answered
-  the numeric `0` for any type it did not name, which does not compile against
-  a `[]float32` return.
+- **A slice-carried `:one` column zeroes as `nil`**, for a VECTOR and for
+  BYTES alike. `goTypeZeroText` answered the numeric `0` for any type it did
+  not name, which does not compile against a `[]float32` or a `[]byte` return;
+  the BYTES case was a latent defect no fixture reached, and
+  `valid/property_bytes` now carries a `:one` over its BYTES column that pins
+  it.
+
+## Known limits
+
+Recorded as limits of this change rather than decided; each is a place where
+the emission is weaker than the declaration. This is the list as reviewed on
+2026-10-27, and it is not claimed to be complete.
+
+- **An ANY-typed column can surface the driver's type.** A projection the
+  resolver types as ANY — `min(d.embedding)`, `coalesce(d.embedding, …)`, a
+  `CASE` over a vector — is emitted as `any`, and what arrives in it is the raw
+  `dbtype.Vector[T]`, not a slice. The public surface names no driver type, but
+  the value does.
+
+- **A `[]T` inside an ANY parameter binds as a LIST.** Only a parameter whose
+  width IS a vector goes through `fromVector`. A slice handed to an ANY (or
+  `LIST<ANY>`) parameter reaches the driver bare and is stored as a list.
+
+- **Expressions invalid on a vector generate.** Indexing (`d.embedding[0]`),
+  `size()`, arithmetic, `sum()` and the like resolve as they would over a list
+  or a number and generate; the server refuses them at run time. Nothing in the
+  resolver knows which operators a vector admits.
+
+- **The dimension is not range-checked.** It is dropped (decision 3), so
+  `VECTOR<FLOAT32>(0)` and `VECTOR<FLOAT32>(100000)` parse; Neo4j admits
+  dimensions of 1 to 4096 and is the one that would refuse.
 
 ## Alternatives declined
 

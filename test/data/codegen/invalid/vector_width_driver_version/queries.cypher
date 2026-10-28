@@ -10,7 +10,7 @@
 // carrier and sends an author looking for a different BACKEND. The carrier
 // exists — dbtype.Vector, in neo4j-go-driver v6 and absent from v5.28.4, the
 // two versions test/data/codegen/go.mod pins — and the repair is a different
-// DRIVER MAJOR inside the same backend (ADR 0050).
+// DRIVER MAJOR inside the same backend (ADR 0051).
 // neo4j.ErrUnrepresentableOnDriverVersion is what says that, and TestInvalid's
 // ErrorIs holds this fixture to it.
 //

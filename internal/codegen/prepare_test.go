@@ -1686,7 +1686,7 @@ var fixedDeclarationFiles = map[string]bool{
 	// bridges' terms: the batch decides whether the file is emitted, never
 	// a name in it. It exports nothing today.
 	"timestamp_neo4j.go": true,
-	// VECTOR's bridge to dbtype.Vector[T] (ADR 0050), on the same terms:
+	// VECTOR's bridge to dbtype.Vector[T] (ADR 0051), on the same terms:
 	// three generic helpers whose names are the emitter's, emitted when the
 	// batch reaches a vector and exporting nothing.
 	"vector_neo4j.go": true,

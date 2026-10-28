@@ -88,7 +88,7 @@ func ListOf(elem PropertyType, elemNotNull bool) PropertyType {
 
 // VectorOf constructs a vector PropertyType over elem, and reports false for an
 // element no vector holds. The dimension is not a parameter: it is a magnitude
-// qualifier, dropped like a string's length (ADR 0002, ADR 0050).
+// qualifier, dropped like a string's length (ADR 0002, ADR 0051).
 //
 // The admitted elements are the coordinate types Cypher 25 defines, which are
 // also exactly the element types neo4j-go-driver v6's dbtype.VectorElement

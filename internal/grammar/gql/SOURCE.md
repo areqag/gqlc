@@ -24,8 +24,8 @@ grammar defect, and two candidates are listed below.
 - **Upstream SHA-256:**
   `e1b4a24c6b88dedddc0a1fff97df0fc30bf118cea51539e26d71c717cb737bbf`
 - **Vendored-file SHA-256** (upstream plus **Local modifications**):
-  `b94f1c2a47f0c4268eb1d7a0287f13c32d60c1c03ec9989ddc102a843eed9574`
-- **Lines:** 3774 upstream, 3819 as vendored
+  `1f19435071f86fd3be5fcaccbd3957fbb29327a66d5a3a573ea0ab06315d1b78`
+- **Lines:** 3774 upstream, 3820 as vendored
 - **Licence:** MIT, at the repository level; the `.g4` carries no header of its
   own and begins at `grammar GQL;`
 - **Upstream's own cited reference:** ISO/IEC 39075:2024
@@ -102,11 +102,16 @@ VECTOR rule hunk sits inside the UUID one, so the delta test removes it first.
    constraints. The element is a full `valueType`, so that an element no target
    can carry is refused by schema admission under a sentinel that can list the
    admitted ones, rather than by the parser. The dimension is parsed and
-   dropped (ADR 0050).
+   dropped (ADR 0051).
 
    Verified the same way: the regenerated `PredefinedType()` gains a single
-   `case GQLParserVECTOR:` and loses none. `VECTOR` is reserved like `UUID`, and
-   `TestPropertyVectorReservedWordEscapeHatch` pins the delimited escape hatch.
+   `case GQLParserVECTOR:` and loses none.
+
+   Unlike `UUID`, `VECTOR` is **non-reserved**: a third hunk adds `| VECTOR` to
+   `nonReservedWords`, so a property, label or variable spelled `vector` still
+   lexes as a name — `(:Vector { vector :: VECTOR<FLOAT32>(4) NOT NULL })`
+   parses. Regenerated with no ANTLR warning; `TestPropertyVectorIsNotReserved`
+   pins it.
 
 ## Known ANTLR adaptations and transcription artefacts
 

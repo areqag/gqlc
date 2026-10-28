@@ -34,7 +34,7 @@ type Option func(*Codegen)
 // DriverWithContext back to Driver (keeping the old name as an alias);
 // generated v6 code uses the native name. The one width the majors carry
 // differently is VECTOR: v6 declares dbtype.Vector and v5 has none, so v5
-// refuses it under ErrUnrepresentableOnDriverVersion (ADR 0050).
+// refuses it under ErrUnrepresentableOnDriverVersion (ADR 0051).
 type DriverVersion int
 
 const (

@@ -188,5 +188,5 @@ var (
 //
 // The admitted set is graph.VectorElements. It is also exactly the element set
 // neo4j-go-driver v6's dbtype.VectorElement admits, so an element refused here
-// is one no target could carry as a vector coordinate (ADR 0050).
+// is one no target could carry as a vector coordinate (ADR 0051).
 var ErrVectorElementType = fmt.Errorf("%w: a vector's element must be INT8, INT16, INT32, INT64 (or INT), FLOAT32 or FLOAT64 (or FLOAT), the coordinate types Cypher 25 defines", ErrUnsupportedType)

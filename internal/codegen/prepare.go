@@ -1719,7 +1719,7 @@ func propertyListElemPlan(tt resolver.ResolvedProperty, entities []Entity, entit
 		// A vector a backend carries bare is still refused as a list
 		// element, on every backend: no list walk here decodes one, and
 		// the slice its type map answers would ride the element walk for
-		// LIST<T>, which no vector satisfies (ADR 0050). The refusal names
+		// LIST<T>, which no vector satisfies (ADR 0051). The refusal names
 		// the list, which is the width a type map refuses as a declared
 		// property too, so the message reads the same from either side.
 		list := graph.ListOf(tt.Type, !tt.Nullable)

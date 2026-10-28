@@ -1755,7 +1755,7 @@ predefinedType
     // gqlc extension, appended after uuidType for the reason uuidType is
     // appended last: an alternative at the end cannot shadow one that
     // already decided. VECTOR is Cypher 25's spelling (Neo4j 2025.10+);
-    // ISO/IEC 39075 has no vector value type (bd gqlc-do1, ADR 0050).
+    // ISO/IEC 39075 has no vector value type (bd gqlc-do1, ADR 0051).
     | vectorType
     ;
 
@@ -1768,9 +1768,9 @@ predefinedType
 // dimension is parsed and dropped, like every other magnitude qualifier
 // (ADR 0002).
 //
-// VECTOR is RESERVED, for uuidType's reason; the escape hatch for a name
-// spelled vector is the delimited identifier, pinned by
-// TestPropertyVectorReservedWordEscapeHatch.
+// VECTOR is NON-reserved, unlike UUID: it is a member of nonReservedWords,
+// so a property, label or variable spelled vector still lexes as a name,
+// pinned by TestPropertyVectorIsNotReserved.
 vectorType
     : VECTOR LEFT_ANGLE_BRACKET valueType RIGHT_ANGLE_BRACKET LEFT_PAREN unsignedInteger RIGHT_PAREN notNull?
     ;
@@ -3144,6 +3144,7 @@ nonReservedWords
     | TRANSACTION
     | TYPE
     | UNDIRECTED
+    | VECTOR
     | VERTEX
     | WALK
     | WITHOUT

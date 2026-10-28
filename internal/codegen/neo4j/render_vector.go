@@ -22,7 +22,7 @@ func (u vectorUse) used() bool { return u.decode || u.encode || u.encodePtr }
 // decoded entity properties, row columns and parameters. Nothing nested is
 // walked, because the type map refuses a vector inside a list, a record or
 // a union, and the front end refuses one as a list element of a query value
-// (ADR 0050) — so a vector is only ever a position's whole width.
+// (ADR 0051) — so a vector is only ever a position's whole width.
 func vectorUses(prepared codegen.Prepared) vectorUse {
 	var u vectorUse
 	for _, e := range codegen.DecodedEntities(prepared) {
@@ -70,7 +70,7 @@ func vectorElem(goType string) string {
 // renderVectorConversions emits vector_neo4j.go: the unexported bridge
 // between the plain slice a VECTOR property is on the emitted surface and
 // the driver's dbtype.Vector[T], which wraps that same slice in its Elems
-// field (ADR 0050). Generic in the element, so one body serves all six
+// field (ADR 0051). Generic in the element, so one body serves all six
 // elements dbtype.VectorElement admits and the file does not grow per
 // element the schema declares.
 //

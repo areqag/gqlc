@@ -15,7 +15,7 @@ import (
 //
 // Today that is VECTOR alone: dbtype.Vector is a neo4j-go-driver v6 type
 // and v5 has no counterpart, so neo4j-go-v5 refuses the width and
-// neo4j-go-v6 carries it (ADR 0050). UUID raised this once too, until ADR
+// neo4j-go-v6 carries it (ADR 0051). UUID raised this once too, until ADR
 // 0047 moved it to a string wire both majors carry.
 //
 // DELIBERATELY NOT codegen.ErrUnrepresentableWidth, which is the sentinel
@@ -64,7 +64,7 @@ func Sentinels() map[string]error {
 // unwrapped BY that rule rather than by an exception to it. Every width
 // that reaches this point is one NO enrolled target carries — the eight
 // oversized numerics, permanent under spec §9, and a vector inside a
-// container (ADR 0050) — so a suffix would send an author looking for a
+// container (ADR 0051) — so a suffix would send an author looking for a
 // target that carries INT128. AGE's twin does attribute its width refusals
 // and is right to: its refused set additionally holds BYTES, VECTOR and the
 // zoned-element lists, which this table accepts on at least one major. That premise is measured rather

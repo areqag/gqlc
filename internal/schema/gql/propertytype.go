@@ -103,7 +103,7 @@ func vectorType(vt gen.IValueTypeContext) gen.IVectorTypeContext {
 // resolveVectorType lowers VECTOR<elem>(dimension) to its encoded
 // PropertyType and the vector's own NOT NULL. The dimension is read by the
 // grammar and dropped here, like every other magnitude qualifier (ADR 0002,
-// ADR 0050): the Go carrier is a slice, which holds any length.
+// ADR 0051): the Go carrier is a slice, which holds any length.
 //
 // The element's own NOT NULL is refused rather than ignored. A coordinate is
 // never null, so the qualifier says nothing true or false about the vector,

@@ -1,6 +1,6 @@
 // neo4j-go-v6 alone. A VECTOR is a plain Go slice on the emitted surface,
 // []float32 for VECTOR<FLOAT32>, and the driver's dbtype.Vector[T] at the
-// boundary, reached only through vector_neo4j.go (ADR 0050). neo4j-go-v5 has
+// boundary, reached only through vector_neo4j.go (ADR 0051). neo4j-go-v5 has
 // no dbtype.Vector and refuses the width
 // (test/data/codegen/invalid/vector_width_driver_version), and Apache AGE has
 // no vector type and refuses it too (test/data/codegen/invalid/vector_width_age).

@@ -57,7 +57,7 @@ var LiveArms = map[string]Arm{
 	// half is TestAGEStoresAndRoundTripsAUUID below.
 	"TestNeo4jStoresAndRoundTripsAUUID": ArmNeo4j,
 	// The VECTOR storage and round-trip measurement (bd gqlc-do1, ADR
-	// 0050), neo4j-go-v6 alone. It skips on the pinned image, which speaks
+	// 0051), neo4j-go-v6 alone. It skips on the pinned image, which speaks
 	// Bolt 5.8, without booting a container; it runs unedited once the pin
 	// moves to a Bolt 6 line. No AGE half: AGE refuses the width.
 	"TestNeo4jStoresAndRoundTripsAVector": ArmNeo4j,

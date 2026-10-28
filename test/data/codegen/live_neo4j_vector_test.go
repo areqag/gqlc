@@ -1,6 +1,6 @@
 //go:build codegen_live
 
-// The live half of the VECTOR width (bd gqlc-do1, ADR 0050): that a vector
+// The live half of the VECTOR width (bd gqlc-do1, ADR 0051): that a vector
 // written through generated code is STORED as a vector rather than a list,
 // and that it ROUND-TRIPS through every read position the golden emits.
 //
@@ -87,7 +87,7 @@ func TestNeo4jStoresAndRoundTripsAVector(t *testing.T) {
 	if neo4jImage == neo4jImageBolt5 {
 		t.Skip("the pinned neo4j image is Neo4j 5.26 on Bolt 5.8, and a VECTOR needs Bolt 6.0 (Neo4j 2025.10+); " +
 			"measured 2026-10-27, the server refuses a vector parameter with \"Unexpected struct tag: 0x56\". " +
-			"Moving the pin is an owner call (bd gqlc-do1, ADR 0050); this test runs unedited once it moves")
+			"Moving the pin is an owner call (bd gqlc-do1, ADR 0051); this test runs unedited once it moves")
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)

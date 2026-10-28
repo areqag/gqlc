@@ -808,7 +808,7 @@ func TestPropertyUUIDReservedWordEscapeHatch(t *testing.T) {
 }
 
 // TestVectorPropertyResolves pins VECTOR's spellings end to end: the dimension
-// dropped (ADR 0002, ADR 0050), the element resolved through the ordinary
+// dropped (ADR 0002, ADR 0051), the element resolved through the ordinary
 // spelling table and then folded by graph.VectorOf, and the outer NOT NULL read
 // from the vector's own node rather than from the element.
 func TestVectorPropertyResolves(t *testing.T) {
@@ -892,28 +892,36 @@ func TestVectorDimensionIsMandatory(t *testing.T) {
 	}
 }
 
-// TestPropertyVectorReservedWordEscapeHatch is cited by name from GQL.g4, above
-// the vectorType rule. It is TestPropertyUUIDReservedWordEscapeHatch for the
-// second keyword gqlc added, on the same argument: the bare word stops being a
-// name, and both delimited spellings still are.
-func TestPropertyVectorReservedWordEscapeHatch(t *testing.T) {
-	load := func(src string) (schema.Schema, error) {
-		return gql.New().Parse(strings.NewReader(src))
+// TestPropertyVectorIsNotReserved is cited by name from GQL.g4, above the
+// vectorType rule. VECTOR is in nonReservedWords, unlike UUID, so adding the
+// type cost a schema author no name: a property, a label and a variable spelled
+// vector all still parse, including beside the type itself, and the delimited
+// spellings still work too.
+func TestPropertyVectorIsNotReserved(t *testing.T) {
+	for _, src := range []string{
+		"CREATE PROPERTY GRAPH TYPE T AS { (:Doc { vector :: STRING }) }",
+		"CREATE PROPERTY GRAPH TYPE T AS { (:Vector { vector :: STRING }) }",
+		"CREATE PROPERTY GRAPH TYPE T AS { (:Vector { vector :: VECTOR<FLOAT32>(4) NOT NULL }) }",
+		"CREATE PROPERTY GRAPH TYPE T AS { (vector :Doc { vector :: STRING }) }",
+		"CREATE PROPERTY GRAPH TYPE T AS { (:Doc { `vector` :: STRING }) }",
+		`CREATE PROPERTY GRAPH TYPE T AS { (:Doc { "vector" :: STRING }) }`,
+	} {
+		t.Run(src, func(t *testing.T) {
+			got, err := gql.New().Parse(strings.NewReader(src))
+			require.NoError(t, err, "VECTOR is non-reserved, so a name spelled vector must parse")
+			require.Len(t, got.Nodes, 1)
+			for _, node := range got.Nodes {
+				require.Contains(t, node.Properties, "vector")
+				require.Len(t, node.Properties, 1)
+			}
+		})
 	}
 
-	_, err := load("CREATE PROPERTY GRAPH TYPE T AS { (:A { vector :: STRING }) }")
-	require.Error(t, err, "VECTOR is a keyword now, so a bare vector in name position must not parse")
-
-	for _, src := range []string{
-		"CREATE PROPERTY GRAPH TYPE T AS { (:A { `vector` :: STRING }) }",
-		`CREATE PROPERTY GRAPH TYPE T AS { (:A { "vector" :: STRING }) }`,
-	} {
-		got, err := load(src)
-		require.NoError(t, err, "the delimited spelling is the escape hatch; if it fails there is none: %s", src)
-		require.Len(t, got.Nodes, 1)
-		for _, node := range got.Nodes {
-			require.Contains(t, node.Properties, "vector")
-			require.Equal(t, graph.TypeString, node.Properties["vector"].Type)
-		}
+	got, err := gql.New().Parse(strings.NewReader(
+		"CREATE PROPERTY GRAPH TYPE T AS { (:Vector { vector :: VECTOR<FLOAT32>(4) NOT NULL }) }"))
+	require.NoError(t, err)
+	for _, node := range got.Nodes {
+		require.Equal(t, graph.PropertyType("VECTOR<FLOAT32>"), node.Properties["vector"].Type)
+		require.False(t, node.Properties["vector"].Nullable)
 	}
 }

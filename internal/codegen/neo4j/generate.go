@@ -82,7 +82,7 @@ func generate(in codegen.Input, target driverTarget, packageName string) ([]code
 		)
 	}
 
-	// VECTOR's bridge to dbtype.Vector[T] (ADR 0050). Only neo4j-go-v6
+	// VECTOR's bridge to dbtype.Vector[T] (ADR 0051). Only neo4j-go-v6
 	// reaches here with a vector: v5's type table refuses the width, so
 	// Prepare refuses the batch first.
 	if use := vectorUses(prepared); use.used() {

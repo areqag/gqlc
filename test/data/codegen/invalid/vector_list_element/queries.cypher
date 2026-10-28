@@ -3,7 +3,7 @@
 // is a vector, and no list walk on this backend decodes one: the element's
 // []float32 carrier would ride the walk for LIST<FLOAT32>, which asserts each
 // element to []any and fails on every vector at run time. The shared front
-// end refuses it at the list-element plan instead (ADR 0050), naming the list
+// end refuses it at the list-element plan instead (ADR 0051), naming the list
 // width, LIST<VECTOR<FLOAT32>>, which is the width the type map refuses as a
 // declared property too (test/data/codegen/invalid/vector_list_property).
 

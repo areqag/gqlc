@@ -389,7 +389,7 @@ func declaredWidths(t *testing.T) []graph.PropertyType {
 	)
 
 	// Every vector, built rather than declared because VECTOR is
-	// parameterised and the read above sees constants only (ADR 0050). The
+	// parameterised and the read above sees constants only (ADR 0051). The
 	// bare width is the sweep's only one that divides the two neo4j MAJORS:
 	// neo4j-go-v6 emits it, and neo4j-go-v5 and AGE refuse it, each owing
 	// its name — v5 under ErrUnrepresentableOnDriverVersion, AGE under the

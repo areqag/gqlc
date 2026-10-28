@@ -1421,7 +1421,7 @@ var driverSliceCarriers = map[string]bool{
 // kept to catch.
 //
 // dbtype.Vector[T] is spelled as the emission spells it: the assertion is
-// inside the generic toVector of vector_neo4j.go (ADR 0050), over a type
+// inside the generic toVector of vector_neo4j.go (ADR 0051), over a type
 // parameter constrained to dbtype.VectorElement. neo4j.PropertyValue names
 // all six instantiations that constraint admits, so the assertion is true
 // for every vector the v6 driver can hand back.

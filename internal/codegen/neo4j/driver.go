@@ -25,7 +25,7 @@ package neo4j
 // The vectors field is the one entry that is not emitted text but a
 // TYPE-TABLE answer: dbtype.Vector exists in neo4j-go-driver v6 and has no
 // counterpart in v5, so the two majors carry different sets of property
-// widths (ADR 0050). false is the v5 answer and the zero value, so a
+// widths (ADR 0051). false is the v5 answer and the zero value, so a
 // typeMap built with no target refuses VECTOR, which is the direction that
 // cannot emit code a driver will not pack.
 type driverTarget struct {

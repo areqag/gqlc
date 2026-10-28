@@ -28,7 +28,7 @@ func Registry() (codegen.Registry, error) {
 			// without complaint — these two wire keys are one backend
 			// package. The map holds the one refusal neo4j raises of its
 			// own, ErrUnrepresentableOnDriverVersion, for a width the
-			// backend carries on the other driver major (VECTOR, ADR 0050).
+			// backend carries on the other driver major (VECTOR, ADR 0051).
 			Sentinels: neo4j.Sentinels(),
 		},
 		codegen.Entry{

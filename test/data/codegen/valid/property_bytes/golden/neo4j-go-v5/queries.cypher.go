@@ -37,3 +37,29 @@ func (q *queries) Blobs(ctx context.Context) ([]Blob, error) {
 	}
 	return out, nil
 }
+
+const blobPayloadQueryText = `MATCH (b:Blob) WHERE b.id = $id RETURN b.payload AS payload`
+
+// BlobPayload executes the BlobPayload query.
+//
+//	MATCH (b:Blob) WHERE b.id = $id RETURN b.payload AS payload
+func (q *queries) BlobPayload(ctx context.Context, arg int64) ([]byte, error) {
+	records, err := q.db.run(ctx, blobPayloadQueryText, map[string]any{"id": arg}, neo4j.AccessModeRead)
+	if err != nil {
+		return nil, err
+	}
+	if len(records) == 0 {
+		return nil, ErrNoRows
+	}
+	if len(records) > 1 {
+		return nil, ErrMultipleResults
+	}
+	value, isNil, err := neo4j.GetRecordValue[[]byte](records[0], "payload")
+	if err != nil {
+		return nil, fmt.Errorf("BlobPayload: decode column %q: %w", "payload", err)
+	}
+	if isNil {
+		return nil, fmt.Errorf("BlobPayload: column %q is non-nullable but arrived null", "payload")
+	}
+	return value, nil
+}

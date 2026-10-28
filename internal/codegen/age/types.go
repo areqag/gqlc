@@ -136,7 +136,7 @@ type typeMap struct{}
 func (t typeMap) Property(pt graph.PropertyType) (string, bool) {
 	if pt.Kind() == graph.KindVector {
 		// Refused, and NOT stored as the agtype list it could be (owner
-		// ruling, ADR 0050). AGE stores lists at any depth, so a vector's
+		// ruling, ADR 0051). AGE stores lists at any depth, so a vector's
 		// coordinates would round-trip — but AGE has no vector type and
 		// no vector functions: no similarity search, no dimension
 		// enforcement. A VECTOR declaration would then mean a vector on

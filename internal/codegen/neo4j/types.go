@@ -13,7 +13,7 @@ import (
 // field below, so two tables built for the same major answer alike.
 //
 // vectors reports whether this major carries VECTOR, which only v6 does:
-// dbtype.Vector is a v6 type with no v5 counterpart (ADR 0050). It is the
+// dbtype.Vector is a v6 type with no v5 counterpart (ADR 0051). It is the
 // only width the two majors disagree about, and it is zero-valued at the
 // v5 answer on purpose: a bare typeMap{} refuses the width, which is the
 // direction that cannot emit code the driver will not pack.
@@ -128,7 +128,7 @@ func (t typeMap) Property(pt graph.PropertyType) (string, bool) {
 
 // vector answers a VECTOR width: a plain Go slice of the element's own
 // carrier, []float32 for VECTOR<FLOAT32>, on the major that has
-// dbtype.Vector, and a refusal on the one that does not (ADR 0050). The
+// dbtype.Vector, and a refusal on the one that does not (ADR 0051). The
 // dimension never reached the width, so it cannot reach the Go type; a
 // fixed-size array was declined by the owner.
 //

@@ -761,7 +761,7 @@ type numericNarrowing struct {
 func (n *numericNarrowing) markWidth(goType string, width graph.PropertyType, tm typeMap) {
 	if isVector(width) {
 		// A vector's elements arrive at their declared width inside
-		// dbtype.Vector[T]; nothing is narrowed (ADR 0050).
+		// dbtype.Vector[T]; nothing is narrowed (ADR 0051).
 		return
 	}
 	if members, ok := unionLeafMembers(goType, width, tm); ok {

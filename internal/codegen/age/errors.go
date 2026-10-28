@@ -256,7 +256,7 @@ func nameBackend(err error) error {
 }
 
 // vectorRefusalReason is why this backend refuses VECTOR rather than storing
-// it as the agtype list it could round-trip as (owner ruling, ADR 0050). The
+// it as the agtype list it could round-trip as (owner ruling, ADR 0051). The
 // refusal carries it because the obvious objection — AGE stores lists — is
 // true, and an author reading a bare "no carrier" would reach for it.
 const vectorRefusalReason = "AGE has no vector type and no vector functions (no similarity search, " +
@@ -301,7 +301,7 @@ func carriedByNoBackend(pt graph.PropertyType) bool {
 // list element, a record field or a union member, at any depth. That is
 // refused by every enrolled target: AGE refuses a vector anywhere, and
 // neo4j refuses one inside a container on both majors (its typeMap's
-// contained, ADR 0050). A bare vector is not here; neo4j-go-v6 carries it,
+// contained, ADR 0051). A bare vector is not here; neo4j-go-v6 carries it,
 // so a refusal of one owes this backend's name.
 func nestsAVector(pt graph.PropertyType) bool {
 	inside := func(inner graph.PropertyType) bool {

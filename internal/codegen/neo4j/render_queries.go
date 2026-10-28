@@ -387,7 +387,7 @@ func zeroValueText(p codegen.Query) string {
 // column's emitted Go type.
 func goTypeZeroText(goType string) string {
 	if strings.HasPrefix(goType, "[]") {
-		// A slice-carried property column: a VECTOR (ADR 0050) or BYTES.
+		// A slice-carried property column: a VECTOR (ADR 0051) or BYTES.
 		// A LIST property never lands here — it is ColumnList, whose arm
 		// above answers nil already — and the default arm's numeric 0
 		// does not compile against a slice return.
@@ -726,7 +726,7 @@ func nullableScalarBindExpr(f codegen.Param, access string) string {
 //
 // The vector is asked first, and of its width, because its []T carrier is
 // the text the slice test below reads as a LIST: bound as one, the server
-// would store a list where the schema declared a vector (ADR 0050).
+// would store a list where the schema declared a vector (ADR 0051).
 func wrappedBindExpr(f codegen.Param, access string) (string, bool) {
 	if !isVector(f.Width) {
 		return unionBindExpr(f, access)
@@ -1121,7 +1121,7 @@ func writeCarrierColumnDecodeIndent(site columnDecodeSite) {
 }
 
 // writeVectorColumnDecodeIndent emits the record.Get lane for a VECTOR
-// column, through toVector (ADR 0050). The record.Get lane rather than
+// column, through toVector (ADR 0051). The record.Get lane rather than
 // GetRecordValue, for toVector's reason, and so with
 // writeAnyColumnDecodeIndent's two gates: a missing key is a decode
 // failure, and a null is the column's null when nullable and a failure

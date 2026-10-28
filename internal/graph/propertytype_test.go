@@ -351,7 +351,7 @@ func mustVector(t *testing.T, elem graph.PropertyType) graph.PropertyType {
 // TestVectorOfAdmitsTheCoordinateTypes pins the admitted set and the two folds.
 // The folds are the canonicalisation clause applied to vectors: VECTOR<INT> and
 // VECTOR<INT64> are one Cypher 25 type, so they have to be one string or a
-// query reading both spellings refuses to unify (ADR 0050).
+// query reading both spellings refuses to unify (ADR 0051).
 func TestVectorOfAdmitsTheCoordinateTypes(t *testing.T) {
 	for _, row := range []struct {
 		elem graph.PropertyType
