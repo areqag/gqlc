@@ -90,7 +90,7 @@ liveness_row R4d internal/query/query.go \
 # R4e determinism: package state makes every second successful Parse report a
 # write statement, so the two calls on one input disagree.
 liveness_row R4e "$build" \
-    's/^package cypher$/&\n\nvar plantedCalls int/
+    's/^func (l \*listener) build() (query\.Query, error) {$/var plantedCalls int\n\n&/
 s/^\tq\.ComprehensionPaths = l\.comprehensionPaths$/&\n\tplantedCalls++\n\tif plantedCalls%2 == 0 {\n\t\tq.StatementKind = query.StatementWrite\n\t}/' \
     'property determinism' property "$fuzz"
 

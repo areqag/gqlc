@@ -100,7 +100,10 @@ func FuzzCypherParse(f *testing.F) {
 		// The three invariants are written against *rapid.T. MakeFuzz runs a
 		// property exactly once over the given bytes and reports a rapid
 		// Fatalf through t; nil bytes are enough because the property draws
-		// nothing.
+		// nothing. Their messages do not name the property, so this log line
+		// does: a test's log is printed only when it fails, and nothing after
+		// this line but the invariants can fail it.
+		t.Log("property model invariants: checking parser_test.go's assert* helpers")
 		rapid.MakeFuzz(func(rt *rapid.T) {
 			assertReferentialIntegrity(rt, first.q, src)
 			assertNamedBindingsUnique(rt, first.q, src)
