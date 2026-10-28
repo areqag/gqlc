@@ -5,14 +5,17 @@
 # and the verdicts are driver.sh's; the recorded run, with every row's diff, is
 # docs/mutation/fuzz-liveness-FuzzResolve.md.
 #
-# R2's condition is a query that resolves with exactly four parameters.
-# Measured 2026-10-28 by printing len(q.Parameters) at the planted line: the
-# committed seeds carry 0, 1, 2, 3 or 6 and never 4 (the driver re-checks that
-# on the mutant before it fuzzes), while about 2.5 % of random generated-arm
-# streams (125 of 5000) resolve with four. So the fuzzer reaches it by mutating
-# a generated-arm seed's stream. A seven-column condition was tried first and
-# SURVIVED 5 m: the generated arm projects at most four columns, and the text
-# arm needs a whole projection inserted.
+# R2's condition is a query that resolves with four parameters, or with two
+# parameters over three parts. Measured 2026-10-28 by printing the counts at
+# the planted line: no committed seed meets either (the driver re-checks that
+# on the mutant before it fuzzes), while 352 of 5000 random generated-arm
+# streams (7 %) do. So the fuzzer reaches it by mutating a generated-arm
+# seed's stream, or by flipping a corpus seed's first byte into that arm.
+#
+# Two conditions tried first were too rare to kill reliably in 5 m on a
+# shared host: seven columns (SURVIVED; the generated arm projects at most
+# four), and four parameters alone (2.5 % of streams: R2 killed in 12 s, but
+# R3 SURVIVED 5 m in the same run and killed in 69 s in a rerun).
 set -euo pipefail
 
 # SC1091: `just lint-hooks` runs shellcheck without -x, so it cannot follow the
@@ -25,7 +28,7 @@ resolve="$pkg/resolve.go"
 # R2's condition with PLANT standing for its body. Each body is a variable of
 # its own because the replacement half of ${cols/PLANT/...} undergoes quote
 # removal, which would eat a literal \n.
-cols='s/^\tif err := compareBranchColumns(branchCols); err != nil {$/\tif len(q.Parameters) == 4 {\n\t\tPLANT\n\t}\n&/'
+cols='s/^\tif err := compareBranchColumns(branchCols); err != nil {$/\tif n := len(q.Parameters); n == 4 || (n == 2 \&\& len(q.Branches[0].Parts) == 3) {\n\t\tPLANT\n\t}\n&/'
 plant_panic='panic("planted: R2")'
 plant_sleep='time.Sleep(3 * time.Second)'
 plant_hang='for {\n\t\t}'
