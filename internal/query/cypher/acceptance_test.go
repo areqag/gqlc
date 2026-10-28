@@ -1075,7 +1075,7 @@ func goldenPath(st *scenarioState) string {
 // docstring of each "When executing query" step, deduplicated and sorted for a
 // stable order. It reuses the gherkin parser (godog's dependency) so the harvest
 // matches what the acceptance suite actually runs, rather than re-scanning text.
-func harvestExecutingQueries(t *testing.T, dirs []string) []string {
+func harvestExecutingQueries(t testing.TB, dirs []string) []string {
 	t.Helper()
 	seen := make(map[string]bool)
 	for _, dir := range dirs {

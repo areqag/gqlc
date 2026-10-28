@@ -3571,7 +3571,10 @@ func TestPropertyReferentialIntegrity(t *testing.T) {
 // endpoints) resolve against that part's bindings OR a name the prior part's WITH
 // exported into it (the per-part scope §4). It threads the exported-name set left
 // to right across parts within each branch; parameters are query-wide and must
-// resolve against the union of every part's bindings.
+// resolve against the union of every part's bindings and projected names. The
+// projected names are there because a WHERE after a WITH compares against the
+// WITH's aliases (`WITH count(a) AS c WHERE c = $p`, admitted by gqlc-dvd1), so
+// a parameter use may name an alias that no MATCH bound.
 func assertReferentialIntegrity(rt *rapid.T, q query.Query, src string) {
 	allNamed := make(map[string]bool)
 	for _, br := range q.Branches {
@@ -3580,6 +3583,9 @@ func assertReferentialIntegrity(rt *rapid.T, q query.Query, src string) {
 				if v := bindingVariable(b); v != "" {
 					allNamed[v] = true
 				}
+			}
+			for _, r := range part.Returns {
+				allNamed[r.Name] = true
 			}
 		}
 	}
@@ -3730,6 +3736,9 @@ func assertParametersDeduped(rt *rapid.T, q query.Query, src string) {
 // bindingVariable reads the variable of any binding variant via its accessor.
 // Stage 8: PathBinding joins the sum with an always-non-empty variable.
 // Stage 9: UnwindBinding joins the sum with an always-non-empty variable.
+// Stage 14: CallBinding joins the sum with an always-non-empty variable. It was
+// missing here until FuzzCypherParse's seeds met a parsed CALL: the corpus
+// property parses with no registry, so every CALL was refused before it.
 func bindingVariable(b query.Binding) string {
 	switch v := b.(type) {
 	case query.NodeBinding:
@@ -3739,6 +3748,8 @@ func bindingVariable(b query.Binding) string {
 	case query.PathBinding:
 		return v.Variable()
 	case query.UnwindBinding:
+		return v.Variable()
+	case query.CallBinding:
 		return v.Variable()
 	default:
 		return ""
