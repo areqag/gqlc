@@ -12,10 +12,10 @@
 # streams (7 %) do. So the fuzzer reaches it by mutating a generated-arm
 # seed's stream, or by flipping a corpus seed's first byte into that arm.
 #
-# Two conditions tried first were too rare to kill reliably in 5 m on a
-# shared host: seven columns (SURVIVED; the generated arm projects at most
-# four), and four parameters alone (2.5 % of streams: R2 killed in 12 s, but
-# R3 SURVIVED 5 m in the same run and killed in 69 s in a rerun).
+# A seven-column condition was tried first and SURVIVED 5 m: the generated
+# arm projects at most four columns, and the text arm needs a whole projection
+# inserted. Four parameters alone killed R2 in 12 s; it was widened while R3
+# was SURVIVING, which turned out to be gqlc-jjot2.25 rather than rarity.
 set -euo pipefail
 
 # SC1091: `just lint-hooks` runs shellcheck without -x, so it cannot follow the
