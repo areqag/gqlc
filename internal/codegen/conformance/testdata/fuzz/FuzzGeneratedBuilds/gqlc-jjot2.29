@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("\x01CREATE PROPERTY GRAPH TYPE G AS {\n    (:Tag { rank :: TIMESTAMP NOT NULL, name :: STRING NOT NULL })\n}\n\x00// name: Rows :many\nMATCH (n:Tag) RETURN n.rank AS a, n.name AS b\n// name: Params :exec\nMATCH (n:Tag) WHERE n.rank = $rank AND n.name = $name DELETE n\n")
