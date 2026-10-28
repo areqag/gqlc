@@ -261,6 +261,8 @@ func sentinelIdent(err error) string {
 		return "ErrUnsatisfiableRelationshipType"
 	case cypher.ErrEmptyIdentifier:
 		return "ErrEmptyIdentifier"
+	case cypher.ErrAggregateArity:
+		return "ErrAggregateArity"
 	default:
 		return "unknown"
 	}
