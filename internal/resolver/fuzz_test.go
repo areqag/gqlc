@@ -120,16 +120,8 @@ func FuzzResolve(f *testing.F) {
 		fuzzkit.Guard(t, fuzzLimit, func() { second.vq, second.err = res.Resolve(q) })
 
 		if !sameResolve(first, second) {
-			msg := fmt.Sprintf("two Resolve calls on %q disagree:\nfirst:  %#v, %v\nsecond: %#v, %v",
+			t.Fatalf("property determinism: two Resolve calls on %q disagree:\nfirst:  %#v, %v\nsecond: %#v, %v",
 				input, first.vq, first.err, second.vq, second.err)
-			if nullabilityOnly(first, second) {
-				msg = "only in nullability: " + msg
-			}
-			if bead := openFinding(msg); bead == "" {
-				t.Fatalf("property determinism: %s", msg)
-			} else {
-				t.Logf("tolerated, open finding %s: %s", bead, msg)
-			}
 		}
 		if first.err != nil {
 			if !reflect.DeepEqual(first.vq, resolver.ValidatedQuery{}) {
@@ -167,34 +159,13 @@ func FuzzResolve(f *testing.F) {
 // again every night until it is fixed; the fix PR deletes its arm and commits
 // the bead's seed (plan §11).
 func openFinding(violation string) string {
-	switch {
-	case strings.Contains(violation, "is not unique"):
+	if strings.Contains(violation, "is not unique") {
 		// Duplicate result column names (openCypher ColumnNameConflict) are
 		// checked by neither the parser nor the resolver. What this hides:
 		// nothing else, since wellFormedViolation checks names last.
 		return "gqlc-jjot2.19"
-	case strings.HasPrefix(violation, "only in nullability: "):
-		// OPTIONAL group demotion depends on map iteration order. What this
-		// hides: any other source of nondeterminism confined to nullability.
-		return "gqlc-jjot2.20"
 	}
 	return ""
-}
-
-var nullableField = regexp.MustCompile(`"nullable":(true|false)`)
-
-// nullabilityOnly reports whether two accepted models differ in nothing but
-// their "nullable" fields.
-func nullabilityOnly(a, b resolveResult) bool {
-	if a.err != nil || b.err != nil {
-		return false
-	}
-	ja, errA := json.Marshal(a.vq)
-	jb, errB := json.Marshal(b.vq)
-	if errA != nil || errB != nil {
-		return false
-	}
-	return bytes.Equal(nullableField.ReplaceAll(ja, nil), nullableField.ReplaceAll(jb, nil))
 }
 
 // sameResolve compares two Resolve results: the models by reflect.DeepEqual,
