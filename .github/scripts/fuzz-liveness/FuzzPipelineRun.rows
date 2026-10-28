@@ -42,6 +42,10 @@ liveness_row R2 "$file" \
 # R3 slow call: R2's condition, sleeping 2.5 s per target that names a procsig
 # file. Each Run is guarded alone, so one such target costs 2.5 s and three
 # 7.5 s: past the 2 s limit and short of the 10 s watchdog.
+# Recorded SURVIVED (bd gqlc-jjot2.25): under go's default 60 s minimize budget,
+# which `just fuzz` keeps, the slow input is mostly first met inside the
+# minimization of another input and its report is lost. The row stays as it is,
+# so that the fix to `fuzz-run` turns it KILLED.
 liveness_row R3 "$file" \
     's/^\t"strings"$/&\n\t"time"/
 '"${procsig_fn}"'time.Sleep(2500 * time.Millisecond)\n\t}\n&/' \
