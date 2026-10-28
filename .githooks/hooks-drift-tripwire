@@ -64,9 +64,10 @@ hook="$(basename -- "$0")"
 # directory is already proof the repo's own hooks are unwired, and a refusal
 # that re-derived it from `git config` would go quiet exactly when that call
 # fails. It does decide whether to REPAIR, which may only rewrite a value it has
-# recognised as one of the two drift shapes. `git config --get` exits 1 when the key is unset, which is itself
-# a drifted state (git falls back to this directory), so the empty value is
-# reported as <unset> rather than treated as an error.
+# recognised as one of the two drift shapes. `git config --get` exits 1 when
+# the key is unset, which is itself a drifted state (git falls back to this
+# directory), so the empty value is reported as <unset> rather than treated as
+# an error.
 configured="$(git config --get core.hooksPath 2>/dev/null || true)"
 
 # WHICH ARM THIS IS, decided BEFORE the message rather than after it (bd

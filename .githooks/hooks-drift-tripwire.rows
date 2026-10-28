@@ -167,6 +167,20 @@ else
     fail "locked config" "did not name the manual repair"
 fi
 
+# An environment override keeps the drift in effect however the file is
+# written, so the write succeeds and the repair must still not be claimed: the
+# read-back of the effective value is what refuses to.
+repo="${scratch}/env"
+fixture "${repo}"
+git -C "${repo}" config --unset core.hooksPath
+err="$(cd "${repo}" && GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath \
+    GIT_CONFIG_VALUE_0="$(pwd)/.git/hooks" .git/hooks/pre-commit 2>&1 >/dev/null)"
+if grep -q 'REPAIRED' <<<"${err}"; then
+    fail "env override" "reported REPAIRED while the override keeps the drift"
+else
+    pass "env override: no repair claimed while the drift stays in effect"
+fi
+
 # R3: post-checkout fires inside `git worktree add`, the spawn's own step, and
 # must neither block nor repair.
 repo="${scratch}/checkout"
