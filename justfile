@@ -2,7 +2,7 @@
 # recipe self-heals: it verifies the pinned version in .bin/ and reinstalls on
 # mismatch, so a version bump here is a one-line change and nobody ever
 # installs or upgrades the linter by hand.
-golangci_version := "v2.13.1"
+golangci_version := "v2.15.0"
 golangci := justfile_directory() + "/.bin/golangci-lint"
 # Wraps a `golangci-lint run` in a bounded wait on the machine-wide lock the
 # linter takes (bd gqlc-49pc). Only `run` takes it — `fmt` was measured under a
