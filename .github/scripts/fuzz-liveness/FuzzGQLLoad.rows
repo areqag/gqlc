@@ -39,12 +39,15 @@ liveness_row R2 "$loader" \
     "${misnamed/PLANT/panic(\"planted: R2\")}" \
     'panic: planted: R2' fuzz "$fuzz"
 
-# R3 slow call: R2's condition, sleeping 3 s: past Guard's 2 s limit and short
-# of its 10 s watchdog, so this row is Guard's after-the-fact report alone.
+# R3 slow call: R2's condition, sleeping 7 s: past Guard's 2 s limit and short
+# of its 10 s watchdog, so this row is Guard's after-the-fact report alone. The
+# evidence asks for the 7 s, not any slow input: every file Load reads goes
+# through the parser, which has a real slow input of its own (bd
+# gqlc-jjot2.17), and a kill by that one would not be this row's.
 liveness_row R3 "$loader" \
-    "${misnamed/PLANT/time.Sleep(3 * time.Second)}
+    "${misnamed/PLANT/time.Sleep(7 * time.Second)}
 s/^\t\"strings\"$/\t\"strings\"\n\t\"time\"/" \
-    'fuzzkit\.Guard: slow input' fuzz "$fuzz"
+    'fuzzkit\.Guard: slow input: the call took 7\.' fuzz "$fuzz"
 
 # R3b hang: R2's condition, never returning. Guard's watchdog ends the worker;
 # the engine reports a worker that terminated unexpectedly and writes the input.
