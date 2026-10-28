@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("\x01CREATE PROPERTY GRAPH TYPE G AS {\n (:Person { name :: STRING NOT NULL, `a\"b` :: INT64 })\n}\n\x00// name: A :many\nMATCH (p:Person) RETURN p.name\n")

@@ -676,6 +676,14 @@ func prepareEntityFields(entityName string, props map[string]schema.Property, tm
 	for _, k := range keys {
 		p := props[k]
 		field := paramFieldName(p.Name)
+		// The spelling half of the record-field check, one container
+		// out: a delimited property name can hold what no Go field
+		// name can, and without this the struct it is emitted into
+		// reached go/format as ErrFormatFailure (gqlc-jjot2.23, found
+		// by FuzzGenerate).
+		if !goFieldName(field) {
+			return nil, fmt.Errorf("%w: entity %q property %q mangles to %q, which is not a Go field name", ErrPropertyFieldCollision, entityName, p.Name, field)
+		}
 		if first, dup := seen[field]; dup {
 			return nil, fmt.Errorf("%w: entity %q properties %q and %q both mangle to %q", ErrPropertyFieldCollision, entityName, first, p.Name, field)
 		}
