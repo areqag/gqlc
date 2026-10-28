@@ -2507,7 +2507,17 @@ func validateEffect(sc *scope, e query.Effect, s schema.Schema, setClause effect
 // contributes an empty string"). Reachability of the tripwire is zero from
 // parser input.
 func validateCreateEffect(sc *scope, e query.CreateEffect) error {
-	for _, v := range e.Variables() {
+	if v, ok := unboundEffectVariable(sc, e.Variables()); !ok {
+		return fmt.Errorf("%w: CREATE variable %q not bound after phase C", ErrInvalidEffectTarget, v)
+	}
+	return nil
+}
+
+// unboundEffectVariable returns the first non-empty name in vars bound in none
+// of sc.nodeTypes, sc.nodeCands and sc.edgeBindings, with ok false; ok is true
+// when every name is bound.
+func unboundEffectVariable(sc *scope, vars []string) (string, bool) {
+	for _, v := range vars {
 		if v == "" {
 			continue
 		}
@@ -2520,9 +2530,9 @@ func validateCreateEffect(sc *scope, e query.CreateEffect) error {
 		if _, ok := sc.edgeBindings[v]; ok {
 			continue
 		}
-		return fmt.Errorf("%w: CREATE variable %q not bound after phase C", ErrInvalidEffectTarget, v)
+		return v, false
 	}
-	return nil
+	return "", true
 }
 
 // validateMergeEffect runs the CREATE variable-presence check and routes each
@@ -2530,19 +2540,7 @@ func validateCreateEffect(sc *scope, e query.CreateEffect) error {
 // type-safety comes from the []SetEffect return on query.MergeEffect's OnMatch
 // and OnCreate, which excludes the five non-Set variants at compile time.
 func validateMergeEffect(sc *scope, e query.MergeEffect, s schema.Schema) error {
-	for _, v := range e.Variables() {
-		if v == "" {
-			continue
-		}
-		if _, ok := sc.nodeTypes[v]; ok {
-			continue
-		}
-		if _, ok := sc.nodeCands[v]; ok {
-			continue
-		}
-		if _, ok := sc.edgeBindings[v]; ok {
-			continue
-		}
+	if v, ok := unboundEffectVariable(sc, e.Variables()); !ok {
 		return fmt.Errorf("%w: MERGE variable %q not bound after phase C", ErrInvalidEffectTarget, v)
 	}
 	for _, se := range e.OnMatch() {
