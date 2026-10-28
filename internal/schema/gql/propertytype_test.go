@@ -172,8 +172,10 @@ func TestPropertyLengthQualifiersDropped(t *testing.T) {
 }
 
 // widthFoldPins is the second base of the grounding relation: parenthesised
-// widths whose folded constant is written out by hand, so a typeSpellings row
-// reached only through truncateParenthetical still counts as pinned.
+// widths on the lattice, whose folded constant is written out by hand. They
+// reach the bare INT, INTEGER and UINT rows through truncateParenthetical,
+// which is where normaliseType rounds them (ADR 0050); the off-lattice widths
+// are TestPropertyBinaryWidthRoundsUp's.
 var widthFoldPins = []typePin{
 	{"INT(8)", graph.TypeInt8},
 	{"INT(16)", graph.TypeInt16},
@@ -202,9 +204,11 @@ var widthFoldPins = []typePin{
 // `INT8` resolve to the same PropertyType. The fold applies only where the
 // grammar makes the parenthesised form a sibling of an explicit width token
 // AND the parenthetical admits no scale: signedBinaryExactNumericType
-// (GQL.g4:1801), unsignedBinaryExactNumericType (:1814), and
-// verboseBinaryExactNumericType (:1827). It does NOT apply to FLOAT(p), whose
-// parenthetical carries a scale slot (:1849) — that case is pinned in
+// (GQL.g4:1815), unsignedBinaryExactNumericType (:1828), and
+// verboseBinaryExactNumericType (:1841). A width between two constants rounds
+// up to the wider one, TestPropertyBinaryWidthRoundsUp's subject; these are the
+// widths the lattice holds exactly. It does NOT apply to FLOAT(p), whose
+// parenthetical carries a scale slot (:1871) — that case is pinned in
 // TestPropertyBinaryWidthNonFolds. Distinct from TestPropertyLengthQualifiersDropped,
 // which pins the decimal/character-length parenthetical as still being dropped.
 func TestPropertyBinaryWidthParenthesisedFolds(t *testing.T) {
@@ -218,16 +222,13 @@ func TestPropertyBinaryWidthParenthesisedFolds(t *testing.T) {
 }
 
 // TestPropertyBinaryWidthNonFolds pins the parenthesised spellings that fall
-// through to the truncated-spelling lookup and land on the machine-word or
-// bare type. Three flavours here, kept in one table because they share the
-// fallback path:
+// through to the truncated-spelling lookup and land on the bare type. Two
+// flavours here, kept in one table because they share the fallback path (the
+// binary-integer widths that also reach it are in
+// TestPropertyBinaryWidthOutsideTheLattice):
 //
-//   - Bit-width binary integers with no exact model counterpart (INT(7),
-//     INT(10)). Lossy — the author said 7 bits, the model says machine int.
-//     ADR 0017 decides that this is accepted rather than rejected or rounded
-//     up, so these rows pin a decision; gqlc-h9n.31 is what would change them.
-//   - FLOAT(p) and FLOAT(p, s) (:1849). The parenthetical is byte-identical
-//     in shape to DECIMAL(p, s) at :1832, not to the binary integers, and
+//   - FLOAT(p) and FLOAT(p, s) (:1871). The parenthetical is byte-identical
+//     in shape to DECIMAL(p, s) at :1854, not to the binary integers, and
 //     nothing in the grammar establishes that FLOAT's precision counts bits.
 //     FLOAT(16) therefore resolves to TypeFloat — 64-bit, a safe superset —
 //     rather than the narrower TypeFloat16. ADR 0049 makes not folding
@@ -241,8 +242,6 @@ func TestPropertyBinaryWidthNonFolds(t *testing.T) {
 		spelling string
 		want     graph.PropertyType
 	}{
-		{"INT(7)", graph.TypeInt},
-		{"INT(10)", graph.TypeInt},
 		{"FLOAT(16)", graph.TypeFloat},
 		{"FLOAT(24)", graph.TypeFloat},
 		{"FLOAT(32)", graph.TypeFloat},
@@ -264,10 +263,147 @@ func TestPropertyBinaryWidthNonFolds(t *testing.T) {
 	}
 }
 
+// TestPropertyBinaryWidthRoundsUp pins ADR 0050: a parenthesised binary width
+// resolves to the narrowest width constant that holds it, read as a count of
+// bits. Every spelling of the parenthesised form is driven, because the five
+// heads reach the rule independently and SIGNED INTEGER(8) is the precedent for
+// one of them being missed while its siblings pass. The widths straddle each
+// lattice step — one below, on, one above — so an off-by-one at any boundary,
+// or a rule that rounds down, fails a named subtest.
+func TestPropertyBinaryWidthRoundsUp(t *testing.T) {
+	signed := []typePin{
+		{"1", graph.TypeInt8},
+		{"7", graph.TypeInt8},
+		{"8", graph.TypeInt8},
+		{"9", graph.TypeInt16},
+		{"10", graph.TypeInt16},
+		{"15", graph.TypeInt16},
+		{"16", graph.TypeInt16},
+		{"17", graph.TypeInt32},
+		{"20", graph.TypeInt32},
+		{"31", graph.TypeInt32},
+		{"32", graph.TypeInt32},
+		{"33", graph.TypeInt64},
+		{"63", graph.TypeInt64},
+		{"64", graph.TypeInt64},
+		{"65", graph.TypeInt128},
+		{"127", graph.TypeInt128},
+		{"128", graph.TypeInt128},
+		{"129", graph.TypeInt256},
+		{"255", graph.TypeInt256},
+		{"256", graph.TypeInt256},
+	}
+	unsigned := []typePin{
+		{"1", graph.TypeUint8},
+		{"7", graph.TypeUint8},
+		{"8", graph.TypeUint8},
+		{"9", graph.TypeUint16},
+		{"10", graph.TypeUint16},
+		{"15", graph.TypeUint16},
+		{"16", graph.TypeUint16},
+		{"17", graph.TypeUint32},
+		{"20", graph.TypeUint32},
+		{"31", graph.TypeUint32},
+		{"32", graph.TypeUint32},
+		{"33", graph.TypeUint64},
+		{"63", graph.TypeUint64},
+		{"64", graph.TypeUint64},
+		{"65", graph.TypeUint128},
+		{"127", graph.TypeUint128},
+		{"128", graph.TypeUint128},
+		{"129", graph.TypeUint256},
+		{"255", graph.TypeUint256},
+		{"256", graph.TypeUint256},
+	}
+
+	for _, family := range []struct {
+		heads []string
+		pins  []typePin
+	}{
+		{[]string{"INT", "INTEGER", "SIGNED INTEGER"}, signed},
+		{[]string{"UINT", "UNSIGNED INTEGER"}, unsigned},
+	} {
+		for _, head := range family.heads {
+			for _, pin := range family.pins {
+				spelling := head + "(" + pin.spelling + ")"
+				t.Run(spelling, func(t *testing.T) {
+					got, err := parseFirstProperty(t, spelling)
+					require.NoError(t, err)
+					require.Equal(t, pin.want, got.Type)
+				})
+			}
+		}
+	}
+}
+
+// TestPropertyBinaryWidthOutsideTheLattice pins the parenthesised integer
+// widths at and past the lattice's ends (ADR 0050). A width wider than 256 has
+// no constant that holds it and takes the widest, INT256 or UINT256, which both
+// codegen targets refuse; the schema still parses. That includes a number too
+// large for uint64, which is still wider than 256. Zero bits is not a width and
+// is the one case that keeps the unqualified machine word. The digit separator
+// and the leading zero are the grammar's own spellings of a number
+// (UNSIGNED_DECIMAL_INTEGER, GQL.g4), so they are read for their value.
+func TestPropertyBinaryWidthOutsideTheLattice(t *testing.T) {
+	for _, tt := range []typePin{
+		{"INT(0)", graph.TypeInt},
+		{"UINT(0)", graph.TypeUint},
+		{"INT(257)", graph.TypeInt256},
+		{"UINT(257)", graph.TypeUint256},
+		{"SIGNED INTEGER(1000)", graph.TypeInt256},
+		{"UNSIGNED INTEGER(65536)", graph.TypeUint256},
+		{"INT(18446744073709551615)", graph.TypeInt256},
+		{"INT(18446744073709551616)", graph.TypeInt256},
+		{"UINT(99999999999999999999999)", graph.TypeUint256},
+		{"INT(08)", graph.TypeInt8},
+		{"INT(1_6)", graph.TypeInt16},
+		{"UNSIGNED INTEGER(0_10)", graph.TypeUint16},
+		{"INT(10) NOT NULL", graph.TypeInt16},
+		{"uint ( 10 )", graph.TypeUint16},
+	} {
+		t.Run(tt.spelling, func(t *testing.T) {
+			got, err := parseFirstProperty(t, tt.spelling)
+			require.NoError(t, err)
+			require.Equal(t, tt.want, got.Type)
+		})
+	}
+}
+
+// TestPropertyBinaryWidthIgnoresHiddenTokens pins that the width is read from
+// the tokens the parser saw, not from the source text between them. A comment
+// is a hidden-channel token (GQL.g4 BRACKETED_COMMENT), and NOT NULL needs no
+// space before it after a closing paren; each of these once reached the
+// spelling table as text no row or width matched, and resolved to the machine
+// word or failed outright.
+func TestPropertyBinaryWidthIgnoresHiddenTokens(t *testing.T) {
+	for _, tt := range []struct {
+		spelling string
+		want     graph.PropertyType
+		nullable bool
+	}{
+		{"INT(10)NOT NULL", graph.TypeInt16, false},
+		{"UINT(8)NOT NULL", graph.TypeUint8, false},
+		{"INT(/* c */10)", graph.TypeInt16, true},
+		{"INT(10 /* c */)", graph.TypeInt16, true},
+		{"INT /* c */ (10)", graph.TypeInt16, true},
+		{"UNSIGNED /* c */ INTEGER(33)", graph.TypeUint64, true},
+		{"ZONED /* c */ DATETIME", graph.TypeTimestamp, true},
+		{"DECIMAL(10, /* c */ 2) NOT NULL", graph.TypeDecimal, false},
+		{"STRING(10)NOT NULL", graph.TypeString, false},
+	} {
+		t.Run(tt.spelling, func(t *testing.T) {
+			got, err := parseFirstProperty(t, tt.spelling)
+			require.NoError(t, err)
+			require.Equal(t, tt.want, got.Type)
+			require.Equal(t, tt.nullable, got.Nullable)
+		})
+	}
+}
+
 // TestPropertyBinaryWidthWhitespaceAndCase covers spelling variants where
 // the same construct can be written with internal whitespace inside the
 // parenthetical, a trailing NOT NULL, or lowercased input, plus one row from
-// the decimal branch: decimalExactNumericType (GQL.g4:1832) puts notNull
+// the decimal branch: decimalExactNumericType (GQL.g4:1854) puts notNull
 // inside the parenthesised alternative rather than as a sibling of it, so the
 // canonicalSpelling ordering (trim `NOT NULL` first, collapse the
 // parenthetical after) is what keeps `DECIMAL(10, 2) NOT NULL` reaching the
@@ -438,7 +574,7 @@ var verboseSignednessEquivalences = []typeEquivalence{
 }
 
 // TestPropertyVerboseIntegerSignedness covers the SIGNED / UNSIGNED prefix on
-// verboseBinaryExactNumericType (GQL.g4:1803 for SIGNED?, :1816 for UNSIGNED).
+// verboseBinaryExactNumericType (GQL.g4:1825 for SIGNED?, :1838 for UNSIGNED).
 // Both signednesses are equivalent to their bare verbose counterpart under the
 // no-dialect principle: SIGNED INTEGER32 is INT32, UNSIGNED INTEGER8 is UINT8,
 // and so on across the six width slots plus the bare / SMALL / BIG spellings.
@@ -464,7 +600,7 @@ func TestPropertyVerboseIntegerSignedness(t *testing.T) {
 // TestPropertyBareDurationRejectedAtParse pins the invariant this bead's
 // duration-qualifier drop depends on: bare `DURATION` (without the mandatory
 // `(YEAR TO MONTH)` / `(DAY TO SECOND)` qualifier) cannot reach the schema
-// mapper because the grammar (GQL.g4:1893, `DURATION LEFT_PAREN
+// mapper because the grammar (GQL.g4:1914, `DURATION LEFT_PAREN
 // temporalDurationQualifier RIGHT_PAREN`) requires the parenthetical. If a
 // future grammar edit made the qualifier optional, `truncateParenthetical`
 // would silently accept bare `DURATION` on the strength of the alias row

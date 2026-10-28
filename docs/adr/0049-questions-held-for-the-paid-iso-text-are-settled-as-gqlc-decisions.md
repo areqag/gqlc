@@ -80,6 +80,7 @@ lost, and a model that carried it would be the fix. This decision does not move
 that case's owning bead. Whether a carried precision belongs with `gqlc-h9n.31`
 (bit widths) or `gqlc-5md` (length, precision and scale) still depends on what
 `p` counts, and gqlc has decided not to answer that.
+(ADR 0050 later re-pointed that case to `gqlc-0ri`, the bead for permanent decisions.)
 
 ## Decision 2: properties on an inline endpoint filler stay rejected
 
@@ -144,7 +145,8 @@ Each decision is reopened by evidence, not by time passing:
     nothing changes.
 - **A consumer needs the dropped `FLOAT` precision.** That reopens it through
   `gqlc-5md` or `gqlc-h9n.31`, on the consumer bar both already carry. It does
-  not reopen the bits-or-digits question.
+  not reopen the bits-or-digits question. (ADR 0050 later settled the integer
+  widths `gqlc-h9n.31` covered, and `gqlc-5md` was closed as won't-do.)
 
 A web paraphrase, a vendor conformance table, or an analogy to SQL does not
 reopen any of these. `gqlc-h9n.28` said so, and that still applies.

@@ -57,8 +57,8 @@ var corpusAreaD1 = []corpusEntry{
 		file:    "18.9-value-type/scalar_float.gql",
 		outcome: resolves,
 		feature: "mandatory",
-		bead:    "gqlc-h9n.31",
-		reason:  "FLOAT's parenthetical is never folded, so FLOAT(10) and FLOAT(10, 2) both resolve to TypeFloat, byte-identical to bare FLOAT; ADR 0017 accepts the loss and ADR 0049 makes not folding final; gqlc does not decide whether that precision counts bits or digits, which is why the owning bead is provisional",
+		bead:    "gqlc-0ri",
+		reason:  "FLOAT's parenthetical is never folded, so FLOAT(10) and FLOAT(10, 2) both resolve to TypeFloat, byte-identical to bare FLOAT; ADR 0049 makes dropping the precision a permanent gqlc decision, without deciding whether it counts bits or digits",
 	},
 	{
 		file:    "18.9-value-type/scalar_local_datetime.gql",
@@ -69,8 +69,6 @@ var corpusAreaD1 = []corpusEntry{
 		file:    "18.9-value-type/scalar_signed_integer.gql",
 		outcome: resolves,
 		feature: "mandatory",
-		bead:    "gqlc-h9n.31",
-		reason:  "10 is not a width PropertyType enumerates, so INT(10) and INTEGER(10) fall through the truncating fallback to TypeInt — a 64-bit machine int, byte-identical to bare INT; ADR 0017 accepts the loss and this is where it is recorded",
 	},
 	{
 		file:    "18.9-value-type/scalar_timestamp.gql",
@@ -121,8 +119,6 @@ var corpusAreaD1 = []corpusEntry{
 		file:    "18.9-value-type/scalar_unsigned_integer.gql",
 		outcome: resolves,
 		feature: "mandatory",
-		bead:    "gqlc-h9n.31",
-		reason:  "10 is not a width PropertyType enumerates, so UINT(10) falls through the truncating fallback to TypeUint — a 64-bit machine uint, byte-identical to bare UINT; ADR 0017 accepts the loss and this is where it is recorded",
 	},
 	{
 		file:    "18.9-value-type/scalar_varchar_max_length.gql",
@@ -324,29 +320,11 @@ var semanticAreaD1 = []semanticCase{
 		siblings: []string{"DURATION(DAY TO SECOND)"},
 	},
 	{
-		file: "18.9-value-type/scalar_signed_integer.gql",
-		bead: "gqlc-h9n.31",
-		why:  "INT(10) resolves to the same PropertyType as bare INT, as INTEGER, and as any other off-lattice width such as INT(7), because PropertyType enumerates eight widths and 10 is not one of them; the declared ten bits are unrecoverable downstream",
-		// INT(8) is deliberately absent from siblings, and it is the row's contrast
-		// rather than an oversight: it folds to TypeInt8 (gqlc-h9n.16), so it does
-		// not collide, and it is the reason the loss here is jagged rather than
-		// uniform. ADR 0017 is the decision to accept that.
-		spelling: "INT(10)",
-		siblings: []string{"INT", "INTEGER", "INTEGER(10)", "INT(7)"},
-	},
-	{
-		file:     "18.9-value-type/scalar_unsigned_integer.gql",
-		bead:     "gqlc-h9n.31",
-		why:      "UINT(10) resolves to the same PropertyType as bare UINT and as any other off-lattice width such as UINT(7), because PropertyType enumerates eight widths and 10 is not one of them; the declared ten bits are unrecoverable downstream",
-		spelling: "UINT(10)",
-		siblings: []string{"UINT", "UINT(7)"},
-	},
-	{
 		file: "18.9-value-type/scalar_float.gql",
-		bead: "gqlc-h9n.31",
-		why:  "FLOAT(10) resolves to the same PropertyType as bare FLOAT and as FLOAT(10, 2), because FLOAT's parenthetical is not folded at all (ADR 0002) and PropertyType has nowhere to keep it; gqlc does not decide whether the discarded precision counts mantissa bits or decimal digits (ADR 0049), which is why this row's bead is the provisional one",
-		// FLOAT(10, 2) as a sibling makes the collision class wider than the other
-		// two rows': it pins that precision-with-scale is no more distinguishable
+		bead: "gqlc-0ri",
+		why:  "FLOAT(10) resolves to the same PropertyType as bare FLOAT and as FLOAT(10, 2), because FLOAT's parenthetical is not folded at all (ADR 0002) and PropertyType has nowhere to keep it; ADR 0049 makes that a permanent gqlc decision and leaves open whether the discarded precision counts mantissa bits or decimal digits",
+		// FLOAT(10, 2) as a sibling makes the collision class wider than a
+		// single pair: it pins that precision-with-scale is no more distinguishable
 		// than precision alone, which is the shape the h9n.28 question turns on.
 		spelling: "FLOAT(10)",
 		siblings: []string{"FLOAT", "FLOAT(10, 2)"},
