@@ -1,0 +1,5 @@
+-- A graph type copied from a catalog path of 33 separators, one past
+-- maxPathRun (32): the leading '/' and the 32 after each directory name.
+-- Without the bound the file parses and the Loader refuses the reference for
+-- naming no file in the catalogue; the bound refuses it first (gqlc-jjot2.36).
+CREATE PROPERTY GRAPH TYPE T COPY OF /a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/T

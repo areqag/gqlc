@@ -1155,6 +1155,7 @@ var invalidFixtures = map[string]error{
 	"duplicate_edge.gql":       gql.ErrDuplicateEdgeType,
 	"no_graph_type.gql":        gql.ErrNoGraphType,
 	"prefix_run_too_long.gql":  gql.ErrPrefixRunTooLong,
+	"path_too_long.gql":        gql.ErrPathTooLong,
 	"multiple_graph_types.gql": gql.ErrMultipleGraphTypes,
 	"like_graph_source.gql":    gql.ErrLikeGraphSource,
 
@@ -1216,6 +1217,7 @@ var allSentinels = map[string]error{
 	"ErrNoGraphType":                 gql.ErrNoGraphType,
 	"ErrMultipleGraphTypes":          gql.ErrMultipleGraphTypes,
 	"ErrPrefixRunTooLong":            gql.ErrPrefixRunTooLong,
+	"ErrPathTooLong":                 gql.ErrPathTooLong,
 	"ErrLikeGraphSource":             gql.ErrLikeGraphSource,
 	"ErrReferenceParameter":          gql.ErrReferenceParameter,
 	"ErrHomeSchemaReference":         gql.ErrHomeSchemaReference,

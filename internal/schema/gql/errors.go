@@ -68,6 +68,12 @@ var ErrDuplicateFieldName = errors.New("field name declared more than once in on
 // wrapped message names the line and column of the operator past the limit.
 var ErrPrefixRunTooLong = errors.New("too many prefix operators in a row")
 
+// ErrPathTooLong is returned for a source with a path of names joined by more
+// than maxPathRun separators (/ . ..). It is a refusal for time, not a reading
+// of ISO 39075, which sets no such limit: see pathRunTooLong. The wrapped
+// message names the line and column of the separator past the limit.
+var ErrPathTooLong = errors.New("path has too many segments")
+
 // The three ways a delimited identifier names nothing this parser can carry.
 // They narrow what Parse accepts relative to gqlc-tzu9r's predecessor, which
 // carried every delimited spelling through undecoded and so had no opinion about
