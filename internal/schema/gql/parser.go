@@ -42,6 +42,9 @@ func parse(r io.Reader) (rawSchema, error) {
 	if t := nesting.TooDeep(gen.NewGQLLexer(in)); t != nil {
 		return rawSchema{}, fmt.Errorf("%w: bracket at %d:%d opens past depth %d", ErrNestingTooDeep, t.GetLine(), t.GetColumn(), nesting.MaxDepth)
 	}
+	if t := prefixRunTooLong(gen.NewGQLLexer(in)); t != nil {
+		return rawSchema{}, fmt.Errorf("%w: operator at %d:%d extends a run past %d", ErrPrefixRunTooLong, t.GetLine(), t.GetColumn(), maxPrefixRun)
+	}
 	lex := gen.NewGQLLexer(in)
 	ts := antlr.NewCommonTokenStream(lex, antlr.TokenDefaultChannel)
 	gp := gen.NewGQLParser(ts)
