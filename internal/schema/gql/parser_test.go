@@ -1182,6 +1182,7 @@ var invalidFixtures = map[string]error{
 	"no_escape_identifier.gql": gql.ErrNoEscapeIdentifier,
 	"empty_identifier.gql":     gql.ErrEmptyIdentifier,
 	"identifier_escape.gql":    gql.ErrIdentifierEscape,
+	"nesting_too_deep.gql":     gql.ErrNestingTooDeep,
 }
 
 // allSentinels is the canonical list of every Parse sentinel — the single source
@@ -1229,6 +1230,7 @@ var allSentinels = map[string]error{
 	"ErrNoEscapeIdentifier":          gql.ErrNoEscapeIdentifier,
 	"ErrEmptyIdentifier":             gql.ErrEmptyIdentifier,
 	"ErrIdentifierEscape":            gql.ErrIdentifierEscape,
+	"ErrNestingTooDeep":              gql.ErrNestingTooDeep,
 }
 
 // sentinelsWithoutAFile are the package's error values allSentinels deliberately

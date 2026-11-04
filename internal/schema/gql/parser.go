@@ -1,12 +1,14 @@
 package gql
 
 import (
+	"fmt"
 	"io"
 
 	"github.com/antlr4-go/antlr/v4"
 
 	"github.com/areqag/gqlc/internal/grammar/gql/gen"
 	"github.com/areqag/gqlc/internal/grammar/lexfold"
+	"github.com/areqag/gqlc/internal/grammar/nesting"
 	"github.com/areqag/gqlc/internal/schema"
 )
 
@@ -36,7 +38,11 @@ func (parser) Parse(r io.Reader) (schema.Schema, error) {
 // Loader share one reading of a file and differ only in what they do with a
 // reference.
 func parse(r io.Reader) (rawSchema, error) {
-	lex := gen.NewGQLLexer(lexfold.NewStream(r, lexfold.GQL))
+	in := lexfold.NewStream(r, lexfold.GQL)
+	if t := nesting.TooDeep(gen.NewGQLLexer(in)); t != nil {
+		return rawSchema{}, fmt.Errorf("%w: bracket at %d:%d opens past depth %d", ErrNestingTooDeep, t.GetLine(), t.GetColumn(), nesting.MaxDepth)
+	}
+	lex := gen.NewGQLLexer(in)
 	ts := antlr.NewCommonTokenStream(lex, antlr.TokenDefaultChannel)
 	gp := gen.NewGQLParser(ts)
 

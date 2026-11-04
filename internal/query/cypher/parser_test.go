@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"pgregory.net/rapid"
 
+	"github.com/areqag/gqlc/internal/grammar/nesting"
 	"github.com/areqag/gqlc/internal/graph"
 	"github.com/areqag/gqlc/internal/procsig"
 	"github.com/areqag/gqlc/internal/query"
@@ -3233,6 +3234,13 @@ var mustReject = map[string]struct {
 	"zero-argument scalar function call": {
 		query: "RETURN size()",
 		want:  cypher.ErrFunctionArity,
+	},
+	// AUTHORED (gqlc-jjot2.31): list literals nested one past
+	// nesting.MaxDepth. Fail-site: Parse, on the lexed tokens before the
+	// parser runs; the per-bracket rows live in nesting_test.go.
+	"brackets nested past the depth limit": {
+		query: "RETURN " + strings.Repeat("[", nesting.MaxDepth+1) + strings.Repeat("]", nesting.MaxDepth+1),
+		want:  cypher.ErrNestingTooDeep,
 	},
 }
 

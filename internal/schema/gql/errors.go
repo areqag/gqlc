@@ -190,3 +190,11 @@ var (
 // neo4j-go-driver v6's dbtype.VectorElement admits, so an element refused here
 // is one no target could carry as a vector coordinate (ADR 0051).
 var ErrVectorElementType = fmt.Errorf("%w: a vector's element must be INT8, INT16, INT32, INT64 (or INT), FLOAT32 or FLOAT64 (or FLOAT), the coordinate types Cypher 25 defines", ErrUnsupportedType)
+
+// ErrNestingTooDeep is returned for a source whose ( [ { nest deeper than
+// nesting.MaxDepth. It is a refusal for time, not a reading of ISO 39075,
+// which sets no depth limit: ANTLR's prediction costs superlinear time in
+// bracket depth, so a few thousand unclosed braces took seconds. The wrapped
+// message names the line and column of the first bracket past the limit. The
+// check runs on the lexed tokens before the parser does. bd gqlc-jjot2.31.
+var ErrNestingTooDeep = errors.New("brackets nested too deep")
