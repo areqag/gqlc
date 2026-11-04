@@ -1,12 +1,14 @@
 package cypher
 
 import (
+	"fmt"
 	"io"
 
 	"github.com/antlr4-go/antlr/v4"
 
 	"github.com/areqag/gqlc/internal/grammar/cypher/gen"
 	"github.com/areqag/gqlc/internal/grammar/lexfold"
+	"github.com/areqag/gqlc/internal/grammar/nesting"
 	"github.com/areqag/gqlc/internal/procsig"
 	"github.com/areqag/gqlc/internal/query"
 )
@@ -64,7 +66,11 @@ func New(opts ...Option) query.Parser {
 // Query. The executed query stays the original text (ADR 0005); this model is the
 // type interface only.
 func (p parser) Parse(r io.Reader) (query.Query, error) {
-	lex := gen.NewCypherLexer(lexfold.NewStream(r, lexfold.Cypher))
+	in := lexfold.NewStream(r, lexfold.Cypher)
+	if t := nesting.TooDeep(gen.NewCypherLexer(in)); t != nil {
+		return query.Query{}, fmt.Errorf("%w: bracket at %d:%d opens past depth %d", ErrNestingTooDeep, t.GetLine(), t.GetColumn(), nesting.MaxDepth)
+	}
+	lex := gen.NewCypherLexer(in)
 	ts := antlr.NewCommonTokenStream(lex, antlr.TokenDefaultChannel)
 	cp := gen.NewCypherParser(ts)
 

@@ -182,6 +182,15 @@ var (
 	// (SyntaxError: InvalidNumberOfArguments). Fail-site: refuseScalarArity,
 	// under the pre-walk sweep refuseCallArity. bd gqlc-jjot2.12.
 	ErrFunctionArity = errors.New("function arity mismatch")
+
+	// ErrNestingTooDeep rejects a query whose ( [ { nest deeper than
+	// nesting.MaxDepth. It is a refusal for time, not a reading of
+	// openCypher, which sets no depth limit: ANTLR's prediction costs
+	// superlinear time in bracket depth, so a few thousand unclosed brackets
+	// took seconds. Wrapped message names the line and column of the first
+	// bracket past the limit. Fail-site: Parse, on the lexed tokens before the
+	// parser runs. bd gqlc-jjot2.31.
+	ErrNestingTooDeep = errors.New("brackets nested too deep")
 )
 
 // allSentinels is the canonical closed set of sentinels Parse may return
@@ -204,6 +213,7 @@ var allSentinels = []error{
 	ErrIntegerOverflow,
 	ErrNestedAggregate,
 	ErrFunctionArity,
+	ErrNestingTooDeep,
 }
 
 // AllSentinels returns a copy of the cypher package's user-input-reachable

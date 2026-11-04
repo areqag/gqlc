@@ -14,6 +14,8 @@ package gql
 // here, which would have had to name *antlr.CommonTokenStream.
 type Listener = listener
 
+const MaxPrefixRun = maxPrefixRun
+
 var (
 	CanonicalSpelling = canonicalSpelling
 	LabelSets         = labelSets
