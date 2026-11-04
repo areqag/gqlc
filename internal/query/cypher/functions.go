@@ -169,7 +169,7 @@ func (q *qualifiedScan) EnterOC_FunctionInvocation(c *gen.OC_FunctionInvocationC
 	// The whole name off the grammar rather than rebuilt from the parts:
 	// §oC_Namespace admits no SP, so the context's text is the author's
 	// bytes and reassembling them could only introduce a difference.
-	text := name.GetText()
+	text := originalText(name)
 	start := name.GetStart()
 	q.found = append(q.found, QualifiedCall{
 		Namespace: strings.Join(lowered, "."),

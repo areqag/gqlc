@@ -211,7 +211,7 @@ func (l *listener) mineSortItemParameters(e gen.IOC_ExpressionContext) {
 func (l *listener) collectReturnItem(item gen.IOC_ProjectionItemContext) {
 	e := item.OC_Expression()
 	if isPatternPredicateAtom(e) {
-		l.fail(fmt.Errorf("%w: %s", ErrPatternInProjection, originalText(l.ts, e)))
+		l.fail(fmt.Errorf("%w: %s", ErrPatternInProjection, originalText(e)))
 		return
 	}
 	value, ok := l.classifyProjection(e)
@@ -219,7 +219,7 @@ func (l *listener) collectReturnItem(item gen.IOC_ProjectionItemContext) {
 		value = l.classifyRichExpression(e)
 	}
 
-	name := originalText(l.ts, e)
+	name := originalText(e)
 	if v, isVar := bareProjectedVariable(e); isVar {
 		name = v
 	}
@@ -1014,7 +1014,7 @@ func (l *listener) collectSetItem(item gen.IOC_SetItemContext) {
 func (l *listener) collectSetProperty(item gen.IOC_SetItemContext) {
 	target, ok := propertyExpressionRef(item.OC_PropertyExpression())
 	if !ok {
-		l.fail(fmt.Errorf("%w: SET %s", ErrNestedPropertyTarget, item.OC_PropertyExpression().GetText()))
+		l.fail(fmt.Errorf("%w: SET %s", ErrNestedPropertyTarget, originalText(item.OC_PropertyExpression())))
 		return
 	}
 	l.appendRef(varRef{name: target.Variable})
@@ -1075,7 +1075,7 @@ func (l *listener) collectRemoveItem(item gen.IOC_RemoveItemContext) {
 	if pe := item.OC_PropertyExpression(); pe != nil {
 		target, ok := propertyExpressionRef(pe)
 		if !ok {
-			l.fail(fmt.Errorf("%w: REMOVE %s", ErrNestedPropertyTarget, pe.GetText()))
+			l.fail(fmt.Errorf("%w: REMOVE %s", ErrNestedPropertyTarget, originalText(pe)))
 			return
 		}
 		l.appendRef(varRef{name: target.Variable})

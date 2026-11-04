@@ -633,13 +633,23 @@ func isPatternPredicateAtom(e gen.IOC_ExpressionContext) bool {
 
 // originalText returns the verbatim source slice spanning a rule context, the
 // exact text the author wrote (so a column name like "p.name" is "p.name", not
-// the token-joined "pname"). It reads the token interval from the stream,
-// mirroring schema/gql's property type-text extraction.
-func originalText(ts *antlr.CommonTokenStream, ctx antlr.ParserRuleContext) string {
+// the token-joined "pname").
+//
+// It slices the character stream between the context's first and last token.
+// Neither CommonTokenStream.GetTextFromInterval nor a rule context's GetText
+// will do: antlr4-go v4.13.1 builds both with `s +=` per token or child, which
+// is quadratic in the text's length, and a 256 KiB `x+1+1…` projection took 3 s
+// (bd gqlc-jjot2.33). Cypher's lexer skips nothing and sends nothing to a
+// hidden channel, so on a tree that parsed the slice is the same string.
+func originalText(ctx antlr.ParserRuleContext) string {
 	if ctx == nil {
 		return ""
 	}
-	return ts.GetTextFromInterval(ctx.GetSourceInterval())
+	start, stop := ctx.GetStart(), ctx.GetStop()
+	if start == nil || stop == nil || stop.GetTokenIndex() < start.GetTokenIndex() {
+		return ""
+	}
+	return start.GetInputStream().GetText(start.GetStart(), stop.GetStop())
 }
 
 // propertyExpressionRef reads a Ref{Variable, Property} from a single-level

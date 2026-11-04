@@ -32,8 +32,6 @@ type listener struct {
 	*gen.BaseCypherListener
 	*antlr.DefaultErrorListener
 
-	ts *antlr.CommonTokenStream
-
 	// branches are the collected branches in source order. The current branch and
 	// current part (the collection targets EnterOC_Match/With/Return write into)
 	// are tracked by curBranch/curPart, set when a branch or part opens.
@@ -191,9 +189,8 @@ type varRef struct {
 	endpointRef bool
 }
 
-func newListener(ts *antlr.CommonTokenStream, registry procsig.Registry) *listener {
+func newListener(registry procsig.Registry) *listener {
 	return &listener{
-		ts:       ts,
 		byParam:  map[string]int{},
 		approved: map[antlr.Tree]bool{},
 		registry: registry,
