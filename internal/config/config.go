@@ -16,7 +16,7 @@ import (
 	"strconv"
 	"strings"
 
-	"gopkg.in/yaml.v3"
+	yaml "go.yaml.in/yaml/v3"
 )
 
 // DefaultFilename is the canonical config file name (§2). There are no

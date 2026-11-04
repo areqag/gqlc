@@ -1,0 +1,9 @@
+-- A graph type followed by a query whose expression opens with 33 unary plus
+-- signs, one past maxPrefixRun (32). Prefix operators cannot appear in a graph
+-- type, so the run sits in a statement after it; without the bound this file
+-- is a parse the listener refuses for its query, and the bound is what
+-- refuses it first (gqlc-jjot2.32).
+CREATE PROPERTY GRAPH TYPE T AS {
+    (:A { id :: INT })
+}
+MATCH (n) RETURN +++++++++++++++++++++++++++++++++1

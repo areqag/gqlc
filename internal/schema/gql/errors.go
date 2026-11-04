@@ -62,6 +62,12 @@ var ErrDuplicatePropertyName = errors.New("property name declared more than once
 // See ADR 0030 for the argument and ADR 0049 for why it is final.
 var ErrDuplicateFieldName = errors.New("field name declared more than once in one record type")
 
+// ErrPrefixRunTooLong is returned for a source with more than maxPrefixRun
+// prefix operators (+ - NOT !) in a row. It is a refusal for time, not a
+// reading of ISO 39075, which sets no such limit: see prefixRunTooLong. The
+// wrapped message names the line and column of the operator past the limit.
+var ErrPrefixRunTooLong = errors.New("too many prefix operators in a row")
+
 // The three ways a delimited identifier names nothing this parser can carry.
 // They narrow what Parse accepts relative to gqlc-tzu9r's predecessor, which
 // carried every delimited spelling through undecoded and so had no opinion about
@@ -190,3 +196,11 @@ var (
 // neo4j-go-driver v6's dbtype.VectorElement admits, so an element refused here
 // is one no target could carry as a vector coordinate (ADR 0051).
 var ErrVectorElementType = fmt.Errorf("%w: a vector's element must be INT8, INT16, INT32, INT64 (or INT), FLOAT32 or FLOAT64 (or FLOAT), the coordinate types Cypher 25 defines", ErrUnsupportedType)
+
+// ErrNestingTooDeep is returned for a source whose ( [ { nest deeper than
+// nesting.MaxDepth. It is a refusal for time, not a reading of ISO 39075,
+// which sets no depth limit: ANTLR's prediction costs superlinear time in
+// bracket depth, so a few thousand unclosed braces took seconds. The wrapped
+// message names the line and column of the first bracket past the limit. The
+// check runs on the lexed tokens before the parser does. bd gqlc-jjot2.31.
+var ErrNestingTooDeep = errors.New("brackets nested too deep")
