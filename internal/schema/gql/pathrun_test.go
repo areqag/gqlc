@@ -95,6 +95,13 @@ func TestPathRunTwoNamesEndThePath(t *testing.T) {
 	_, err := gql.New().Parse(strings.NewReader(src))
 	require.Error(t, err, "a query is no schema")
 	require.NotErrorIs(t, err, gql.ErrPathTooLong)
+
+	// Exactly two names between separators end the path; three would not
+	// tell a two-name boundary from a longer one.
+	src = "MATCH (n) RETURN n" + strings.Repeat(".a x", 4*gql.MaxPathRun)
+	_, err = gql.New().Parse(strings.NewReader(src))
+	require.Error(t, err, "a query is no schema")
+	require.NotErrorIs(t, err, gql.ErrPathTooLong)
 }
 
 // TestLoadRefusesPathTooLong pins the Loader's path through the same check: it

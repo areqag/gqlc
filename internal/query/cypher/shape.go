@@ -639,8 +639,12 @@ func isPatternPredicateAtom(e gen.IOC_ExpressionContext) bool {
 // Neither CommonTokenStream.GetTextFromInterval nor a rule context's GetText
 // will do: antlr4-go v4.13.1 builds both with `s +=` per token or child, which
 // is quadratic in the text's length, and a 256 KiB `x+1+1…` projection took 3 s
-// (bd gqlc-jjot2.33). Cypher's lexer skips nothing and sends nothing to a
-// hidden channel, so on a tree that parsed the slice is the same string.
+// (bd gqlc-jjot2.33). Cypher's lexer sends nothing to a hidden channel, so on
+// a tree that parsed the slice is the same string. On text the lexer refused,
+// which only the total scans (RelationshipTypeAlternations,
+// QualifiedFunctionCalls) read, the slice keeps a character the lexer dropped
+// where GetText omitted it. The stop-before-start test is defensive: no input
+// is known to reach it.
 func originalText(ctx antlr.ParserRuleContext) string {
 	if ctx == nil {
 		return ""
