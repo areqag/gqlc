@@ -8,7 +8,7 @@ import (
 	"slices"
 	"strings"
 
-	"gopkg.in/yaml.v3"
+	yaml "go.yaml.in/yaml/v3"
 )
 
 // ArmTriggers is the set of GitHub events that must reach each live arm, by
