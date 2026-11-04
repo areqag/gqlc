@@ -77,7 +77,7 @@ func (p parser) Parse(r io.Reader) (query.Query, error) {
 	// The listener is the single error sink: it captures lexer/parser syntax
 	// errors and the collection errors raised during the walk, all on l.err. walk
 	// surfaces the first of them.
-	l := newListener(ts, p.cfg.registry)
+	l := newListener(p.cfg.registry)
 	lex.RemoveErrorListeners()
 	lex.AddErrorListener(l)
 	cp.RemoveErrorListeners()

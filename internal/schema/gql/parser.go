@@ -45,6 +45,9 @@ func parse(r io.Reader) (rawSchema, error) {
 	if t := prefixRunTooLong(gen.NewGQLLexer(in)); t != nil {
 		return rawSchema{}, fmt.Errorf("%w: operator at %d:%d extends a run past %d", ErrPrefixRunTooLong, t.GetLine(), t.GetColumn(), maxPrefixRun)
 	}
+	if t := pathRunTooLong(gen.NewGQLLexer(in)); t != nil {
+		return rawSchema{}, fmt.Errorf("%w: separator at %d:%d takes a path past %d", ErrPathTooLong, t.GetLine(), t.GetColumn(), maxPathRun)
+	}
 	lex := gen.NewGQLLexer(in)
 	ts := antlr.NewCommonTokenStream(lex, antlr.TokenDefaultChannel)
 	gp := gen.NewGQLParser(ts)

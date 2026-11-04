@@ -121,14 +121,14 @@ type alternationScan struct {
 // The position comes off the production's own start token, which is the ':'
 // opening the detail. The token is in hand at the point the finding is made,
 // so nothing is searched for and nothing is reconstructed: the coordinate
-// names the same characters GetText quotes.
+// names the same characters Text quotes.
 func (a *alternationScan) EnterOC_RelationshipTypes(c *gen.OC_RelationshipTypesContext) {
 	if len(c.AllOC_RelTypeName()) < 2 {
 		return
 	}
 	start := c.GetStart()
 	a.found = append(a.found, Alternation{
-		Text: c.GetText(),
+		Text: originalText(c),
 		Line: start.GetLine(),
 		// +1 because ANTLR counts a line's characters from 0 while it
 		// counts the lines from 1.
